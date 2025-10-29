@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Test database for account service
+  test-postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: test_account_db
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+  # Account service test stage
+  account-service-test:
+    build:
+      context: ./services/account-service
+      target: test
+    depends_on:
+      test-postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://test_user:test_password@test-postgres:5432/test_account_db
+      - FLASK_ENV=testing
+      - JWT_SECRET_KEY=test-secret-key
+      - JWT_ACCESS_TOKEN_EXPIRES=900
+      - JWT_REFRESH_TOKEN_EXPIRES=2592000
+    volumes:
+      - ./services/account-service:/app
+      - account-coverage:/app/htmlcov
+    command: >
+      sh -c "
+        echo 'Running Account Service tests...' &&
+        pytest tests/ -v --cov=app --cov-report=term --cov-report=html --cov-report=xml &&
+        echo 'Running linting...' &&
+        black --check app/ &&
+        flake8 app/ &&
+        mypy app/
+      "
+  
+  # Swagger service test stage
+  swagger-service-test:
+    build:
+      context: ./services/swagger-service
+      target: test
+    environment:
+      - NODE_ENV=test
+      - PORT=3001
+      - LOG_LEVEL=error
+    volumes:
+      - ./services/swagger-service:/app
+      - /app/node_modules
+      - swagger-coverage:/app/coverage
+    command: >
+      sh -c "
+        echo 'Running Swagger Service tests...' &&
+        npm run test:coverage &&
+        echo 'Running linting...' &&
+        npm run lint &&
+        echo 'Running type check...' &&
+        npm run type-check
+      "
+
+volumes:
+  account-coverage:
+  swagger-coverage:
+

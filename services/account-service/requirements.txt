@@ -1,0 +1,3 @@
+# Main requirements file - imports from requirements/base.txt
+-r requirements/base.txt
+
