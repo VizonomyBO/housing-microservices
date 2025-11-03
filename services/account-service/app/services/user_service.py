@@ -11,7 +11,6 @@ from app.utils.validators import (
     sanitize_string,
     validate_email,
     validate_password,
-    validate_username,
 )
 
 
@@ -21,20 +20,22 @@ class UserService:
     @staticmethod
     def create_user(
         email: str,
-        username: str,
         password: str,
-        first_name: str | None = None,
-        last_name: str | None = None,
+        first_name: str,
+        last_name: str,
+        country_code: str = "USA",
+        role: str = "public",
     ) -> tuple[User, None] | tuple[None, str]:
         """
         Create a new user with validation.
 
         Args:
             email: User email address
-            username: User username
             password: User password (plain text)
-            first_name: Optional first name
-            last_name: Optional last name
+            first_name: User first name (required)
+            last_name: User last name (required)
+            country_code: ISO country code (default: "USA")
+            role: User role (default: "public")
 
         Returns:
             Tuple of (User object, None) on success or (None, error_message) on failure
@@ -45,34 +46,39 @@ class UserService:
             return None, result
         normalized_email = result
 
-        # Validate username
-        is_valid, error = validate_username(username)
-        if not is_valid:
-            return None, error
-
         # Validate password
         is_valid, error = validate_password(password)
         if not is_valid:
             return None, error
 
+        # Validate required fields
+        if not first_name or not last_name:
+            return None, "First name and last name are required"
+
+        # Validate country code (should be 3 characters)
+        if not country_code or len(country_code) != 3:
+            return None, "Country code must be 3 characters (ISO format)"
+
+        # Validate role
+        valid_roles = ['admin', 'public', 'government', 'staff']
+        if role not in valid_roles:
+            return None, f"Role must be one of: {', '.join(valid_roles)}"
+
         # Check if email already exists
         if User.query.filter_by(email=normalized_email).first():
             return None, "Email already registered"
-
-        # Check if username already exists
-        if User.query.filter_by(username=username).first():
-            return None, "Username already taken"
 
         # Create user
         try:
             user = User(
                 email=normalized_email,
-                username=username,
                 password_hash=hash_password(password),
-                first_name=sanitize_string(first_name, 100) if first_name else None,
-                last_name=sanitize_string(last_name, 100) if last_name else None,
-                is_active=True,
-                is_verified=False,
+                first_name=sanitize_string(first_name, 100),
+                last_name=sanitize_string(last_name, 100),
+                country_code=country_code.upper(),
+                role=role,
+                status='pending',  # New users start as pending
+                email_verified=False,
             )
 
             db.session.add(user)
@@ -86,26 +92,21 @@ class UserService:
     @staticmethod
     def get_user_by_id(user_id: int) -> User | None:
         """Get user by ID"""
-        result = User.query.filter_by(id=user_id, is_active=True).first()
+        result = User.query.filter_by(user_id=user_id, status='active').first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
     def get_user_by_email(email: str) -> User | None:
         """Get user by email"""
-        result = User.query.filter_by(email=email, is_active=True).first()
-        return result  # type: ignore[no-any-return]
-
-    @staticmethod
-    def get_user_by_username(username: str) -> User | None:
-        """Get user by username"""
-        result = User.query.filter_by(username=username, is_active=True).first()
+        result = User.query.filter_by(email=email, status='active').first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
     def update_last_login(user: User) -> None:
-        """Update user's last login timestamp"""
+        """Update user's last login timestamp (stored in date_modified)"""
         try:
-            user.last_login = datetime.utcnow()
+            # Update date_modified to track last activity
+            user.date_modified = datetime.utcnow()
             db.session.commit()
         except Exception:
             db.session.rollback()

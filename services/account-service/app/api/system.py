@@ -135,31 +135,53 @@ def openapi_spec():
                 "post": {
                     "tags": ["Authentication"],
                     "summary": "Register a new user",
-                    "description": "Create a new user account with email, username, and password",
+                    "description": "Create a new user account with email, password, and personal information",
                     "requestBody": {
                         "required": True,
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "type": "object",
-                                    "required": ["email", "username", "password"],
+                                    "required": ["email", "password", "first_name", "last_name"],
                                     "properties": {
                                         "email": {"type": "string", "format": "email"},
-                                        "username": {
-                                            "type": "string",
-                                            "minLength": 3,
-                                            "maxLength": 80,
-                                        },
                                         "password": {"type": "string", "minLength": 8},
-                                        "first_name": {"type": "string"},
-                                        "last_name": {"type": "string"},
+                                        "first_name": {"type": "string", "minLength": 1},
+                                        "last_name": {"type": "string", "minLength": 1},
+                                        "country_code": {
+                                            "type": "string",
+                                            "pattern": "^[A-Z]{3}$",
+                                            "description": "ISO 3166-1 alpha-3 country code",
+                                            "default": "USA",
+                                        },
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["admin", "public", "government", "staff"],
+                                            "default": "public",
+                                        },
                                     },
                                 }
                             }
                         },
                     },
                     "responses": {
-                        "201": {"description": "User created successfully"},
+                        "201": {
+                            "description": "User created successfully",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "message": {"type": "string", "example": "User registered successfully"},
+                                            "user": {
+                                                "type": "object",
+                                                "description": "Note: New users are created with status='pending' and must be activated before login"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         "400": {"description": "Invalid input"},
                         "409": {"description": "User already exists"},
                     },
@@ -180,7 +202,8 @@ def openapi_spec():
                                     "properties": {
                                         "login": {
                                             "type": "string",
-                                            "description": "Email or username",
+                                            "format": "email",
+                                            "description": "Email address",
                                         },
                                         "password": {"type": "string"},
                                     },
@@ -189,8 +212,46 @@ def openapi_spec():
                         },
                     },
                     "responses": {
-                        "200": {"description": "Login successful"},
-                        "401": {"description": "Invalid credentials"},
+                        "200": {
+                            "description": "Login successful",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "message": {"type": "string", "example": "Login successful"},
+                                            "access_token": {"type": "string"},
+                                            "refresh_token": {"type": "string"},
+                                            "token_type": {"type": "string", "example": "Bearer"},
+                                            "expires_in": {"type": "integer"},
+                                            "user": {"type": "object"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "401": {
+                            "description": "Authentication failed",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "Invalid credentials",
+                                                    "Account is pending activation. Please verify your email or contact support.",
+                                                    "Account has been suspended. Please contact support.",
+                                                    "Account is inactive. Please contact support."
+                                                ],
+                                                "example": "Invalid credentials"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     },
                 }
             },

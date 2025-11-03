@@ -43,6 +43,10 @@ class User(db.Model):  # type: ignore[name-defined]
     # Additional fields
     created_by = db.Column(BigInteger, db.ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    
+    # Password reset fields
+    reset_token = db.Column(db.String(255), nullable=True)
+    reset_token_expires = db.Column(db.DateTime, nullable=True)
 
     # Relationships
     refresh_tokens = db.relationship(
