@@ -68,14 +68,27 @@ export class SpecAggregator {
       pathPrefix: `/${this.sanitizeServiceName(service.name)}`,
     });
 
-    // Merge paths with service prefix
+
     const pathPrefix = `/${this.sanitizeServiceName(service.name)}`;
+    const serviceExternalUrl = this.convertToExternalUrl(service.url);
+    
     for (const [path, pathItem] of Object.entries(spec.paths)) {
-      const prefixedPath = `${pathPrefix}${path}`;
+      let finalPath = path;
+      if (aggregated.paths[path]) {
+        finalPath = `${pathPrefix}${path}`;
+      }
 
       // Add service tag to all operations in this path
       const taggedPathItem = this.addServiceTagToPathItem(pathItem, service.name);
-      aggregated.paths[prefixedPath] = taggedPathItem;
+      
+      taggedPathItem.servers = [
+        {
+          url: serviceExternalUrl,
+          description: `${service.name} - ${service.description || 'API Server'}`,
+        },
+      ];
+      
+      aggregated.paths[finalPath] = taggedPathItem;
     }
 
     // Merge components
@@ -128,13 +141,35 @@ export class SpecAggregator {
       aggregated.tags = [...(aggregated.tags || []), serviceTag];
     }
 
-    // Merge servers
-    if (spec.servers && spec.servers.length > 0) {
-      const serviceServers = spec.servers.map((server) => ({
-        ...server,
-        description: `${service.name} - ${server.description || 'Server'}`,
-      }));
-      aggregated.servers = [...(aggregated.servers || []), ...serviceServers];
+    const serviceServer = {
+      url: serviceExternalUrl,
+      description: `${service.name} - ${service.description || 'API Server'}`,
+    };
+
+    if (!aggregated.servers) {
+      aggregated.servers = [];
+    }
+    
+    const existingServer = aggregated.servers.find((s) => s.url === serviceExternalUrl);
+    if (!existingServer) {
+      aggregated.servers.push(serviceServer);
+    }
+
+    if (!!spec?.servers?.length) {
+      for (const server of spec.servers) {
+        const serverExternalUrl = this.convertToExternalUrl(server.url);
+        if (serverExternalUrl !== serviceExternalUrl) {
+          const serviceServerFromSpec = {
+            url: serverExternalUrl,
+            description: `${service.name} - ${server.description || 'Additional Server'}`,
+          };
+          
+          const alreadyAdded = aggregated.servers.some((s) => s.url === serverExternalUrl);
+          if (!alreadyAdded) {
+            aggregated.servers.push(serviceServerFromSpec);
+          }
+        }
+      }
     }
   }
 
@@ -182,6 +217,32 @@ export class SpecAggregator {
       .toLowerCase()
       .replace(/\s+/g, '-')
       .replace(/[^a-z0-9-]/g, '');
+  }
+
+  private convertToExternalUrl(internalUrl: string): string {
+    if (internalUrl.includes('localhost') || internalUrl.includes('127.0.0.1')) {
+      return internalUrl;
+    }
+
+    const servicePortMap: Record<string, number> = {
+      'account-service': 5001,
+    };
+
+    try {
+      const url = new URL(internalUrl);
+      const hostname = url.hostname;
+
+      for (const [serviceName, externalPort] of Object.entries(servicePortMap)) {
+        if (hostname.includes(serviceName) || hostname === serviceName) {
+          return `http://localhost:${externalPort}`;
+        }
+      }
+
+      const internalPort = parseInt(url.port || '5000', 10);
+      return `http://localhost:${internalPort}`;
+    } catch {
+      return internalUrl;
+    }
   }
 
   /**
