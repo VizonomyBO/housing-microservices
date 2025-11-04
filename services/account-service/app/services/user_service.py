@@ -90,9 +90,12 @@ class UserService:
             return None, f"Failed to create user: {str(e)}"
 
     @staticmethod
-    def get_user_by_id(user_id: int) -> User | None:
+    def get_user_by_id(user_id: int, active_only: bool = True) -> User | None:
         """Get user by ID"""
-        result = User.query.filter_by(user_id=user_id, status='active').first()
+        if active_only:
+            result = User.query.filter_by(user_id=user_id, status='active').first()
+        else:
+            result = User.query.filter_by(user_id=user_id).first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
@@ -148,3 +151,49 @@ class UserService:
         except Exception as e:
             db.session.rollback()
             return False, f"Failed to update password: {str(e)}"
+
+    @staticmethod
+    def list_users(
+        page: int = 1,
+        per_page: int = 10,
+        status: str | None = None,
+        role: str | None = None,
+    ) -> tuple[list[User], int]:
+        """
+        List users with pagination and optional filtering.
+
+        Args:
+            page: Page number (1-indexed)
+            per_page: Number of items per page (max 100)
+            status: Filter by status ('active', 'pending', 'inactive', 'suspended')
+            role: Filter by role ('admin', 'public', 'government', 'staff')
+
+        Returns:
+            Tuple of (list of User objects, total count)
+        """
+        # Validate and clamp per_page
+        per_page = max(1, min(per_page, 100))
+        page = max(1, page)
+
+        # Build query
+        query = User.query
+
+        # Apply status filter
+        if status:
+            valid_statuses = ['active', 'pending', 'inactive', 'suspended']
+            if status in valid_statuses:
+                query = query.filter_by(status=status)
+
+        # Apply role filter
+        if role:
+            valid_roles = ['admin', 'public', 'government', 'staff']
+            if role in valid_roles:
+                query = query.filter_by(role=role)
+
+        # Get total count
+        total = query.count()
+
+        # Apply pagination and ordering
+        users = query.order_by(User.date_created.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+        return users, total  # type: ignore[return-value]

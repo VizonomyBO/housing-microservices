@@ -103,6 +103,7 @@ def openapi_spec():
         "tags": [
             {"name": "Authentication", "description": "User authentication and token management"},
             {"name": "System", "description": "System health and status endpoints"},
+            {"name": "User Management", "description": "User management and administration endpoints"},
         ],
         "paths": {
             "/health": {
@@ -299,6 +300,41 @@ def openapi_spec():
                     "responses": {"200": {"description": "Logout successful"}},
                 }
             },
+            "/auth/me": {
+                "get": {
+                    "tags": ["Authentication"],
+                    "summary": "Get current user",
+                    "description": "Get the current authenticated user's information. Requires Bearer token in Authorization header.",
+                    "security": [{"BearerAuth": []}],
+                    "responses": {
+                        "200": {
+                            "description": "Current user information",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "user_id": {"type": "integer", "format": "int64"},
+                                            "first_name": {"type": "string"},
+                                            "last_name": {"type": "string"},
+                                            "email": {"type": "string", "format": "email"},
+                                            "email_verified": {"type": "boolean"},
+                                            "role": {"type": "string", "enum": ["admin", "public", "government", "staff"]},
+                                            "status": {"type": "string", "enum": ["active", "pending", "inactive", "suspended"]},
+                                            "country_code": {"type": "string", "pattern": "^[A-Z]{3}$"},
+                                            "date_created": {"type": "string", "format": "date-time"},
+                                            "date_modified": {"type": "string", "format": "date-time"},
+                                            "created_by": {"type": ["integer", "null"], "format": "int64"},
+                                        },
+                                    },
+                                }
+                            },
+                        },
+                        "401": {"description": "Unauthorized - Invalid or missing token"},
+                        "403": {"description": "Forbidden - User account is not active"},
+                    },
+                }
+            },
             "/auth/forgot-password": {
                 "post": {
                     "tags": ["Authentication"],
@@ -345,10 +381,208 @@ def openapi_spec():
                     },
                 }
             },
+            "/users": {
+                "get": {
+                    "tags": ["User Management"],
+                    "summary": "List users",
+                    "description": "Get a paginated list of users. Admins can view all users. Can filter by status (active, pending, inactive, suspended) and role (admin, public, government, staff). Supports pagination with page and per_page parameters.",
+                    "security": [{"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "default": 1},
+                            "description": "Page number (1-indexed)",
+                        },
+                        {
+                            "name": "per_page",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+                            "description": "Number of items per page (max 100)",
+                        },
+                        {
+                            "name": "status",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["active", "pending", "inactive", "suspended"]},
+                            "description": "Filter by user status",
+                        },
+                        {
+                            "name": "role",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["admin", "public", "government", "staff"]},
+                            "description": "Filter by user role",
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "List of users with pagination metadata",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "users": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "user_id": {"type": "integer", "format": "int64"},
+                                                        "first_name": {"type": "string"},
+                                                        "last_name": {"type": "string"},
+                                                        "email": {"type": "string", "format": "email"},
+                                                        "email_verified": {"type": "boolean"},
+                                                        "role": {"type": "string", "enum": ["admin", "public", "government", "staff"]},
+                                                        "status": {"type": "string", "enum": ["active", "pending", "inactive", "suspended"]},
+                                                        "country_code": {"type": "string", "pattern": "^[A-Z]{3}$"},
+                                                        "date_created": {"type": "string", "format": "date-time"},
+                                                        "date_modified": {"type": "string", "format": "date-time"},
+                                                        "created_by": {"type": ["integer", "null"], "format": "int64"},
+                                                    },
+                                                },
+                                            },
+                                            "pagination": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "page": {"type": "integer"},
+                                                    "per_page": {"type": "integer"},
+                                                    "total": {"type": "integer"},
+                                                    "total_pages": {"type": "integer"},
+                                                    "has_next": {"type": "boolean"},
+                                                    "has_prev": {"type": "boolean"},
+                                                },
+                                            },
+                                        },
+                                    },
+                                }
+                            },
+                        },
+                        "400": {"description": "Invalid pagination parameters"},
+                        "401": {"description": "Unauthorized"},
+                        "403": {"description": "Admin access required"},
+                        "500": {"description": "Internal server error"},
+                    },
+                }
+            },
+            "/users/{user_id}": {
+                "delete": {
+                    "tags": ["User Management"],
+                    "summary": "Delete user",
+                    "description": "Delete a user by ID. Requires admin role.",
+                    "security": [{"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "user_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"},
+                            "description": "User ID to delete",
+                        }
+                    ],
+                    "responses": {
+                        "200": {"description": "User deleted successfully"},
+                        "400": {"description": "Cannot delete own account"},
+                        "401": {"description": "Unauthorized"},
+                        "403": {"description": "Admin access required"},
+                        "404": {"description": "User not found"},
+                    },
+                },
+                "put": {
+                    "tags": ["User Management"],
+                    "summary": "Update user",
+                    "description": "Update user details. Admins can update any user account (user settings for admins). Non-admin users can only update their own account. Users can update their own profile (first_name, last_name, password, country_code). Only admins can change the role field.",
+                    "security": [{"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "user_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"},
+                            "description": "User ID to update",
+                        }
+                    ],
+                    "requestBody": {
+                        "required": False,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "first_name": {"type": "string", "minLength": 1},
+                                        "last_name": {"type": "string", "minLength": 1},
+                                        "password": {"type": "string", "minLength": 8, "description": "New password"},
+                                        "country_code": {
+                                            "type": "string",
+                                            "pattern": "^[A-Z]{3}$",
+                                            "description": "ISO 3166-1 alpha-3 country code",
+                                        },
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["admin", "public", "government", "staff"],
+                                        },
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "User updated successfully"},
+                        "400": {"description": "Invalid input"},
+                        "401": {"description": "Unauthorized"},
+                        "403": {"description": "Forbidden - cannot update other users or change role without admin access"},
+                        "404": {"description": "User not found"},
+                    },
+                },
+            },
+            "/users/{user_id}/approve": {
+                "put": {
+                    "tags": ["User Management"],
+                    "summary": "Approve user",
+                    "description": "Approve a user by changing status from pending to active. Requires admin role.",
+                    "security": [{"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "user_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "integer"},
+                            "description": "User ID to approve",
+                        }
+                    ],
+                    "responses": {
+                        "200": {"description": "User approved successfully"},
+                        "400": {"description": "User already active"},
+                        "401": {"description": "Unauthorized"},
+                        "403": {"description": "Admin access required"},
+                        "404": {"description": "User not found"},
+                    },
+                }
+            },
         },
         "components": {
             "securitySchemes": {
                 "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+            },
+            "schemas": {
+                "User": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "integer", "format": "int64"},
+                        "first_name": {"type": "string"},
+                        "last_name": {"type": "string"},
+                        "email": {"type": "string", "format": "email"},
+                        "email_verified": {"type": "boolean"},
+                        "role": {"type": "string", "enum": ["admin", "public", "government", "staff"]},
+                        "status": {"type": "string", "enum": ["active", "pending", "inactive", "suspended"]},
+                        "country_code": {"type": "string", "pattern": "^[A-Z]{3}$"},
+                        "date_created": {"type": "string", "format": "date-time"},
+                        "date_modified": {"type": "string", "format": "date-time"},
+                        "created_by": {"type": "integer", "format": "int64", "nullable": True},
+                    },
+                }
             }
         },
     }

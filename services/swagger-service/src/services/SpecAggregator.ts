@@ -81,14 +81,17 @@ export class SpecAggregator {
       // Add service tag to all operations in this path
       const taggedPathItem = this.addServiceTagToPathItem(pathItem, service.name);
       
-      taggedPathItem.servers = [
+      // Update security references to match prefixed security schemes
+      const prefixedPathItem = this.updateSecurityReferences(taggedPathItem, service.name);
+      
+      prefixedPathItem.servers = [
         {
           url: serviceExternalUrl,
           description: `${service.name} - ${service.description || 'API Server'}`,
         },
       ];
       
-      aggregated.paths[finalPath] = taggedPathItem;
+      aggregated.paths[finalPath] = prefixedPathItem;
     }
 
     // Merge components
@@ -190,6 +193,43 @@ export class SpecAggregator {
     }
 
     return tagged;
+  }
+
+  /**
+   * Update security references in path items to match prefixed security scheme names
+   */
+  private updateSecurityReferences(pathItem: PathItem, serviceName: string): PathItem {
+    const updated: any = { ...pathItem };
+    const methods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'] as const;
+    const prefix = this.sanitizeServiceName(serviceName);
+
+    for (const method of methods) {
+      if (updated[method] && updated[method]?.security) {
+        const operation = { ...updated[method] };
+        operation.security = operation.security?.map((secReq: any) => {
+          const updatedSecReq: { [key: string]: string[] } = {};
+          for (const [key, value] of Object.entries(secReq)) {
+            // Prefix the security scheme name
+            updatedSecReq[`${prefix}_${key}`] = value as string[];
+          }
+          return updatedSecReq;
+        });
+        updated[method] = operation;
+      }
+    }
+
+    // Also update path-level security if present (PathItem can have security at path level)
+    if (updated.security) {
+      updated.security = updated.security.map((secReq: any) => {
+        const updatedSecReq: { [key: string]: string[] } = {};
+        for (const [key, value] of Object.entries(secReq)) {
+          updatedSecReq[`${prefix}_${key}`] = value as string[];
+        }
+        return updatedSecReq;
+      });
+    }
+
+    return updated as PathItem;
   }
 
   /**

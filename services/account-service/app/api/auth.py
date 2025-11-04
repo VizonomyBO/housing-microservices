@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, jsonify, request
 from app import limiter
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
+from app.utils.auth_decorators import require_auth
 from app.utils.security import generate_reset_token
 
 auth_bp = Blueprint("auth", __name__)
@@ -292,3 +293,14 @@ def verify_token():
         ),
         200,
     )
+
+
+@auth_bp.route("/me", methods=["GET"])
+@require_auth
+@limiter.limit("30 per minute")
+def get_current_user(current_user, token_payload):
+    """
+    Get the current authenticated user's information.
+    Requires Bearer token in Authorization header.
+    """
+    return jsonify(current_user.to_dict()), 200

@@ -43,9 +43,11 @@ def create_app(config_class=Config):
     # Register blueprints
     from app.api.auth import auth_bp
     from app.api.system import system_bp
+    from app.api.users import users_bp
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(system_bp)
+    app.register_blueprint(users_bp, url_prefix="/users")
 
     # Add security headers
     @app.after_request
