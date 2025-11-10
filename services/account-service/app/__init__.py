@@ -42,12 +42,14 @@ def create_app(config_class=Config):
 
     # Register blueprints
     from app.api.auth import auth_bp
+    from app.api.documents import documents_bp
     from app.api.system import system_bp
     from app.api.users import users_bp
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(system_bp)
     app.register_blueprint(users_bp, url_prefix="/users")
+    app.register_blueprint(documents_bp, url_prefix="/documents")
 
     # Add security headers
     @app.after_request

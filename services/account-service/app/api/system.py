@@ -104,6 +104,7 @@ def openapi_spec():
             {"name": "Authentication", "description": "User authentication and token management"},
             {"name": "System", "description": "System health and status endpoints"},
             {"name": "User Management", "description": "User management and administration endpoints"},
+            {"name": "Document Management", "description": "Document management and retrieval endpoints"},
         ],
         "paths": {
             "/health": {
@@ -339,7 +340,7 @@ def openapi_spec():
                 "post": {
                     "tags": ["Authentication"],
                     "summary": "Forgot password",
-                    "description": "Request a password reset token",
+                    "description": "Request a password reset token. An email with the reset token will be sent via AWS SES to the provided email address if it exists in the system.",
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -558,6 +559,118 @@ def openapi_spec():
                         "401": {"description": "Unauthorized"},
                         "403": {"description": "Admin access required"},
                         "404": {"description": "User not found"},
+                    },
+                }
+            },
+            "/documents": {
+                "get": {
+                    "tags": ["Document Management"],
+                    "summary": "List documents",
+                    "description": "Get a paginated list of documents. Requires authentication. Can filter by status, access_level, country_code, user_uploaded, and validated. Supports pagination with page and per_page parameters.",
+                    "security": [{"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "default": 1},
+                            "description": "Page number (1-indexed)",
+                        },
+                        {
+                            "name": "per_page",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
+                            "description": "Number of items per page (max 100)",
+                        },
+                        {
+                            "name": "status",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["pending", "processing", "validated", "rejected", "archived"]},
+                            "description": "Filter by document status",
+                        },
+                        {
+                            "name": "access_level",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["public", "restricted", "confidential", "internal"]},
+                            "description": "Filter by access level",
+                        },
+                        {
+                            "name": "country_code",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "pattern": "^[A-Z]{3}$"},
+                            "description": "Filter by country code (ISO 3-letter code)",
+                        },
+                        {
+                            "name": "user_uploaded",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "format": "int64"},
+                            "description": "Filter by uploader user_id",
+                        },
+                        {
+                            "name": "validated",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "boolean"},
+                            "description": "Filter by validation status",
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "List of documents with pagination metadata",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "documents": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "document_id": {"type": "integer", "format": "int64"},
+                                                        "filename": {"type": "string"},
+                                                        "file_path": {"type": "string"},
+                                                        "file_size": {"type": "integer", "format": "int64"},
+                                                        "file_type": {"type": "string"},
+                                                        "mime_type": {"type": "string"},
+                                                        "file_hash": {"type": "string"},
+                                                        "country_code": {"type": "string"},
+                                                        "date_uploaded": {"type": "string", "format": "date-time"},
+                                                        "date_modified": {"type": "string", "format": "date-time"},
+                                                        "user_uploaded": {"type": "integer", "format": "int64"},
+                                                        "source": {"type": ["string", "null"]},
+                                                        "validated": {"type": "boolean"},
+                                                        "validated_by": {"type": ["integer", "null"], "format": "int64"},
+                                                        "validated_at": {"type": ["string", "null"], "format": "date-time"},
+                                                        "document_status": {"type": "string"},
+                                                        "access_level": {"type": "string"},
+                                                    },
+                                                },
+                                            },
+                                            "pagination": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "page": {"type": "integer"},
+                                                    "per_page": {"type": "integer"},
+                                                    "total": {"type": "integer"},
+                                                    "total_pages": {"type": "integer"},
+                                                    "has_next": {"type": "boolean"},
+                                                    "has_prev": {"type": "boolean"},
+                                                },
+                                            },
+                                        },
+                                    },
+                                }
+                            },
+                        },
+                        "400": {"description": "Invalid pagination parameters"},
+                        "401": {"description": "Unauthorized"},
+                        "500": {"description": "Internal server error"},
                     },
                 }
             },

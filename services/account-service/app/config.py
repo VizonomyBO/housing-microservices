@@ -36,12 +36,17 @@ class Config:
     # Rate Limiting
     RATELIMIT_STORAGE_URL = "memory://"
 
-    # Email (for password reset)
+    # Email (for password reset) - AWS SES
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@app.com")
+    
+    # Legacy SMTP (kept for backwards compatibility, not used)
     SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
     SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-    EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@app.com")
 
     # Application
     APP_NAME = "Account Management Service"

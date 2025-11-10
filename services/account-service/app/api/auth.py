@@ -10,6 +10,7 @@ from app import limiter
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 from app.utils.auth_decorators import require_auth
+from app.utils.email_service import EmailService
 from app.utils.security import generate_reset_token
 
 auth_bp = Blueprint("auth", __name__)
@@ -186,7 +187,6 @@ def forgot_password():
     user = UserService.get_user_by_email(email)
 
     # Always return success to prevent email enumeration
-    # In production, send actual email here
     if user:
         # Generate reset token
         reset_token = generate_reset_token()
@@ -195,16 +195,16 @@ def forgot_password():
         # Store reset token
         UserService.set_reset_token(user, reset_token, expires_at)
 
-        # TODO: Send email with reset token
-        # In production, you would send an email like:
-        # send_email(
-        #     to=user.email,
-        #     subject='Password Reset Request',
-        #     body=f'Your reset token is: {reset_token}\nExpires in 1 hour.'
-        # )
+        # Send email with reset token via AWS SES
+        success, message = EmailService.send_password_reset_email(
+            to=user.email,
+            reset_token=reset_token,
+        )
 
-        # For development, log the token (REMOVE IN PRODUCTION)
-        print(f"Password reset token for {email}: {reset_token}")
+        if not success:
+            # Log error but don't expose it to user (security best practice)
+            current_app.logger.error(f"Failed to send password reset email to {email}: {message}")
+            # Still return success to prevent email enumeration
 
     return jsonify({"message": "If the email exists, a password reset link has been sent"}), 200
 
