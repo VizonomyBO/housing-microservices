@@ -1,0 +1,17 @@
+-r base.txt
+
+# Code formatting
+black==24.1.1
+isort==5.13.2
+
+# Linting
+flake8==7.0.0
+flake8-docstrings==1.7.0
+flake8-bugbear==24.1.17
+bandit==1.7.6
+
+# Type checking
+mypy==1.8.0
+types-Flask==1.1.6
+types-PyJWT==1.7.1
+

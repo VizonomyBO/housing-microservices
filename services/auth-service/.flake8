@@ -1,0 +1,27 @@
+[flake8]
+max-line-length = 100
+# Ignore docstring style warnings (D200, D212, D415) - these are style-only
+# D200: One-line docstring formatting
+# D212: Multi-line docstring summary position
+# D415: Period at end of docstring
+# D205: Blank line after summary
+# D403: First word capitalization
+# D105: Missing docstring in magic methods (acceptable)
+# B017: pytest.raises(Exception) - acceptable for some test cases
+extend-ignore = E203, E266, E501, W503, D200, D212, D415, D205, D403, D105, B017
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    build,
+    dist,
+    *.egg-info,
+    .pytest_cache,
+    .mypy_cache
+max-complexity = 10
+docstring-convention = google
+per-file-ignores =
+    __init__.py:F401
+    tests/*:D100,D101,D102,D103,D104
+
