@@ -27,22 +27,24 @@ def register():
 
     # Extract fields
     email = data.get("email")
-    username = data.get("username")
     password = data.get("password")
     first_name = data.get("first_name")
     last_name = data.get("last_name")
+    country_code = data.get("country_code", "USA")
+    role = data.get("role", "public")
 
     # Validate required fields
-    if not email or not username or not password:
-        return jsonify({"error": "Email, username, and password are required"}), 400
+    if not email or not password or not first_name or not last_name:
+        return jsonify({"error": "Email, password, first_name, and last_name are required"}), 400
 
     # Create user
     user, error = UserService.create_user(
         email=email,
-        username=username,
         password=password,
         first_name=first_name,
         last_name=last_name,
+        country_code=country_code,
+        role=role,
     )
 
     if error:
@@ -246,7 +248,7 @@ def reset_password():
     UserService.clear_reset_token(user)
 
     # Revoke all existing refresh tokens for security
-    AuthService.revoke_all_user_tokens(user.id)
+    AuthService.revoke_all_user_tokens(user.user_id)
 
     return (
         jsonify({"message": "Password reset successful. Please login with your new password."}),
@@ -285,7 +287,6 @@ def verify_token():
             {
                 "valid": True,
                 "user_id": payload.get("user_id"),
-                "username": payload.get("username"),
                 "email": payload.get("email"),
             }
         ),

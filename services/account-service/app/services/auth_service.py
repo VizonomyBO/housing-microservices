@@ -6,6 +6,7 @@ from datetime import datetime
 
 import jwt
 from flask import current_app
+from sqlalchemy import BigInteger
 
 from app import db
 from app.models.refresh_token import RefreshToken
@@ -19,22 +20,30 @@ class AuthService:
     @staticmethod
     def authenticate_user(login: str, password: str) -> tuple[User, None] | tuple[None, str]:
         """
-        Authenticate user with email/username and password.
+        Authenticate user with email and password.
 
         Args:
-            login: Email or username
+            login: Email address
             password: Plain text password
 
         Returns:
             Tuple of (User, None) on success or (None, error_message) on failure
         """
-        # Try to find user by email or username
-        user = User.query.filter(
-            (User.email == login) | (User.username == login), User.is_active.is_(True)
-        ).first()
+        # Find user by email
+        user = User.query.filter(User.email == login).first()
 
         if not user:
             return None, "Invalid credentials"
+
+        # Check user status
+        if user.status == 'pending':
+            return None, "Account is pending activation. Please verify your email or contact support."
+        if user.status == 'suspended':
+            return None, "Account has been suspended. Please contact support."
+        if user.status == 'inactive':
+            return None, "Account is inactive. Please contact support."
+        if user.status != 'active':
+            return None, f"Account status is {user.status}. Please contact support."
 
         # Verify password
         if not verify_password(user.password_hash, password):
@@ -46,8 +55,7 @@ class AuthService:
     def generate_access_token(user: User) -> str:
         """Generate JWT access token"""
         payload = {
-            "user_id": user.id,
-            "username": user.username,
+            "user_id": user.user_id,
             "email": user.email,
             "exp": datetime.utcnow() + current_app.config["JWT_ACCESS_TOKEN_EXPIRES"],
             "iat": datetime.utcnow(),
@@ -64,7 +72,7 @@ class AuthService:
     ) -> str:
         """Generate and store refresh token"""
         payload = {
-            "user_id": user.id,
+            "user_id": user.user_id,
             "exp": datetime.utcnow() + current_app.config["JWT_REFRESH_TOKEN_EXPIRES"],
             "iat": datetime.utcnow(),
             "type": "refresh",
@@ -76,7 +84,7 @@ class AuthService:
 
         # Store refresh token in database
         refresh_token = RefreshToken(
-            user_id=user.id,
+            user_id=user.user_id,
             token=token,
             expires_at=datetime.utcnow() + current_app.config["JWT_REFRESH_TOKEN_EXPIRES"],
             user_agent=user_agent[:500] if user_agent else None,
@@ -153,7 +161,7 @@ class AuthService:
 
         # Get user
         user = User.query.get(token_obj.user_id)
-        if not user or not user.is_active:
+        if not user or user.status != 'active':
             return None, None, "User not found or inactive"
 
         # Revoke old refresh token
@@ -182,7 +190,7 @@ class AuthService:
             return False
 
     @staticmethod
-    def revoke_all_user_tokens(user_id: int) -> bool:
+    def revoke_all_user_tokens(user_id: int | BigInteger) -> bool:
         """Revoke all refresh tokens for a user"""
         try:
             RefreshToken.query.filter_by(user_id=user_id, is_revoked=False).update(

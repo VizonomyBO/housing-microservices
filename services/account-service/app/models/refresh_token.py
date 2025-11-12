@@ -13,7 +13,7 @@ class RefreshToken(db.Model):  # type: ignore[name-defined]
     __tablename__ = "refresh_tokens"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     token = db.Column(db.String(500), unique=True, nullable=False, index=True)
 
     # Token metadata

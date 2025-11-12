@@ -92,7 +92,14 @@ test-account: ## Run account service tests locally
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m pytest tests/ -v
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pytest tests/ -v; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pytest tests/ -v; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 
 test-swagger: ## Run swagger service tests locally
 	cd services/swagger-service && npm test
@@ -102,21 +109,42 @@ test-account-unit: ## Run account service unit tests only
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m pytest tests/unit/ -v -m unit
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pytest tests/unit/ -v -m unit; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pytest tests/unit/ -v -m unit; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 
 test-account-integration: ## Run account service integration tests only
 	@if [ ! -d "services/account-service/.venv" ]; then \
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m pytest tests/integration/ -v -m integration
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pytest tests/integration/ -v -m integration; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pytest tests/integration/ -v -m integration; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 
 test-coverage: ## Run tests with coverage reports
 	@if [ ! -d "services/account-service/.venv" ]; then \
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m pytest tests/ --cov=app --cov-report=html --cov-report=term
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 	cd services/swagger-service && npm run test:coverage
 	@echo "\n==> Coverage reports generated:"
 	@echo "    Account Service: services/account-service/htmlcov/index.html"
@@ -140,9 +168,17 @@ lint-account: ## Lint account service
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m black --check app/ tests/
-	cd services/account-service && .venv/bin/python -m flake8 app/ tests/
-	cd services/account-service && .venv/bin/python -m mypy app/
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			PYTHON_CMD=".venv/bin/python"; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			PYTHON_CMD=".venv/Scripts/python.exe"; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi && \
+		$$PYTHON_CMD -m black --check app/ tests/ && \
+		$$PYTHON_CMD -m flake8 app/ tests/ && \
+		$$PYTHON_CMD -m mypy app/
 
 lint-swagger: ## Lint swagger service
 	@echo "==> Linting Swagger Service..."
@@ -156,8 +192,16 @@ lint-fix-account: ## Fix account service linting issues
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m black app/ tests/
-	cd services/account-service && .venv/bin/python -m isort app/ tests/
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			PYTHON_CMD=".venv/bin/python"; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			PYTHON_CMD=".venv/Scripts/python.exe"; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi && \
+		$$PYTHON_CMD -m black app/ tests/ && \
+		$$PYTHON_CMD -m isort app/ tests/
 
 lint-fix-swagger: ## Fix swagger service linting issues
 	cd services/swagger-service && npm run lint:fix
@@ -170,8 +214,16 @@ format: ## Auto-format all code
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m black app/ tests/
-	cd services/account-service && .venv/bin/python -m isort app/ tests/
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			PYTHON_CMD=".venv/bin/python"; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			PYTHON_CMD=".venv/Scripts/python.exe"; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi && \
+		$$PYTHON_CMD -m black app/ tests/ && \
+		$$PYTHON_CMD -m isort app/ tests/
 	@echo "==> Formatting Swagger Service..."
 	cd services/swagger-service && npm run format
 
@@ -182,7 +234,14 @@ type-check: ## Run type checking
 		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
 		exit 1; \
 	fi
-	cd services/account-service && .venv/bin/python -m mypy app/
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m mypy app/; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m mypy app/; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 	@echo "==> Type checking Swagger Service..."
 	cd services/swagger-service && npm run type-check
 
@@ -195,24 +254,52 @@ install-deps: install-account install-swagger ## Install all dependencies
 install-account-dev: ## Install account service development dependencies
 	@echo "==> Setting up Account Service virtual environment..."
 	@if [ ! -d "services/account-service/.venv" ]; then \
-		cd services/account-service && python3 -m venv .venv; \
+		cd services/account-service && python -m venv .venv 2>/dev/null || python3 -m venv .venv; \
 	fi
-	cd services/account-service && .venv/bin/pip install --upgrade pip
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pip install --upgrade pip; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pip install --upgrade pip; \
+		else \
+			echo "Error: Could not find Python in virtual environment"; exit 1; \
+		fi
 	@echo "==> Installing base dependencies (excluding psycopg2-binary for now)..."
 	@cd services/account-service && \
-		grep -v "psycopg2-binary" requirements/base.txt > /tmp/base_no_pg.txt && \
-		.venv/bin/pip install -r /tmp/base_no_pg.txt && \
-		rm /tmp/base_no_pg.txt || true
+		TMPFILE=$$(mktemp 2>/dev/null || echo ".base_no_pg.tmp") && \
+		grep -v "psycopg2-binary" requirements/base.txt > $$TMPFILE && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pip install -r $$TMPFILE && \
+			rm -f $$TMPFILE; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pip install -r $$TMPFILE && \
+			rm -f $$TMPFILE; \
+		fi
 	@echo "==> Installing psycopg2-binary (requires PostgreSQL if building from source)..."
-	@cd services/account-service && .venv/bin/pip install psycopg2-binary || \
-		(echo "Warning: psycopg2-binary installation failed."; \
-		 echo "This is OK for development/testing with SQLite."; \
-		 echo "To install PostgreSQL support, run: brew install postgresql"; \
-		 echo "Then run: cd services/account-service && .venv/bin/pip install psycopg2-binary")
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pip install psycopg2-binary || \
+			(echo "Warning: psycopg2-binary installation failed."; \
+			 echo "This is OK for development/testing with SQLite."); \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pip install psycopg2-binary || \
+			(echo "Warning: psycopg2-binary installation failed."; \
+			 echo "This is OK for development/testing with SQLite."); \
+		fi
 	@echo "==> Installing dev dependencies..."
-	cd services/account-service && .venv/bin/pip install -r requirements/dev.txt || true
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pip install -r requirements/dev.txt || true; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pip install -r requirements/dev.txt || true; \
+		fi
 	@echo "==> Installing test dependencies..."
-	cd services/account-service && .venv/bin/pip install -r requirements/test.txt || true
+	@cd services/account-service && \
+		if [ -f ".venv/bin/python" ]; then \
+			.venv/bin/python -m pip install -r requirements/test.txt || true; \
+		elif [ -f ".venv/Scripts/python.exe" ]; then \
+			.venv/Scripts/python.exe -m pip install -r requirements/test.txt || true; \
+		fi
 	@echo "==> Account Service dependencies installed!"
 
 install-swagger-dev: ## Install swagger service development dependencies

@@ -4,7 +4,7 @@ User model for authentication and account management
 
 from datetime import datetime
 
-from sqlalchemy import Index
+from sqlalchemy import BigInteger, Index
 
 from app import db
 
@@ -14,57 +14,75 @@ class User(db.Model):  # type: ignore[name-defined]
 
     __tablename__ = "users"
 
-    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(BigInteger, primary_key=True, autoincrement=True)
+    first_name = db.Column(db.String(100), nullable=False)
+    last_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email_verified = db.Column(db.Boolean, default=False, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-
-    # User metadata
-    first_name = db.Column(db.String(100))
-    last_name = db.Column(db.String(100))
-    is_active = db.Column(db.Boolean, default=True, nullable=False)
-    is_verified = db.Column(db.Boolean, default=False, nullable=False)
-
+    role = db.Column(
+        db.String(20),
+        nullable=False,
+        default="public",
+        index=True
+    )  # ENUM: 'admin', 'public', 'government', 'staff'
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="pending",
+        index=True
+    )  # ENUM: 'active', 'inactive', 'suspended', 'pending'
+    country_code = db.Column(db.CHAR(3), nullable=False, index=True)
+    
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(
+    date_created = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    date_modified = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
-    last_login = db.Column(db.DateTime)
-
-    # Password reset
-    reset_token = db.Column(db.String(255))
-    reset_token_expires = db.Column(db.DateTime)
+    
+    # Additional fields
+    created_by = db.Column(BigInteger, db.ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    
+    # Password reset fields
+    reset_token = db.Column(db.String(255), nullable=True)
+    reset_token_expires = db.Column(db.DateTime, nullable=True)
 
     # Relationships
     refresh_tokens = db.relationship(
-        "RefreshToken", backref="user", lazy="dynamic", cascade="all, delete-orphan"
+        "RefreshToken", backref="user", lazy="dynamic", cascade="all, delete-orphan", foreign_keys="RefreshToken.user_id"
+    )
+    creator = db.relationship(
+        "User", remote_side=[user_id], backref="created_users"
     )
 
     # Indexes for common queries
     __table_args__ = (
-        Index("idx_user_email_active", "email", "is_active"),
-        Index("idx_user_username_active", "username", "is_active"),
+        Index("idx_user_email", "email"),
+        Index("idx_user_country", "country_code"),
+        Index("idx_user_role_status", "role", "status"),
     )
 
     def to_dict(self, include_sensitive=False):
         """Convert user to dictionary"""
         data = {
-            "id": self.id,
-            "email": self.email,
-            "username": self.username,
+            "user_id": self.user_id,
             "first_name": self.first_name,
             "last_name": self.last_name,
-            "is_active": self.is_active,
-            "is_verified": self.is_verified,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "last_login": self.last_login.isoformat() if self.last_login else None,
+            "email": self.email,
+            "email_verified": self.email_verified,
+            "role": self.role,
+            "status": self.status,
+            "country_code": self.country_code,
+            "date_created": self.date_created.isoformat() if self.date_created else None,
+            "date_modified": self.date_modified.isoformat() if self.date_modified else None,
+            "created_by": self.created_by,
         }
 
         if include_sensitive:
-            data["updated_at"] = self.updated_at.isoformat() if self.updated_at else None
+            data["notes"] = self.notes
 
         return data
 
     def __repr__(self):
-        return f"<User {self.username}>"
+        return f"<User {self.user_id}: {self.email}>"
