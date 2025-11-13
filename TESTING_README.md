@@ -57,31 +57,31 @@ make format
 
 **Unit Tests:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/unit/ -v -m unit
 ```
 
 **Integration Tests:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/integration/ -v -m integration
 ```
 
 **All Tests:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/ -v
 ```
 
 **With Coverage:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/ --cov=app --cov-report=html --cov-report=term
 ```
 
 **Test Specific File:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/unit/test_auth_service.py -v
 ```
 
@@ -125,7 +125,7 @@ npm test -- ServiceDiscovery.test.ts
 
 **Check Code:**
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # Black - code formatting
 black --check app/ tests/
@@ -145,7 +145,7 @@ bandit -r app/
 
 **Auto-fix:**
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # Format code
 black app/ tests/
@@ -209,10 +209,10 @@ After running tests with coverage:
 **Account Service:**
 ```bash
 # HTML report
-open services/account-service/htmlcov/index.html
+open services/auth-service/htmlcov/index.html
 
 # Terminal report
-cd services/account-service
+cd services/auth-service
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
@@ -268,10 +268,10 @@ Both services use multi-stage Dockerfiles:
 
 ```bash
 # Build test stage only
-docker build --target test -t account-service:test services/account-service/
+docker build --target test -t auth-service:test services/auth-service/
 
 # Build production stage (default)
-docker build -t account-service:latest services/account-service/
+docker build -t auth-service:latest services/auth-service/
 ```
 
 ## Pre-commit Hooks
@@ -320,7 +320,7 @@ name: Test and Quality
 on: [push, pull_request]
 
 jobs:
-  test-account-service:
+  test-auth-service:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -344,19 +344,19 @@ jobs:
     
     - name: Install dependencies
       run: |
-        cd services/account-service
+        cd services/auth-service
         pip install -r requirements/test.txt -r requirements/dev.txt
     
     - name: Run linting
       run: |
-        cd services/account-service
+        cd services/auth-service
         black --check app/ tests/
         flake8 app/ tests/
         mypy app/
     
     - name: Run tests
       run: |
-        cd services/account-service
+        cd services/auth-service
         pytest --cov=app --cov-fail-under=85
       env:
         DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_account_db
@@ -392,7 +392,7 @@ jobs:
 ### Account Service Structure
 
 ```
-services/account-service/tests/
+services/auth-service/tests/
 ├── conftest.py              # Pytest fixtures
 ├── unit/                    # Unit tests
 │   ├── test_auth_service.py
@@ -450,7 +450,7 @@ services/swagger-service/tests/
 **Import Errors:**
 ```bash
 # Ensure you're in the correct directory
-cd services/account-service
+cd services/auth-service
 export PYTHONPATH=$PWD
 pytest tests/
 ```

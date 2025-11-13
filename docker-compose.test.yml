@@ -19,9 +19,9 @@ services:
       retries: 5
   
   # Account service test stage
-  account-service-test:
+  auth-service-test:
     build:
-      context: ./services/account-service
+      context: ./services/auth-service
       target: test
     depends_on:
       test-postgres:
@@ -33,7 +33,7 @@ services:
       - JWT_ACCESS_TOKEN_EXPIRES=900
       - JWT_REFRESH_TOKEN_EXPIRES=2592000
     volumes:
-      - ./services/account-service:/app
+      - ./services/auth-service:/app
       - account-coverage:/app/htmlcov
     command: >
       sh -c "

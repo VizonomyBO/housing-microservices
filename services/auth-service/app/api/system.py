@@ -2,7 +2,7 @@
 System endpoints for health checks and API documentation
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
 
@@ -47,7 +47,7 @@ def health_check():
         jsonify(
             {
                 "status": "healthy" if db_status == "connected" else "degraded",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "service": current_app.config["APP_NAME"],
                 "version": current_app.config["APP_VERSION"],
                 "database": db_status,
@@ -73,7 +73,7 @@ def status():
             {
                 "service": current_app.config["APP_NAME"],
                 "version": current_app.config["APP_VERSION"],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "endpoints": {
                     "health": "/health",
                     "status": "/status",
@@ -149,19 +149,86 @@ def openapi_spec():
                                             "type": "string",
                                             "minLength": 3,
                                             "maxLength": 80,
+                                            "description": "Unique username",
                                         },
                                         "password": {"type": "string", "minLength": 8},
-                                        "first_name": {"type": "string"},
-                                        "last_name": {"type": "string"},
+                                        "first_name": {
+                                            "type": "string",
+                                            "description": "Optional first name",
+                                        },
+                                        "last_name": {
+                                            "type": "string",
+                                            "description": "Optional last name",
+                                        },
+                                        "country_code": {
+                                            "type": "string",
+                                            "pattern": "^[A-Z]{3}$",
+                                            "description": "ISO 3166-1 alpha-3 country code",
+                                            "default": "USA",
+                                        },
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["admin", "public", "government", "staff"],
+                                            "default": "public",
+                                        },
                                     },
                                 }
                             }
                         },
                     },
                     "responses": {
-                        "201": {"description": "User created successfully"},
-                        "400": {"description": "Invalid input"},
-                        "409": {"description": "User already exists"},
+                        "201": {
+                            "description": "User created successfully",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "message": {
+                                                "type": "string",
+                                                "example": "User registered successfully",
+                                            },
+                                            "user": {
+                                                "type": "object",
+                                                "description": "User object with created user details",
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "400": {
+                            "description": "Invalid input",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {
+                                                "type": "string",
+                                                "example": "Missing required field(s): email, username",
+                                            }
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "409": {
+                            "description": "User already exists",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {
+                                                "type": "string",
+                                                "example": "Email already registered",
+                                            }
+                                        },
+                                    }
+                                }
+                            },
+                        },
                     },
                 }
             },
@@ -180,7 +247,7 @@ def openapi_spec():
                                     "properties": {
                                         "login": {
                                             "type": "string",
-                                            "description": "Email or username",
+                                            "description": "Email address or username",
                                         },
                                         "password": {"type": "string"},
                                     },
@@ -189,8 +256,49 @@ def openapi_spec():
                         },
                     },
                     "responses": {
-                        "200": {"description": "Login successful"},
-                        "401": {"description": "Invalid credentials"},
+                        "200": {
+                            "description": "Login successful",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "message": {
+                                                "type": "string",
+                                                "example": "Login successful",
+                                            },
+                                            "access_token": {"type": "string"},
+                                            "refresh_token": {"type": "string"},
+                                            "token_type": {"type": "string", "example": "Bearer"},
+                                            "expires_in": {"type": "integer"},
+                                            "user": {"type": "object"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "401": {
+                            "description": "Authentication failed",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "Invalid credentials",
+                                                    "Account is pending activation. Please verify your email or contact support.",
+                                                    "Account has been suspended. Please contact support.",
+                                                    "Account is inactive. Please contact support.",
+                                                ],
+                                                "example": "Invalid credentials",
+                                            }
+                                        },
+                                    }
+                                }
+                            },
+                        },
                     },
                 }
             },

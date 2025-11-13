@@ -29,6 +29,8 @@ class Config:
 
     # Security
     SECRET_KEY = os.getenv("SECRET_KEY", os.urandom(32))
+    # Cookie security: Set to False in development when HTTPS is not available
+    COOKIE_SECURE = os.getenv("COOKIE_SECURE", "True").lower() == "true"
 
     # CORS
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")

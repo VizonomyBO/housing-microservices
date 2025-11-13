@@ -61,7 +61,7 @@ open http://localhost:3000/docs
 
 **Account Service (Python)**
 ```bash
-cd services/account-service
+cd services/auth-service
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -160,11 +160,11 @@ services:
       - microservices-network
     # Don't expose port in production - use only internal network
 
-  account-service:
+  auth-service:
     build:
-      context: ./services/account-service
+      context: ./services/auth-service
       dockerfile: Dockerfile
-    container_name: account-service
+    container_name: auth-service
     restart: unless-stopped
     depends_on:
       postgres:
@@ -203,13 +203,13 @@ services:
     container_name: swagger-service
     restart: unless-stopped
     depends_on:
-      account-service:
+      auth-service:
         condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=3000
       - LOG_LEVEL=info
-      - ACCOUNT_SERVICE_URL=http://account-service:5000
+      - ACCOUNT_SERVICE_URL=http://auth-service:5000
     ports:
       - "3000:3000"  # Expose to reverse proxy
     deploy:
@@ -445,25 +445,25 @@ spec:
 ### Account Service
 
 ```yaml
-# account-service-deployment.yaml
+# auth-service-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: account-service
+  name: auth-service
   namespace: microservices-platform
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: account-service
+      app: auth-service
   template:
     metadata:
       labels:
-        app: account-service
+        app: auth-service
     spec:
       containers:
-      - name: account-service
-        image: your-registry/account-service:latest
+      - name: auth-service
+        image: your-registry/auth-service:latest
         env:
         - name: DATABASE_URL
           valueFrom:
@@ -502,11 +502,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: account-service
+  name: auth-service
   namespace: microservices-platform
 spec:
   selector:
-    app: account-service
+    app: auth-service
   ports:
   - port: 5000
     targetPort: 5000
@@ -541,7 +541,7 @@ spec:
         - name: PORT
           value: "3000"
         - name: ACCOUNT_SERVICE_URL
-          value: "http://account-service:5000"
+          value: "http://auth-service:5000"
         ports:
         - containerPort: 3000
         livenessProbe:
@@ -585,7 +585,7 @@ spec:
 kubectl apply -f namespace.yaml
 kubectl apply -f secrets.yaml
 kubectl apply -f postgres-deployment.yaml
-kubectl apply -f account-service-deployment.yaml
+kubectl apply -f auth-service-deployment.yaml
 kubectl apply -f swagger-service-deployment.yaml
 
 # Check status
@@ -593,7 +593,7 @@ kubectl get pods -n microservices-platform
 kubectl get services -n microservices-platform
 
 # View logs
-kubectl logs -n microservices-platform -l app=account-service
+kubectl logs -n microservices-platform -l app=auth-service
 kubectl logs -n microservices-platform -l app=swagger-service
 ```
 
@@ -650,7 +650,7 @@ NODE_ENV=production
 PORT=3000
 
 # Services
-ACCOUNT_SERVICE_URL=http://account-service:5000
+ACCOUNT_SERVICE_URL=http://auth-service:5000
 
 # Security
 CORS_ORIGINS=https://yourdomain.com
@@ -765,7 +765,7 @@ See separate logging setup guide.
 docker-compose logs
 
 # Check individual service
-docker-compose logs account-service
+docker-compose logs auth-service
 
 # Restart services
 docker-compose restart
@@ -777,7 +777,7 @@ docker-compose restart
 docker-compose exec postgres psql -U account_user -d account_db
 
 # Check connectivity
-docker-compose exec account-service nc -zv postgres 5432
+docker-compose exec auth-service nc -zv postgres 5432
 ```
 
 **Port conflicts**

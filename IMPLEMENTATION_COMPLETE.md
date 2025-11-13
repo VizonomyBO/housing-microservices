@@ -36,7 +36,7 @@
 
 #### Python Source Files (12)
 ```
-services/account-service/
+services/auth-service/
 ├── app/__init__.py
 ├── app/config.py
 ├── app/models/__init__.py
@@ -53,7 +53,7 @@ services/account-service/
 
 #### Python API Endpoints (3)
 ```
-services/account-service/app/api/
+services/auth-service/app/api/
 ├── __init__.py
 ├── auth.py
 └── system.py
@@ -91,9 +91,9 @@ Root:
 ├── .dockerignore
 
 Services:
-├── services/account-service/Dockerfile
-├── services/account-service/requirements.txt
-├── services/account-service/.dockerignore
+├── services/auth-service/Dockerfile
+├── services/auth-service/requirements.txt
+├── services/auth-service/.dockerignore
 ├── services/swagger-service/Dockerfile
 ├── services/swagger-service/package.json
 ├── services/swagger-service/tsconfig.json

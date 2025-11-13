@@ -123,7 +123,7 @@ ia-project/
 │   └── test-api.sh                 ← API testing script
 │
 └── 🔧 Services
-    ├── account-service/            ← Flask authentication service
+    ├── auth-service/            ← Flask authentication service
     │   ├── app/                    ← Application code
     │   │   ├── __init__.py
     │   │   ├── config.py

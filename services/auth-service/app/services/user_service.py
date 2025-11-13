@@ -25,16 +25,20 @@ class UserService:
         password: str,
         first_name: str | None = None,
         last_name: str | None = None,
+        country_code: str = "USA",
+        role: str = "public",
     ) -> tuple[User, None] | tuple[None, str]:
         """
         Create a new user with validation.
 
         Args:
             email: User email address
-            username: User username
+            username: User username (for validation, not stored)
             password: User password (plain text)
             first_name: Optional first name
             last_name: Optional last name
+            country_code: ISO 3166-1 alpha-3 country code (default: "USA")
+            role: User role (default: "public")
 
         Returns:
             Tuple of (User object, None) on success or (None, error_message) on failure
@@ -59,20 +63,21 @@ class UserService:
         if User.query.filter_by(email=normalized_email).first():
             return None, "Email already registered"
 
-        # Check if username already exists
-        if User.query.filter_by(username=username).first():
+        # Check if username already exists (by checking email prefix)
+        if User.query.filter(User.email.like(f"{username}@%")).first():
             return None, "Username already taken"
 
         # Create user
         try:
             user = User(
                 email=normalized_email,
-                username=username,
                 password_hash=hash_password(password),
-                first_name=sanitize_string(first_name, 100) if first_name else None,
-                last_name=sanitize_string(last_name, 100) if last_name else None,
-                is_active=True,
-                is_verified=False,
+                first_name=sanitize_string(first_name, 100) if first_name else "User",
+                last_name=sanitize_string(last_name, 100) if last_name else "",
+                country_code=country_code,
+                role=role,
+                status="pending",
+                email_verified=False,
             )
 
             db.session.add(user)
@@ -86,26 +91,28 @@ class UserService:
     @staticmethod
     def get_user_by_id(user_id: int) -> User | None:
         """Get user by ID"""
-        result = User.query.filter_by(id=user_id, is_active=True).first()
+        result = User.query.filter_by(user_id=user_id, status="active").first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
     def get_user_by_email(email: str) -> User | None:
         """Get user by email"""
-        result = User.query.filter_by(email=email, is_active=True).first()
+        result = User.query.filter_by(email=email).first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
     def get_user_by_username(username: str) -> User | None:
-        """Get user by username"""
-        result = User.query.filter_by(username=username, is_active=True).first()
+        """Get user by username (searches by email prefix)"""
+        # Username is derived from email, so search by email prefix
+        result = User.query.filter(User.email.like(f"{username}@%")).first()
         return result  # type: ignore[no-any-return]
 
     @staticmethod
     def update_last_login(user: User) -> None:
         """Update user's last login timestamp"""
         try:
-            user.last_login = datetime.utcnow()
+            # Update via query to ensure it works across sessions
+            User.query.filter_by(user_id=user.user_id).update({"last_login": datetime.utcnow()})
             db.session.commit()
         except Exception:
             db.session.rollback()

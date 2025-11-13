@@ -82,7 +82,7 @@ graph LR
 ```
 microservices-platform/
 ├── services/
-│   ├── account-service/
+│   ├── auth-service/
 │   │   ├── app/
 │   │   │   ├── __init__.py
 │   │   │   ├── config.py
@@ -197,8 +197,8 @@ services:
       timeout: 10s
       retries: 3
 
-  account-service:
-    build: ./services/account-service
+  auth-service:
+    build: ./services/auth-service
     ports:
       - "5000:5000"
     depends_on:
@@ -217,7 +217,7 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - account-service
+      - auth-service
     environment:
       - NODE_ENV=production
       - PORT=3000

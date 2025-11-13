@@ -80,7 +80,7 @@ POSTGRES_PASSWORD=your-secure-password
 JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
 
 # Service URLs
-ACCOUNT_SERVICE_URL=http://account-service:5000
+ACCOUNT_SERVICE_URL=http://auth-service:5000
 ```
 
 ### 3. Start All Services
@@ -206,7 +206,7 @@ curl http://localhost:3000/api/status
 ### Local Development - Account Service
 
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # Create virtual environment
 python -m venv venv
@@ -248,7 +248,7 @@ npm start
 ```
 ia-project/
 ├── services/
-│   ├── account-service/          # Flask authentication service
+│   ├── auth-service/          # Flask authentication service
 │   │   ├── app/
 │   │   │   ├── __init__.py       # Application factory
 │   │   │   ├── config.py         # Configuration
@@ -315,7 +315,7 @@ docker-compose up -d
 docker-compose logs -f
 
 # View logs for specific service
-docker-compose logs -f account-service
+docker-compose logs -f auth-service
 docker-compose logs -f swagger-service
 
 # Stop all services
@@ -353,7 +353,7 @@ curl http://localhost:3000/health/metrics/Account%20Service
 docker-compose logs -f
 
 # Account service only
-docker-compose logs -f account-service
+docker-compose logs -f auth-service
 
 # Swagger service only
 docker-compose logs -f swagger-service

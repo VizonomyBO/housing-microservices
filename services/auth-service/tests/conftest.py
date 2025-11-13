@@ -24,6 +24,7 @@ class TestConfig:
     SECRET_KEY = "test-secret"
     CORS_ORIGINS = ["*"]
     RATELIMIT_ENABLED = False
+    COOKIE_SECURE = False  # Disable secure cookies for testing (no HTTPS)
 
 
 @pytest.fixture(scope="session")
@@ -62,12 +63,12 @@ def sample_user(db_session):
     """Create a sample user for testing"""
     user = User(
         email="test@example.com",
-        username="testuser",
         password_hash=hash_password("TestPass123!"),
         first_name="Test",
         last_name="User",
-        is_active=True,
-        is_verified=False,
+        status="active",
+        email_verified=False,
+        country_code="USA",
     )
     db_session.add(user)
     db_session.commit()
@@ -79,12 +80,12 @@ def verified_user(db_session):
     """Create a verified user for testing"""
     user = User(
         email="verified@example.com",
-        username="verifieduser",
         password_hash=hash_password("VerifiedPass123!"),
         first_name="Verified",
         last_name="User",
-        is_active=True,
-        is_verified=True,
+        status="active",
+        email_verified=True,
+        country_code="USA",
     )
     db_session.add(user)
     db_session.commit()
@@ -96,12 +97,12 @@ def inactive_user(db_session):
     """Create an inactive user for testing"""
     user = User(
         email="inactive@example.com",
-        username="inactiveuser",
         password_hash=hash_password("InactivePass123!"),
         first_name="Inactive",
         last_name="User",
-        is_active=False,
-        is_verified=False,
+        status="inactive",
+        email_verified=False,
+        country_code="USA",
     )
     db_session.add(user)
     db_session.commit()

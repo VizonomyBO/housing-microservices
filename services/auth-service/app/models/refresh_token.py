@@ -4,6 +4,8 @@ Refresh Token model for JWT token rotation
 
 from datetime import datetime
 
+from sqlalchemy import BigInteger
+
 from app import db
 
 
@@ -13,7 +15,11 @@ class RefreshToken(db.Model):  # type: ignore[name-defined]
     __tablename__ = "refresh_tokens"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(
+        BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
     token = db.Column(db.String(500), unique=True, nullable=False, index=True)
 
     # Token metadata

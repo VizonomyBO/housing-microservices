@@ -37,7 +37,7 @@ All items from the `TESTING_AND_LINTING_PLAN.md` have been successfully implemen
 
 #### Files Created
 ```
-services/account-service/
+services/auth-service/
 ├── requirements/
 │   ├── base.txt
 │   ├── dev.txt
@@ -173,7 +173,7 @@ Added 30+ new make commands:
 
 ```bash
 # Account Service
-cd services/account-service
+cd services/auth-service
 pip install -r requirements/dev.txt -r requirements/test.txt
 
 # Swagger Service
@@ -220,7 +220,7 @@ pre-commit install
 
 **Account Service:**
 ```bash
-cd services/account-service
+cd services/auth-service
 pytest tests/ --cov=app --cov-report=html
 open htmlcov/index.html
 ```

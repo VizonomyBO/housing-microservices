@@ -6,7 +6,7 @@ Before running any tests or linting, you must install dependencies:
 
 ### Account Service (Python)
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # Create virtual environment
 python3 -m venv .venv
@@ -35,7 +35,7 @@ make install-swagger-dev
 
 **Note:** Always activate the virtual environment before running Python commands:
 ```bash
-cd services/account-service
+cd services/auth-service
 source .venv/bin/activate
 ```
 
@@ -62,7 +62,7 @@ make quality               # All quality checks
 ### Coverage Reports
 ```bash
 # Account Service
-open services/account-service/htmlcov/index.html
+open services/auth-service/htmlcov/index.html
 
 # Swagger Service
 open services/swagger-service/coverage/lcov-report/index.html
@@ -78,7 +78,7 @@ make clean-all             # Remove everything
 
 ### Account Service
 ```
-services/account-service/tests/
+services/auth-service/tests/
 ├── conftest.py                     # Fixtures
 ├── unit/
 │   ├── test_auth_service.py       # 15+ tests
@@ -119,10 +119,10 @@ services/swagger-service/tests/
 
 ```bash
 # Build test image
-docker build --target test -t service:test services/account-service/
+docker build --target test -t service:test services/auth-service/
 
 # Build production image
-docker build --target production -t service:prod services/account-service/
+docker build --target production -t service:prod services/auth-service/
 
 # Run tests in Docker
 docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
@@ -132,7 +132,7 @@ docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
 
 ### Account Service (Python)
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # All tests
 pytest tests/ -v
@@ -177,7 +177,7 @@ npm run test:verbose
 
 ### Account Service
 ```bash
-cd services/account-service
+cd services/auth-service
 
 # Check
 black --check app/ tests/
@@ -262,7 +262,7 @@ make format
 ```bash
 # Python
 export PYTHONPATH=$PWD
-cd services/account-service
+cd services/auth-service
 
 # Node
 cd services/swagger-service
@@ -329,7 +329,7 @@ describe('FeatureName', () => {
   
 - name: Check coverage
   run: |
-    cd services/account-service
+    cd services/auth-service
     pytest --cov=app --cov-fail-under=85
 ```
 

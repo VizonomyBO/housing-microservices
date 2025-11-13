@@ -29,7 +29,7 @@ class TestAuthenticateUser:
     def test_authenticate_user_with_username_success(self, app, sample_user):
         """Test successful authentication with username"""
         with app.app_context():
-            user, error = AuthService.authenticate_user("testuser", "TestPass123!")
+            user, error = AuthService.authenticate_user("test", "TestPass123!")
 
             assert user is not None
             assert error is None

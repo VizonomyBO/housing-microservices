@@ -6,7 +6,10 @@ import swaggerUi from 'swagger-ui-express';
 import { ServiceDiscovery } from '../services/ServiceDiscovery';
 import { SpecAggregator } from '../services/SpecAggregator';
 
-export function createDocsRoutes(_discovery: ServiceDiscovery, _aggregator: SpecAggregator): Router {
+export function createDocsRoutes(
+  _discovery: ServiceDiscovery,
+  _aggregator: SpecAggregator
+): Router {
   const router = Router();
 
   /**

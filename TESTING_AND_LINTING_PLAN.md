@@ -31,12 +31,12 @@ graph TB
 ```
 
 **Key Components to Test:**
-- [`AuthService`](services/account-service/app/services/auth_service.py:12) - JWT token management, authentication logic
-- [`UserService`](services/account-service/app/services/user_service.py) - User CRUD operations
-- [`User`](services/account-service/app/models/user.py) and [`RefreshToken`](services/account-service/app/models/refresh_token.py) models
-- API endpoints in [`auth.py`](services/account-service/app/api/auth.py:11)
-- Security utilities in [`security.py`](services/account-service/app/utils/security.py)
-- Validation logic in [`validators.py`](services/account-service/app/utils/validators.py)
+- [`AuthService`](services/auth-service/app/services/auth_service.py:12) - JWT token management, authentication logic
+- [`UserService`](services/auth-service/app/services/user_service.py) - User CRUD operations
+- [`User`](services/auth-service/app/models/user.py) and [`RefreshToken`](services/auth-service/app/models/refresh_token.py) models
+- API endpoints in [`auth.py`](services/auth-service/app/api/auth.py:11)
+- Security utilities in [`security.py`](services/auth-service/app/utils/security.py)
+- Validation logic in [`validators.py`](services/auth-service/app/utils/validators.py)
 
 ### Swagger Service Architecture
 ```mermaid
@@ -121,7 +121,7 @@ graph TB
 
 ### Account Service Structure
 ```
-services/account-service/
+services/auth-service/
 ├── app/                          # Application code
 │   ├── api/                      # API endpoints
 │   ├── models/                   # SQLAlchemy models  
@@ -369,9 +369,9 @@ services:
     tmpfs:
       - /var/lib/postgresql/data
     
-  account-service-test:
+  auth-service-test:
     build:
-      context: ./services/account-service
+      context: ./services/auth-service
       target: test-stage
     depends_on:
       - test-postgres
@@ -384,7 +384,7 @@ services:
       context: ./services/swagger-service  
       target: test-stage
     depends_on:
-      - account-service-test
+      - auth-service-test
 ```
 
 ## CI/CD Pipeline Integration
@@ -396,7 +396,7 @@ name: Test and Deploy
 on: [push, pull_request]
 
 jobs:
-  test-account-service:
+  test-auth-service:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -420,19 +420,19 @@ jobs:
     
     - name: Install dependencies
       run: |
-        cd services/account-service
+        cd services/auth-service
         pip install -r requirements/test.txt
     
     - name: Run linting
       run: |
-        cd services/account-service
+        cd services/auth-service
         black --check app/
         flake8 app/
         mypy app/
     
     - name: Run tests
       run: |
-        cd services/account-service
+        cd services/auth-service
         pytest --cov=app --cov-fail-under=85
       env:
         DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_account_db
@@ -473,13 +473,13 @@ repos:
     rev: 23.1.0
     hooks:
       - id: black
-        files: ^services/account-service/
+        files: ^services/auth-service/
         
   - repo: https://github.com/pycqa/flake8
     rev: 6.0.0
     hooks:
       - id: flake8
-        files: ^services/account-service/
+        files: ^services/auth-service/
         
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.0.0-alpha.4
@@ -502,27 +502,27 @@ repos:
 test: test-account test-swagger ## Run all tests
 
 test-account: ## Run account service tests
-	cd services/account-service && python -m pytest tests/ -v
+	cd services/auth-service && python -m pytest tests/ -v
 
 test-swagger: ## Run swagger service tests  
 	cd services/swagger-service && npm test
 
 test-coverage: ## Run tests with coverage
-	cd services/account-service && python -m pytest tests/ --cov=app --cov-report=html
+	cd services/auth-service && python -m pytest tests/ --cov=app --cov-report=html
 	cd services/swagger-service && npm run test:coverage
 
 # Linting commands  
 lint: lint-account lint-swagger ## Run all linting
 
 lint-account: ## Lint account service
-	cd services/account-service && black --check app/ && flake8 app/ && mypy app/
+	cd services/auth-service && black --check app/ && flake8 app/ && mypy app/
 
 lint-swagger: ## Lint swagger service
 	cd services/swagger-service && npm run lint && npm run type-check
 
 # Fix formatting
 format: ## Auto-format code
-	cd services/account-service && black app/
+	cd services/auth-service && black app/
 	cd services/swagger-service && npm run format
 
 # Docker testing

@@ -180,7 +180,7 @@ docker-compose down
 ```
 ia-project/
 ├── services/
-│   ├── account-service/          # Flask authentication service
+│   ├── auth-service/          # Flask authentication service
 │   │   ├── app/
 │   │   │   ├── __init__.py       # App factory
 │   │   │   ├── config.py         # Configuration

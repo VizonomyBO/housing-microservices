@@ -27,7 +27,7 @@ Thank you for your interest in contributing to the Microservices Platform!
 #### Account Service
 
 ```bash
-cd services/account-service
+cd services/auth-service
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -108,7 +108,7 @@ export async function fetchServiceSpec(service: ServiceConfig): Promise<OpenAPIS
 
 ```bash
 # Test Account Service
-cd services/account-service
+cd services/auth-service
 pytest
 
 # Test Swagger Service

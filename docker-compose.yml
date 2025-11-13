@@ -20,11 +20,11 @@ services:
     networks:
       - microservices-network
 
-  account-service:
+  auth-service:
     build: 
-      context: ./services/account-service
+      context: ./services/auth-service
       dockerfile: Dockerfile
-    container_name: account-service
+    container_name: auth-service
     ports:
       - "5001:5000"
     depends_on:
@@ -53,13 +53,13 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      account-service:
+      auth-service:
         condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=3000
       - LOG_LEVEL=info
-      - ACCOUNT_SERVICE_URL=http://account-service:5000
+      - ACCOUNT_SERVICE_URL=http://auth-service:5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

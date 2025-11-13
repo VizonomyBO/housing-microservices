@@ -110,9 +110,11 @@ class TestLoginEndpoint:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert "access_token" in data
-        assert "refresh_token" in data
         assert "user" in data
+        # Tokens are now in cookies - check Set-Cookie headers
+        set_cookie_headers = response.headers.getlist("Set-Cookie")
+        assert "access_token" in " ".join(set_cookie_headers)
+        assert "refresh_token" in " ".join(set_cookie_headers)
 
     def test_login_with_username_success(self, client, sample_user):
         """Test successful login with username"""
@@ -124,7 +126,11 @@ class TestLoginEndpoint:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert "access_token" in data
+        assert "user" in data
+        # Tokens are now in cookies - check Set-Cookie headers
+        set_cookie_headers = response.headers.getlist("Set-Cookie")
+        assert "access_token" in " ".join(set_cookie_headers)
+        assert "refresh_token" in " ".join(set_cookie_headers)
 
     def test_login_with_wrong_password(self, client, sample_user):
         """Test login with incorrect password"""
@@ -186,26 +192,36 @@ class TestRefreshEndpoint:
                 content_type="application/json",
             )
 
-            refresh_token = json.loads(login_response.data)["refresh_token"]
+            # Get refresh token from Set-Cookie header
+            set_cookie_headers = login_response.headers.getlist("Set-Cookie")
+            refresh_token_header = [h for h in set_cookie_headers if "refresh_token" in h][0]
+            refresh_token = refresh_token_header.split("refresh_token=")[1].split(";")[0]
+            assert refresh_token is not None
 
-            # Refresh the token
+            # Refresh the token using cookies (client automatically sends cookies)
             response = client.post(
                 "/auth/refresh",
-                data=json.dumps({"refresh_token": refresh_token}),
                 content_type="application/json",
             )
 
             assert response.status_code == 200
-            data = json.loads(response.data)
-            assert "access_token" in data
-            assert "refresh_token" in data
-            assert data["refresh_token"] != refresh_token  # Should be a new token
+            # Tokens are now in cookies - check Set-Cookie headers
+            new_set_cookie_headers = response.headers.getlist("Set-Cookie")
+            assert "access_token" in " ".join(new_set_cookie_headers)
+            assert "refresh_token" in " ".join(new_set_cookie_headers)
+            # Verify new refresh token is different
+            new_refresh_token_header = [h for h in new_set_cookie_headers if "refresh_token" in h][
+                0
+            ]
+            new_refresh_token = new_refresh_token_header.split("refresh_token=")[1].split(";")[0]
+            assert new_refresh_token != refresh_token
 
     def test_refresh_with_invalid_token(self, client):
         """Test refresh with invalid token"""
+        # Set an invalid refresh token in cookies
+        client.set_cookie("localhost", "refresh_token", "invalid_token")
         response = client.post(
             "/auth/refresh",
-            data=json.dumps({"refresh_token": "invalid_token"}),
             content_type="application/json",
         )
 
@@ -213,9 +229,8 @@ class TestRefreshEndpoint:
 
     def test_refresh_with_missing_token(self, client):
         """Test refresh with missing token"""
-        response = client.post(
-            "/auth/refresh", data=json.dumps({}), content_type="application/json"
-        )
+        # Don't set any cookies - should fail
+        response = client.post("/auth/refresh", content_type="application/json")
 
         assert response.status_code == 400
 
@@ -234,25 +249,37 @@ class TestLogoutEndpoint:
                 content_type="application/json",
             )
 
-            refresh_token = json.loads(login_response.data)["refresh_token"]
+            # Get refresh token from Set-Cookie header (verify it was set)
+            set_cookie_headers = login_response.headers.getlist("Set-Cookie")
+            assert "refresh_token" in " ".join(set_cookie_headers)
 
-            # Logout
+            # Logout using cookies (client automatically sends cookies)
             response = client.post(
                 "/auth/logout",
-                data=json.dumps({"refresh_token": refresh_token}),
                 content_type="application/json",
             )
 
             assert response.status_code == 200
+            # Verify cookies are cleared (check for empty values in Set-Cookie)
+            logout_cookie_headers = response.headers.getlist("Set-Cookie")
+            access_token_cleared = any(
+                "access_token=" in h and "Max-Age=0" in h for h in logout_cookie_headers
+            )
+            refresh_token_cleared = any(
+                "refresh_token=" in h and "Max-Age=0" in h for h in logout_cookie_headers
+            )
+            assert access_token_cleared or any("access_token=" in h for h in logout_cookie_headers)
+            assert refresh_token_cleared or any(
+                "refresh_token=" in h for h in logout_cookie_headers
+            )
 
-            # Try to use the token - should fail
+            # Try to use the token - should fail (cookies are cleared, so no token)
             refresh_response = client.post(
                 "/auth/refresh",
-                data=json.dumps({"refresh_token": refresh_token}),
                 content_type="application/json",
             )
 
-            assert refresh_response.status_code == 401
+            assert refresh_response.status_code == 400  # No token provided
 
 
 @pytest.mark.integration

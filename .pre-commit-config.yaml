@@ -4,24 +4,24 @@ repos:
     rev: 24.1.1
     hooks:
       - id: black
-        files: ^services/account-service/
-        exclude: ^services/account-service/(\.venv|venv|\.pytest_cache|htmlcov)/
+        files: ^services/auth-service/
+        exclude: ^services/auth-service/(\.venv|venv|\.pytest_cache|htmlcov)/
         
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
-        files: ^services/account-service/
-        exclude: ^services/account-service/(\.venv|venv|\.pytest_cache|htmlcov)/
+        files: ^services/auth-service/
+        exclude: ^services/auth-service/(\.venv|venv|\.pytest_cache|htmlcov)/
         args: ["--profile", "black"]
         
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0
     hooks:
       - id: flake8
-        files: ^services/account-service/
-        exclude: ^services/account-service/(\.venv|venv|\.pytest_cache|htmlcov)/
-        args: ["--config=services/account-service/.flake8"]
+        files: ^services/auth-service/
+        exclude: ^services/auth-service/(\.venv|venv|\.pytest_cache|htmlcov)/
+        args: ["--config=services/auth-service/.flake8"]
         
   # TypeScript/JavaScript formatting and linting
   - repo: https://github.com/pre-commit/mirrors-prettier
@@ -67,7 +67,7 @@ repos:
     rev: 1.7.6
     hooks:
       - id: bandit
-        files: ^services/account-service/app/
+        files: ^services/auth-service/app/
         args: ["-ll", "-i"]
         
   # Docker

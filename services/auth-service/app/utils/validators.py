@@ -22,9 +22,11 @@ def validate_email(email: str) -> tuple[bool, str]:
         return False, "Email is required"
 
     try:
-        # Validate and normalize email
-        valid = email_validator(email)
-        return True, valid.email
+        # Validate and normalize email (check_deliverability=False to avoid blocking on domain validation)
+        valid = email_validator(email, check_deliverability=False)
+        # Ensure email is fully lowercased for normalization
+        normalized_email = valid.email.lower()
+        return True, normalized_email
     except EmailNotValidError as e:
         return False, str(e)
 
