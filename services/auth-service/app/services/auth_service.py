@@ -5,6 +5,7 @@ Authentication service layer for JWT token management
 import logging
 import secrets
 from datetime import datetime
+from typing import cast
 
 import jwt
 from flask import current_app
@@ -23,6 +24,60 @@ class AuthService:
     """Service for authentication and token management"""
 
     @staticmethod
+    def _check_user_status(user: User, login: str) -> tuple[None, str] | None:
+        """
+        Check if user status allows authentication.
+
+        Args:
+            user: User object to check
+            login: Login identifier for logging
+
+        Returns:
+            Tuple of (None, error_message) if status is invalid, None if status is valid
+        """
+        status_messages = {
+            "pending": "Account is pending activation. Please verify your email or contact support.",
+            "suspended": "Account has been suspended. Please contact support.",
+            "inactive": "Account is inactive. Please contact support.",
+        }
+
+        if user.status in status_messages:
+            logger.warning(
+                f"Authentication failed: account {user.status}",
+                extra={"user_id": user.user_id, "login": login, "status": user.status},
+            )
+            return None, status_messages[user.status]
+
+        if user.status != "active":
+            logger.warning(
+                "Authentication failed: invalid account status",
+                extra={"user_id": user.user_id, "login": login, "status": user.status},
+            )
+            return None, f"Account status is {user.status}. Please contact support."
+
+        return None
+
+    @staticmethod
+    def _find_user_by_login(login: str) -> User | None:
+        """
+        Find user by email or username.
+
+        Args:
+            login: Email address or username
+
+        Returns:
+            User object if found, None otherwise
+        """
+        # Try email first
+        user = cast(User | None, User.query.filter(User.email == login).first())
+
+        # If not found by email, try username (email prefix)
+        if not user:
+            user = cast(User | None, User.query.filter(User.email.like(f"{login}@%")).first())
+
+        return user
+
+    @staticmethod
     def authenticate_user(login: str, password: str) -> tuple[User, None] | tuple[None, str]:
         """
         Authenticate user with email and password.
@@ -38,45 +93,16 @@ class AuthService:
             logger.info("Authentication attempt", extra={"login": login})
 
             # Find user by email or username
-            # Try email first
-            user = User.query.filter(User.email == login).first()
-            
-            # If not found by email, try username (email prefix)
-            if not user:
-                user = User.query.filter(User.email.like(f"{login}@%")).first()
+            user = AuthService._find_user_by_login(login)
 
             if not user:
                 logger.warning("Authentication failed: user not found", extra={"login": login})
                 return None, "Invalid credentials"
 
             # Check user status
-            if user.status == "pending":
-                logger.warning(
-                    "Authentication failed: account pending activation",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
-                )
-                return (
-                    None,
-                    "Account is pending activation. Please verify your email or contact support.",
-                )
-            if user.status == "suspended":
-                logger.warning(
-                    "Authentication failed: account suspended",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
-                )
-                return None, "Account has been suspended. Please contact support."
-            if user.status == "inactive":
-                logger.warning(
-                    "Authentication failed: account inactive",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
-                )
-                return None, "Account is inactive. Please contact support."
-            if user.status != "active":
-                logger.warning(
-                    "Authentication failed: invalid account status",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
-                )
-                return None, f"Account status is {user.status}. Please contact support."
+            status_error = AuthService._check_user_status(user, login)
+            if status_error:
+                return status_error
 
             # Verify password
             if not verify_password(user.password_hash, password):

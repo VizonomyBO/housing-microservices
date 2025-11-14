@@ -45,6 +45,34 @@ services:
     networks:
       - microservices-network
 
+  user-service:
+    build: 
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    ports:
+      - "5002:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://account_user:secure_password@postgres:5432/account_db
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
+      - JWT_ACCESS_TOKEN_EXPIRES_MINUTES=15
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - FLASK_ENV=production
+      - PORT=5001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - microservices-network
+
   swagger-service:
     build: 
       context: ./services/swagger-service
@@ -55,11 +83,14 @@ services:
     depends_on:
       auth-service:
         condition: service_healthy
+      user-service:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=3000
       - LOG_LEVEL=info
       - ACCOUNT_SERVICE_URL=http://auth-service:5000
+      - USER_SERVICE_URL=http://user-service:5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

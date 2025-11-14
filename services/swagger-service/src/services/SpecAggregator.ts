@@ -225,6 +225,7 @@ export class SpecAggregator {
 
     const servicePortMap: Record<string, number> = {
       'auth-service': 5001,
+      'user-service': 5002,
     };
 
     try {

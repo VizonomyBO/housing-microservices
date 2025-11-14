@@ -1,5 +1,5 @@
 """
-User model for authentication and account management
+User model for user profile management
 """
 
 from datetime import datetime
@@ -22,9 +22,8 @@ class User(db.Model):  # type: ignore[name-defined]
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     email_verified = db.Column(db.Boolean, default=False, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(
-        db.String(20), nullable=False, default="public", index=True
-    )  # ENUM: 'admin', 'public', 'government', 'staff'
+    # ENUM: 'admin', 'public', 'government', 'staff'
+    role = db.Column(db.String(20), nullable=False, default="public", index=True)
     status = db.Column(db.String(20), nullable=False, default="pending", index=True)
     country_code = db.Column(db.CHAR(3), nullable=False, default="USA", index=True)
 
@@ -44,13 +43,6 @@ class User(db.Model):  # type: ignore[name-defined]
     reset_token_expires = db.Column(db.DateTime, nullable=True)
     last_login = db.Column(db.DateTime, nullable=True)
 
-    refresh_tokens = db.relationship(
-        "RefreshToken",
-        backref="user",
-        lazy="dynamic",
-        cascade="all, delete-orphan",
-        foreign_keys="RefreshToken.user_id",
-    )
     creator = db.relationship("User", remote_side=[user_id], backref="created_users")
 
     __table_args__ = (
@@ -71,7 +63,9 @@ class User(db.Model):  # type: ignore[name-defined]
 
     @username.setter
     def username(self, value):
-        """No-op setter for username compatibility (username is derived from email)."""
+        """Setter for username (no-op since username is derived from email)"""
+        # Username is derived from email, so setting it has no effect
+        # This setter exists for compatibility with tests that try to set it
         pass
 
     @property
@@ -119,10 +113,10 @@ class User(db.Model):  # type: ignore[name-defined]
             "role": self.role,
             "status": self.status,
             "country_code": self.country_code,
-            "date_created": self.date_created.isoformat() if self.date_created else None,
-            "date_modified": self.date_modified.isoformat() if self.date_modified else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "date_created": (self.date_created.isoformat() if self.date_created else None),
+            "date_modified": (self.date_modified.isoformat() if self.date_modified else None),
+            "created_at": (self.created_at.isoformat() if self.created_at else None),
+            "updated_at": (self.updated_at.isoformat() if self.updated_at else None),
             "created_by": self.created_by,
         }
 

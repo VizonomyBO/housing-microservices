@@ -158,6 +158,8 @@ def login():
                 {
                     "message": "Login successful",
                     "user": user.to_dict(),
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
                     "expires_in": int(
                         current_app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()
                     ),
@@ -234,6 +236,8 @@ def refresh():
             jsonify(
                 {
                     "message": "Token refreshed successfully",
+                    "access_token": new_access_token,
+                    "refresh_token": new_refresh_token,
                     "expires_in": int(
                         current_app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()
                     ),
@@ -443,14 +447,27 @@ def reset_password():
 def verify_token():
     """
     Verify if an access token is valid.
-    Supports token from cookies, Authorization header, or JSON body.
+    Supports token from Authorization header, cookies, or JSON body.
     """
     try:
-        token = request.cookies.get("access_token")
-
+        token = None
+        
+        # Try Authorization header first
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+        
+        # Fallback to cookie
+        if not token:
+            token = request.cookies.get("access_token")
+        
+        # Fallback to request body
         if not token:
             data = request.get_json() if request.is_json else {}
-            token = data.get("token") if data else None
+            if data:
+                token = data.get("token") or data.get("access_token")
 
         if not token:
             logger.warning("Token verification attempt with no token")
@@ -473,6 +490,7 @@ def verify_token():
                     "user_id": payload.get("user_id"),
                     "username": payload.get("username"),
                     "email": payload.get("email"),
+                    "role": payload.get("role"),
                 }
             ),
             200,

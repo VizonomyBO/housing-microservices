@@ -15,17 +15,16 @@ export const services: ServiceConfig[] = [
     tags: ['authentication', 'users', 'security'],
     enabled: true,
   },
-  // Add more services here as they become available
-  // {
-  //   name: 'Product Service',
-  //   url: 'http://product-service:5001',
-  //   specEndpoint: '/openapi.json',
-  //   healthEndpoint: '/health',
-  //   description: 'Product catalog and inventory management',
-  //   version: '1.0.0',
-  //   tags: ['products', 'inventory'],
-  //   enabled: true,
-  // },
+  {
+    name: 'User Service',
+    url: config.userServiceUrl,
+    specEndpoint: '/openapi.json',
+    healthEndpoint: '/health',
+    description: 'User profile management service',
+    version: '1.0.0',
+    tags: ['users', 'profiles', 'management'],
+    enabled: true,
+  },
 ];
 
 export default services;
