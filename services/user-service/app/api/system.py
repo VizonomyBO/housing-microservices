@@ -61,7 +61,10 @@ def openapi_spec():
         "info": {
             "title": current_app.config.get("SERVICE_NAME", "User Service"),
             "version": current_app.config.get("SERVICE_VERSION", "1.0.0"),
-            "description": "User profile management microservice with JWT-based authentication and role-based access control.",
+            "description": (
+                "User profile management microservice with JWT-based authentication "
+                "and role-based access control."
+            ),
             "contact": {"name": "API Support", "email": "support@example.com"},
         },
         "servers": [{"url": "http://localhost:5001", "description": "Development server"}],
@@ -125,7 +128,10 @@ def openapi_spec():
                 "put": {
                     "tags": ["Users"],
                     "summary": "Update current user profile",
-                    "description": "Update the authenticated user's profile (first_name, last_name, country_code only)",
+                    "description": (
+                        "Update the authenticated user's profile "
+                        "(first_name, last_name, country_code only)"
+                    ),
                     "security": [{"BearerAuth": []}],
                     "requestBody": {
                         "required": True,
@@ -338,19 +344,30 @@ def openapi_spec():
                         {
                             "name": "per_page",
                             "in": "query",
-                            "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+                            "schema": {
+                                "type": "integer",
+                                "default": 20,
+                                "minimum": 1,
+                                "maximum": 100,
+                            },
                             "description": "Items per page",
                         },
                         {
                             "name": "role",
                             "in": "query",
-                            "schema": {"type": "string", "enum": ["admin", "public", "government", "staff"]},
+                            "schema": {
+                                "type": "string",
+                                "enum": ["admin", "public", "government", "staff"],
+                            },
                             "description": "Filter by role",
                         },
                         {
                             "name": "status",
                             "in": "query",
-                            "schema": {"type": "string", "enum": ["active", "inactive", "suspended", "pending"]},
+                            "schema": {
+                                "type": "string",
+                                "enum": ["active", "inactive", "suspended", "pending"],
+                            },
                             "description": "Filter by status",
                         },
                         {
@@ -400,7 +417,12 @@ def openapi_spec():
                         {
                             "name": "limit",
                             "in": "query",
-                            "schema": {"type": "integer", "default": 10, "minimum": 1, "maximum": 50},
+                            "schema": {
+                                "type": "integer",
+                                "default": 10,
+                                "minimum": 1,
+                                "maximum": 50,
+                            },
                             "description": "Maximum number of results",
                         },
                     ],

@@ -243,6 +243,37 @@ npm run build
 npm start
 ```
 
+### Pre-commit Hooks Setup
+
+To automatically run linting and formatting checks before each commit:
+
+```bash
+# Install pre-commit (if not already installed)
+pip install pre-commit
+
+# Or using Homebrew on macOS
+brew install pre-commit
+
+# Install the git hooks
+pre-commit install
+
+# (Optional) Run pre-commit on all files
+pre-commit run --all-files
+```
+
+The pre-commit hooks will automatically:
+- Format Python code with `black` and `isort`
+- Lint Python code with `flake8`
+- Format TypeScript/JavaScript code with `prettier`
+- Lint TypeScript/JavaScript code with `eslint`
+- Run security checks with `bandit`
+- Check for common issues (trailing whitespace, large files, etc.)
+
+To skip hooks for a specific commit (not recommended):
+```bash
+git commit --no-verify -m "your message"
+```
+
 ## 📁 Project Structure
 
 ```

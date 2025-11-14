@@ -3,7 +3,7 @@ User service for managing user profiles and data
 """
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, cast
 
 from sqlalchemy.exc import IntegrityError
 
@@ -26,12 +26,14 @@ class UserService:
     @staticmethod
     def get_user_by_id(user_id: int) -> Optional[User]:
         """Get user by ID"""
-        return User.query.filter_by(user_id=user_id).first()
+        result = User.query.filter_by(user_id=user_id).first()
+        return cast(Optional[User], result)
 
     @staticmethod
     def get_user_by_email(email: str) -> Optional[User]:
         """Get user by email"""
-        return User.query.filter_by(email=email).first()
+        result = User.query.filter_by(email=email).first()
+        return cast(Optional[User], result)
 
     @staticmethod
     def get_all_users(
@@ -174,7 +176,7 @@ class UserService:
         )
 
         logger.info("User search executed", extra={"query": query, "results": len(users)})
-        return users
+        return cast(List[User], users)
 
     @staticmethod
     def update_last_login(user_id: int) -> bool:

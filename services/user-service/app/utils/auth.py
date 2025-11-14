@@ -3,14 +3,19 @@ Authentication utilities for JWT token validation via auth-service
 """
 import logging
 from functools import wraps
+from typing import Optional, Dict, Any, Tuple, Callable, cast
 
 from flask import request, jsonify, current_app
 import requests
 
 logger = logging.getLogger(__name__)
 
+# Type definitions
+TokenPayload = Dict[str, Any]
+TokenResponse = Tuple[Optional[TokenPayload], Optional[str]]
 
-def get_token_from_header():
+
+def get_token_from_header() -> Optional[str]:
     """Extract JWT token from Authorization header, with fallback to cookies and request body"""
     # Try Authorization header first
     auth_header = request.headers.get("Authorization")
@@ -18,24 +23,26 @@ def get_token_from_header():
         parts = auth_header.split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
-    
+
     # Fallback to cookie
     token = request.cookies.get("access_token")
     if token:
         return token
-    
+
     # Fallback to request body
     if request.is_json:
         data = request.get_json()
         if data and "token" in data:
-            return data.get("token")
+            token_value = data.get("token")
+            return cast(Optional[str], token_value) if isinstance(token_value, str) else None
         if data and "access_token" in data:
-            return data.get("access_token")
-    
+            token_value = data.get("access_token")
+            return cast(Optional[str], token_value) if isinstance(token_value, str) else None
+
     return None
 
 
-def verify_token_with_auth_service(token):
+def verify_token_with_auth_service(token: str) -> TokenResponse:
     """Verify JWT token by calling auth-service"""
     try:
         auth_service_url = current_app.config.get("AUTH_SERVICE_URL", "http://localhost:5001")
@@ -77,11 +84,11 @@ def verify_token_with_auth_service(token):
         return None, f"Token verification error: {str(e)}"
 
 
-def token_required(f):
+def token_required(f: Callable) -> Callable:
     """Decorator to require valid JWT token"""
 
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> Any:
         token = get_token_from_header()
 
         if not token:
@@ -100,11 +107,11 @@ def token_required(f):
     return decorated
 
 
-def admin_required(f):
+def admin_required(f: Callable) -> Callable:
     """Decorator to require admin role"""
 
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> Any:
         token = get_token_from_header()
 
         if not token:

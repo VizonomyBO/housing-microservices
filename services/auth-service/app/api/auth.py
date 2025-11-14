@@ -451,18 +451,18 @@ def verify_token():
     """
     try:
         token = None
-        
+
         # Try Authorization header first
         auth_header = request.headers.get("Authorization")
         if auth_header:
             parts = auth_header.split()
             if len(parts) == 2 and parts[0].lower() == "bearer":
                 token = parts[1]
-        
+
         # Fallback to cookie
         if not token:
             token = request.cookies.get("access_token")
-        
+
         # Fallback to request body
         if not token:
             data = request.get_json() if request.is_json else {}
