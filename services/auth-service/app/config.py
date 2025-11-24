@@ -48,3 +48,5 @@ class Config:
     # Application
     APP_NAME = "Account Management Service"
     APP_VERSION = "1.0.0"
+    SERVICE_NAME = "auth-service"
+    SERVICE_VERSION = "1.0.0"

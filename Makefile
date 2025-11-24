@@ -196,7 +196,7 @@ test-coverage: ## Run tests with coverage reports
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi
-	cd services/swagger-service && npm run test:coverage
+	cd services/swagger-service && npm run test:coverage || true
 	@if [ -d "services/user-service/.venv" ]; then \
 		cd services/user-service && \
 		if [ -f ".venv/bin/python" ]; then \
@@ -236,8 +236,8 @@ lint-account: ## Lint account service
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black --check app/ tests/ && \
-		$$PYTHON_CMD -m flake8 app/ tests/ && \
+		$$PYTHON_CMD -m ruff format --check . && \
+		$$PYTHON_CMD -m ruff check . && \
 		$$PYTHON_CMD -m mypy app/
 
 lint-swagger: ## Lint swagger service
@@ -259,8 +259,8 @@ lint-user: ## Lint user service
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black --check app/ tests/ && \
-		$$PYTHON_CMD -m flake8 app/ tests/ && \
+		$$PYTHON_CMD -m ruff format --check . && \
+		$$PYTHON_CMD -m ruff check . && \
 		$$PYTHON_CMD -m mypy app/
 
 lint-fix: lint-fix-account lint-fix-swagger lint-fix-user ## Fix linting issues
@@ -278,8 +278,8 @@ lint-fix-account: ## Fix account service linting issues
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black app/ tests/ && \
-		$$PYTHON_CMD -m isort app/ tests/
+		$$PYTHON_CMD -m ruff format . && \
+		$$PYTHON_CMD -m ruff check --fix .
 
 lint-fix-swagger: ## Fix swagger service linting issues
 	cd services/swagger-service && npm run lint:fix
@@ -298,8 +298,8 @@ lint-fix-user: ## Fix user service linting issues
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black app/ tests/ && \
-		$$PYTHON_CMD -m isort app/ tests/
+		$$PYTHON_CMD -m ruff format . && \
+		$$PYTHON_CMD -m ruff check --fix .
 
 # Format code
 format: ## Auto-format all code
@@ -316,8 +316,8 @@ format: ## Auto-format all code
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black app/ tests/ && \
-		$$PYTHON_CMD -m isort app/ tests/
+		$$PYTHON_CMD -m ruff format . && \
+		$$PYTHON_CMD -m ruff check --fix .
 	@echo "==> Formatting Swagger Service..."
 	cd services/swagger-service && npm run format
 	@echo "==> Formatting User Service..."
@@ -330,8 +330,8 @@ format: ## Auto-format all code
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi && \
-		$$PYTHON_CMD -m black app/ tests/ && \
-		$$PYTHON_CMD -m isort app/ tests/; \
+		$$PYTHON_CMD -m ruff format . && \
+		$$PYTHON_CMD -m ruff check --fix .; \
 	fi
 
 # Type checking

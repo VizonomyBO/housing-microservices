@@ -36,6 +36,7 @@ services:
       - JWT_ACCESS_TOKEN_EXPIRES=900
       - JWT_REFRESH_TOKEN_EXPIRES=2592000
       - FLASK_ENV=production
+      - PORT=5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -65,7 +66,7 @@ services:
       - FLASK_ENV=production
       - PORT=5001
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

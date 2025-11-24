@@ -6,6 +6,12 @@ import { ServiceConfig } from '../types/service.types';
 import logger from '../utils/logger';
 import config from '../config/environment';
 
+/**
+ * Type for values that can contain schema references
+ * This is a recursive type that matches any JSON-serializable structure
+ */
+type SchemaReferenceValue = unknown;
+
 export class SpecAggregator {
   /**
    * Merge multiple OpenAPI specs into a single aggregated spec
@@ -70,46 +76,92 @@ export class SpecAggregator {
 
     const pathPrefix = `/${this.sanitizeServiceName(service.name)}`;
     const serviceExternalUrl = this.convertToExternalUrl(service.url);
+    const componentPrefix = this.sanitizeServiceName(service.name);
 
     for (const [path, pathItem] of Object.entries(spec.paths)) {
-      let finalPath = path;
-      if (aggregated.paths[path]) {
-        finalPath = `${pathPrefix}${path}`;
-      }
+      // Always prefix paths with service name to avoid conflicts
+      const finalPath = `${pathPrefix}${path}`;
 
       // Add service tag to all operations in this path
       const taggedPathItem = this.addServiceTagToPathItem(pathItem, service.name);
 
-      taggedPathItem.servers = [
+      // Update schema references in the path item to use prefixed names
+      const updatedPathItem = this.updateSchemaReferences(
+        taggedPathItem,
+        componentPrefix
+      ) as PathItem;
+
+      // Debug logging
+      if (path === '/v1/auth/register') {
+        const requestBody = taggedPathItem?.post?.requestBody;
+        const updatedRequestBody = updatedPathItem?.post?.requestBody;
+        const originalSchema =
+          requestBody &&
+          !('$ref' in requestBody) &&
+          requestBody.content?.['application/json']?.schema;
+        const updatedSchema =
+          updatedRequestBody &&
+          !('$ref' in updatedRequestBody) &&
+          updatedRequestBody.content?.['application/json']?.schema;
+        logger.info(`Updating schema refs for ${path}:`, {
+          componentPrefix,
+          original: JSON.stringify(originalSchema),
+          updated: JSON.stringify(updatedSchema),
+        });
+      }
+
+      updatedPathItem.servers = [
         {
           url: serviceExternalUrl,
           description: `${service.name} - ${service.description || 'API Server'}`,
         },
       ];
 
-      aggregated.paths[finalPath] = taggedPathItem;
+      aggregated.paths[finalPath] = updatedPathItem;
     }
 
     // Merge components
     if (spec.components) {
+      const componentPrefix = this.sanitizeServiceName(service.name);
+
       if (spec.components.schemas) {
+        // Prefix the schema keys and update internal references
+        const prefixedSchemas = this.prefixComponentKeys(spec.components.schemas, service.name);
+        // Update any internal schema references within the schemas themselves
+        const updatedSchemas = this.updateSchemaReferences(
+          prefixedSchemas,
+          componentPrefix
+        ) as typeof prefixedSchemas;
         aggregated.components!.schemas = {
           ...aggregated.components!.schemas,
-          ...this.prefixComponentKeys(spec.components.schemas, service.name),
+          ...updatedSchemas,
         };
       }
 
       if (spec.components.responses) {
+        const prefixedResponses = this.prefixComponentKeys(spec.components.responses, service.name);
+        const updatedResponses = this.updateSchemaReferences(
+          prefixedResponses,
+          componentPrefix
+        ) as typeof prefixedResponses;
         aggregated.components!.responses = {
           ...aggregated.components!.responses,
-          ...this.prefixComponentKeys(spec.components.responses, service.name),
+          ...updatedResponses,
         };
       }
 
       if (spec.components.parameters) {
+        const prefixedParameters = this.prefixComponentKeys(
+          spec.components.parameters,
+          service.name
+        );
+        const updatedParameters = this.updateSchemaReferences(
+          prefixedParameters,
+          componentPrefix
+        ) as typeof prefixedParameters;
         aggregated.components!.parameters = {
           ...aggregated.components!.parameters,
-          ...this.prefixComponentKeys(spec.components.parameters, service.name),
+          ...updatedParameters,
         };
       }
 
@@ -206,6 +258,44 @@ export class SpecAggregator {
     }
 
     return prefixed;
+  }
+
+  /**
+   * Update schema references in a path item to use prefixed component names
+   */
+  private updateSchemaReferences<T extends SchemaReferenceValue>(obj: T, prefix: string): T {
+    if (!obj) return obj;
+
+    // Handle string references
+    if (typeof obj === 'string' && obj.startsWith('#/components/schemas/')) {
+      const schemaName = obj.replace('#/components/schemas/', '');
+      return `#/components/schemas/${prefix}_${schemaName}` as T;
+    }
+
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.updateSchemaReferences(item, prefix)) as T;
+    }
+
+    // Handle objects
+    if (typeof obj === 'object' && obj !== null) {
+      const updated: Record<string, SchemaReferenceValue> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (
+          key === '$ref' &&
+          typeof value === 'string' &&
+          value.startsWith('#/components/schemas/')
+        ) {
+          const schemaName = value.replace('#/components/schemas/', '');
+          updated[key] = `#/components/schemas/${prefix}_${schemaName}`;
+        } else {
+          updated[key] = this.updateSchemaReferences(value as SchemaReferenceValue, prefix);
+        }
+      }
+      return updated as T;
+    }
+
+    return obj;
   }
 
   /**

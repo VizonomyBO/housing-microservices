@@ -1,501 +1,642 @@
 """
-Authentication API endpoints
+Authentication API endpoints - FastAPI version
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from flask import Blueprint, current_app, jsonify, make_response, request
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
-from app import limiter
+from app.dependencies import AuthenticatedUser, DatabaseSession
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
-from app.utils.security import generate_reset_token
+from app.utils.security import generate_reset_token, verify_password
 
-auth_bp = Blueprint("auth", __name__)
+router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
 logger = logging.getLogger(__name__)
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 ERROR_NO_DATA = "No data provided"
 ERROR_UNEXPECTED = "An unexpected error occurred"
 ERROR_UNKNOWN = "Unknown error"
+ERROR_AUTH_FAILED = "Authentication failed"
 
 
-@auth_bp.route("/register", methods=["POST"])
+# Pydantic models for request/response
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "username": "johndoe",
+                "password": "SecurePass123!",
+                "first_name": "John",
+                "last_name": "Doe",
+                "country_code": "USA",
+                "role": "public",
+            }
+        }
+    )
+
+    email: EmailStr = Field(..., description="User email address", examples=["user@example.com"])
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=80,
+        description="Username (3-80 characters)",
+        examples=["johndoe"],
+    )
+    password: str = Field(
+        ...,
+        min_length=8,
+        description="User password (minimum 8 characters)",
+        examples=["SecurePass123!"],
+    )
+    first_name: str | None = Field(None, description="User's first name", examples=["John"])
+    last_name: str | None = Field(None, description="User's last name", examples=["Doe"])
+    country_code: str = Field(
+        default="USA",
+        pattern="^[A-Z]{3}$",
+        description="ISO country code (3 uppercase letters)",
+        examples=["USA"],
+    )
+    role: str = Field(
+        default="public",
+        pattern="^(admin|public|government|staff)$",
+        description="User role",
+        examples=["public"],
+    )
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"login": "user@example.com", "password": "SecurePass123!"}}
+    )
+
+    login: str = Field(..., description="Email address or username", examples=["user@example.com"])
+    password: str = Field(..., description="User password", examples=["SecurePass123!"])
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str | None = Field(
+        default=None,
+        description="Refresh token (optional if using cookies)",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = Field(
+        default=None,
+        description="Refresh token to revoke (optional if using cookies)",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(
+        ..., description="Email address for password reset", examples=["user@example.com"]
+    )
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(
+        ..., description="Password reset token received via email", examples=["abc123def456"]
+    )
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="New password (minimum 8 characters)",
+        examples=["NewSecurePass123!"],
+    )
+
+
+class VerifyTokenRequest(BaseModel):
+    token: str | None = Field(
+        default=None,
+        description="Access token to verify (alternative to access_token field)",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+    access_token: str | None = Field(
+        default=None,
+        description="Access token to verify (alternative to token field)",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., description="Current password", examples=["OldPassword123!"])
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="New password (minimum 8 characters)",
+        examples=["NewSecurePass123!"],
+    )
+
+
+def _get_config(request: Request):
+    """Get config from app state"""
+    return request.app.state.config
+
+
+def _set_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    access_token_expires: datetime,
+    refresh_token_expires: datetime,
+    cookie_secure: bool,
+):
+    """Set authentication cookies on response"""
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        expires=access_token_expires,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        expires=refresh_token_expires,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_cookies(response: Response, cookie_secure: bool):
+    """Clear authentication cookies"""
+    # cookie_secure parameter kept for API consistency, not used for deletion
+    response.delete_cookie(key="access_token", path="/", samesite="lax")
+    response.delete_cookie(key="refresh_token", path="/", samesite="lax")
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5 per minute")
-def register():
+async def register(
+    request: Request, session: DatabaseSession, payload: RegisterRequest
+) -> JSONResponse:
     """
     Register a new user.
     """
     try:
-        data = request.get_json()
-
-        if not data:
-            logger.warning("Registration attempt with no data")
-            return jsonify({"error": ERROR_NO_DATA}), 400
-
-        email = data.get("email")
-        username = data.get("username")
-        password = data.get("password")
-        first_name = data.get("first_name")
-        last_name = data.get("last_name")
-        country_code = data.get("country_code", "USA")
-        role = data.get("role", "public")
-
-        missing_fields = []
-        if not email:
-            missing_fields.append("email")
-        if not username:
-            missing_fields.append("username")
-        if not password:
-            missing_fields.append("password")
-
-        if missing_fields:
-            error_message = f"Missing required field(s): {', '.join(missing_fields)}"
-            logger.warning(
-                "Registration attempt with missing required fields",
-                extra={
-                    "missing_fields": missing_fields,
-                    "email_provided": bool(email),
-                    "username_provided": bool(username),
-                    "password_provided": bool(password),
-                },
-            )
-            return jsonify({"error": error_message}), 400
-
-        logger.info("Attempting to create user", extra={"email": email, "username": username})
+        logger.info(
+            "Attempting to create user",
+            extra={"email": payload.email, "username": payload.username},
+        )
         user, error = UserService.create_user(
-            email=email,
-            username=username,
-            password=password,
-            first_name=first_name,
-            last_name=last_name,
-            country_code=country_code,
-            role=role,
+            session,
+            email=payload.email,
+            username=payload.username,
+            password=payload.password,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            country_code=payload.country_code,
+            role=payload.role,
         )
 
         if error:
-            status_code = 409 if "already" in error.lower() else 400
+            status_code = (
+                status.HTTP_409_CONFLICT
+                if "already" in error.lower()
+                else status.HTTP_400_BAD_REQUEST
+            )
             logger.warning(
                 "User creation failed",
                 extra={
-                    "email": email,
-                    "username": username,
+                    "email": payload.email,
+                    "username": payload.username,
                     "error": error,
                     "status_code": status_code,
                 },
             )
-            return jsonify({"error": error}), status_code
+            raise HTTPException(status_code=status_code, detail=error)
 
         if user is None:
             logger.error(
                 "User creation returned None without error",
-                extra={"email": email, "username": username},
+                extra={"email": payload.email, "username": payload.username},
             )
-            return jsonify({"error": "Failed to create user"}), 500
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user"
+            )
 
         logger.info(
             "User registered successfully",
             extra={
                 "user_id": user.id,
-                "email": email,
-                "username": username,
-                "country_code": country_code,
-                "role": role,
+                "email": payload.email,
+                "username": payload.username,
+                "country_code": payload.country_code,
+                "role": payload.role,
             },
         )
-        return jsonify({"message": "User registered successfully", "user": user.to_dict()}), 201
+        return JSONResponse(
+            {"message": "User registered successfully", "user": user.to_dict()},
+            status_code=status.HTTP_201_CREATED,
+        )
 
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Unexpected error during user registration")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/login", methods=["POST"])
+@router.post("/login")
 @limiter.limit("10 per minute")
-def login():
+async def login(
+    request: Request,
+    response: Response,
+    session: DatabaseSession,
+    payload: LoginRequest,
+) -> JSONResponse:
     """
     Authenticate user and return access and refresh tokens.
     """
     try:
-        data = request.get_json()
-
-        if not data:
-            logger.warning("Login attempt with no data")
-            return jsonify({"error": ERROR_NO_DATA}), 400
-
-        login_identifier = data.get("login")
-        password = data.get("password")
-
-        if not login_identifier or not password:
+        if not payload.login or not payload.password:
             logger.warning("Login attempt with missing credentials")
-            return jsonify({"error": "Login and password are required"}), 400
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Login and password are required"
+            )
 
         # Authenticate user
-        logger.info("Authentication attempt", extra={"login_identifier": login_identifier})
-        user, error = AuthService.authenticate_user(login_identifier, password)
+        logger.info("Authentication attempt", extra={"login_identifier": payload.login})
+        try:
+            user, error = AuthService.authenticate_user(session, payload.login, payload.password)
+        except Exception:
+            logger.exception(
+                "Database error during authentication",
+                extra={"login_identifier": payload.login},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_AUTH_FAILED
+            ) from None
 
         if error or user is None:
             logger.warning(
                 "Authentication failed",
                 extra={
-                    "login_identifier": login_identifier,
+                    "login_identifier": payload.login,
                     "error": error if error else ERROR_UNKNOWN,
                 },
             )
-            return jsonify({"error": error if error else "Authentication failed"}), 401
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error if error else ERROR_AUTH_FAILED,
+            )
 
-        access_token = AuthService.generate_access_token(user)
+        config = _get_config(request)
+        access_token = AuthService.generate_access_token(user, config)
 
         user_agent = request.headers.get("User-Agent")
-        ip_address = request.remote_addr
+        ip_address = request.client.host if request.client else None
 
-        refresh_token = AuthService.generate_refresh_token(user, user_agent, ip_address)
-
-        UserService.update_last_login(user)
-
-        response = make_response(
-            jsonify(
-                {
-                    "message": "Login successful",
-                    "user": user.to_dict(),
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                    "expires_in": int(
-                        current_app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()
-                    ),
-                }
-            )
+        refresh_token = AuthService.generate_refresh_token(
+            session, user, user_agent, ip_address, config
         )
 
-        access_token_expires = (
-            datetime.now(timezone.utc) + current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
-        )
-        refresh_token_expires = (
-            datetime.now(timezone.utc) + current_app.config["JWT_REFRESH_TOKEN_EXPIRES"]
-        )
+        UserService.update_last_login(session, user)
 
-        cookie_secure = current_app.config.get("COOKIE_SECURE", True)
+        access_token_expires = datetime.now(UTC) + config.JWT_ACCESS_TOKEN_EXPIRES
+        refresh_token_expires = datetime.now(UTC) + config.JWT_REFRESH_TOKEN_EXPIRES
 
-        response.set_cookie(
-            "access_token",
+        cookie_secure = config.COOKIE_SECURE
+
+        _set_cookies(
+            response,
             access_token,
-            expires=access_token_expires,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
-        )
-
-        response.set_cookie(
-            "refresh_token",
             refresh_token,
-            expires=refresh_token_expires,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
+            access_token_expires,
+            refresh_token_expires,
+            cookie_secure,
         )
 
         logger.info("Login successful", extra={"user_id": user.id, "username": user.username})
-        return response, 200
+        return JSONResponse(
+            {
+                "message": "Login successful",
+                "user": user.to_dict(),
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": int(config.JWT_ACCESS_TOKEN_EXPIRES.total_seconds()),
+            }
+        )
 
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Unexpected error during login")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/refresh", methods=["POST"])
+@router.post("/refresh")
 @limiter.limit("20 per minute")
-def refresh():
+async def refresh(
+    request: Request,
+    response: Response,
+    payload: RefreshTokenRequest,
+    session: DatabaseSession,
+    refresh_token_cookie: str | None = Cookie(None, alias="refresh_token"),
+) -> JSONResponse:
     """
     Refresh access token using a valid refresh token.
     Supports both cookie-based and JSON body-based refresh tokens.
     """
     try:
-        refresh_token = request.cookies.get("refresh_token")
-
-        if not refresh_token:
-            data = request.get_json() if request.is_json else {}
-            refresh_token = data.get("refresh_token") if data else None
+        refresh_token = refresh_token_cookie or payload.refresh_token
 
         if not refresh_token:
             logger.warning("Token refresh attempt with missing refresh token")
-            return jsonify({"error": "Refresh token is required"}), 400
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token is required"
+            )
 
         logger.info("Attempting to refresh token")
-        new_access_token, new_refresh_token, error = AuthService.refresh_access_token(refresh_token)
+        config = _get_config(request)
+        new_access_token, new_refresh_token, error = AuthService.refresh_access_token(
+            session, refresh_token, config
+        )
 
         if error or new_access_token is None or new_refresh_token is None:
             logger.warning(
                 "Token refresh failed", extra={"error": error if error else ERROR_UNKNOWN}
             )
-            return jsonify({"error": error if error else "Failed to refresh token"}), 401
-
-        # Create response
-        response = make_response(
-            jsonify(
-                {
-                    "message": "Token refreshed successfully",
-                    "access_token": new_access_token,
-                    "refresh_token": new_refresh_token,
-                    "expires_in": int(
-                        current_app.config["JWT_ACCESS_TOKEN_EXPIRES"].total_seconds()
-                    ),
-                }
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error if error else "Failed to refresh token",
             )
-        )
 
-        access_token_expires = (
-            datetime.now(timezone.utc) + current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
-        )
-        refresh_token_expires = (
-            datetime.now(timezone.utc) + current_app.config["JWT_REFRESH_TOKEN_EXPIRES"]
-        )
+        config = _get_config(request)
+        access_token_expires = datetime.now(UTC) + config.JWT_ACCESS_TOKEN_EXPIRES
+        refresh_token_expires = datetime.now(UTC) + config.JWT_REFRESH_TOKEN_EXPIRES
 
-        cookie_secure = current_app.config.get("COOKIE_SECURE", True)
+        cookie_secure = config.COOKIE_SECURE
 
-        response.set_cookie(
-            "access_token",
+        _set_cookies(
+            response,
             new_access_token,
-            expires=access_token_expires,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
-        )
-
-        response.set_cookie(
-            "refresh_token",
             new_refresh_token,
-            expires=refresh_token_expires,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
+            access_token_expires,
+            refresh_token_expires,
+            cookie_secure,
         )
 
         logger.info("Token refreshed successfully")
-        return response, 200
+        return JSONResponse(
+            {
+                "message": "Token refreshed successfully",
+                "access_token": new_access_token,
+                "refresh_token": new_refresh_token,
+                "expires_in": int(config.JWT_ACCESS_TOKEN_EXPIRES.total_seconds()),
+            }
+        )
 
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Unexpected error during token refresh")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/logout", methods=["POST"])
+@router.post("/logout")
 @limiter.limit("10 per minute")
-def logout():
+async def logout(
+    request: Request,
+    response: Response,
+    payload: LogoutRequest,
+    session: DatabaseSession,
+    refresh_token_cookie: str | None = Cookie(None, alias="refresh_token"),
+) -> JSONResponse:
     """
     Logout user by revoking refresh token.
     Supports both cookie-based and JSON body-based refresh tokens.
     """
     try:
-        refresh_token = request.cookies.get("refresh_token")
-
-        if not refresh_token:
-            data = request.get_json() if request.is_json else {}
-            refresh_token = data.get("refresh_token") if data else None
+        refresh_token = refresh_token_cookie or payload.refresh_token
 
         if not refresh_token:
             logger.warning("Logout attempt with missing refresh token")
-            return jsonify({"error": "Refresh token is required"}), 400
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token is required"
+            )
 
         logger.info("Revoking refresh token")
-        AuthService.revoke_refresh_token(refresh_token)
+        AuthService.revoke_refresh_token(session, refresh_token)
 
-        response = make_response(jsonify({"message": "Logout successful"}))
-
-        cookie_secure = current_app.config.get("COOKIE_SECURE", True)
-
-        response.set_cookie(
-            "access_token",
-            "",
-            expires=0,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
-        )
-
-        response.set_cookie(
-            "refresh_token",
-            "",
-            expires=0,
-            httponly=True,
-            secure=cookie_secure,
-            samesite="Lax",
-            path="/",
-        )
+        config = _get_config(request)
+        _clear_cookies(response, config.COOKIE_SECURE)
 
         logger.info("Logout successful")
-        return response, 200
+        return JSONResponse({"message": "Logout successful"})
 
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Unexpected error during logout")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/forgot-password", methods=["POST"])
+@router.post("/forgot-password")
 @limiter.limit("3 per hour")
-def forgot_password():
+async def forgot_password(
+    request: Request, payload: ForgotPasswordRequest, session: DatabaseSession
+) -> JSONResponse:
     """
     Request password reset token.
     """
     try:
-        data = request.get_json()
-
-        if not data:
-            logger.warning("Password reset request with no data")
-            return jsonify({"error": ERROR_NO_DATA}), 400
-
-        email = data.get("email")
-
-        if not email:
-            logger.warning("Password reset request with missing email")
-            return jsonify({"error": "Email is required"}), 400
-
-        # Find user by email
-        logger.info("Password reset request", extra={"email": email})
-        user = UserService.get_user_by_email(email)
+        logger.info("Password reset request", extra={"email": payload.email})
+        user = UserService.get_user_by_email(session, payload.email)
 
         if user:
             reset_token = generate_reset_token()
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at = datetime.now(UTC) + timedelta(hours=1)
 
-            if UserService.set_reset_token(user, reset_token, expires_at):
+            if UserService.set_reset_token(session, user, reset_token, expires_at):
                 logger.info(
-                    "Password reset token generated", extra={"user_id": user.id, "email": email}
+                    "Password reset token generated",
+                    extra={"user_id": user.id, "email": payload.email},
                 )
-                # TODO: Send email with reset token
-                # In production, you would send an email like:
-                # send_email(
-                #     to=user.email,
-                #     subject='Password Reset Request',
-                #     body=f'Your reset token is: {reset_token}\nExpires in 1 hour.'
-                # )
-
+                # Note: Email sending should be implemented in production
                 # For development, log the token (REMOVE IN PRODUCTION)
-                logger.debug(f"Password reset token for {email}: {reset_token}")
+                logger.debug(f"Password reset token for {payload.email}: {reset_token}")
             else:
                 logger.error(
-                    "Failed to set reset token", extra={"user_id": user.id, "email": email}
+                    "Failed to set reset token", extra={"user_id": user.id, "email": payload.email}
                 )
 
-        return jsonify({"message": "If the email exists, a password reset link has been sent"}), 200
+        return JSONResponse({"message": "If the email exists, a password reset link has been sent"})
 
     except Exception:
         logger.exception("Unexpected error during password reset request")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/reset-password", methods=["POST"])
+@router.post("/reset-password")
 @limiter.limit("5 per hour")
-def reset_password():
+async def reset_password(
+    request: Request, payload: ResetPasswordRequest, session: DatabaseSession
+) -> JSONResponse:
     """
     Reset password using a valid reset token.
     """
     try:
-        data = request.get_json()
-
-        if not data:
-            logger.warning("Password reset attempt with no data")
-            return jsonify({"error": ERROR_NO_DATA}), 400
-
-        token = data.get("token")
-        new_password = data.get("new_password")
-
-        if not token or not new_password:
-            logger.warning("Password reset attempt with missing token or password")
-            return jsonify({"error": "Token and new password are required"}), 400
-
         from app.models.user import User
 
         logger.info("Attempting password reset with token")
-        user = User.query.filter_by(reset_token=token).first()
+        user = session.query(User).filter_by(reset_token=payload.token).first()
 
         if not user:
             logger.warning("Password reset attempt with invalid token")
-            return jsonify({"error": "Invalid or expired reset token"}), 400
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
+            )
 
-        if not user.reset_token_expires or datetime.now(timezone.utc) > user.reset_token_expires:
+        if not user.reset_token_expires or datetime.now(UTC) > user.reset_token_expires:
             logger.warning("Password reset attempt with expired token", extra={"user_id": user.id})
-            UserService.clear_reset_token(user)
-            return jsonify({"error": "Reset token has expired"}), 400
+            UserService.clear_reset_token(session, user)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Reset token has expired"
+            )
 
-        success, error = UserService.update_password(user, new_password)
+        success, error = UserService.update_password(session, user, payload.new_password)
 
         if not success:
             logger.warning("Password update failed", extra={"user_id": user.id, "error": error})
-            return jsonify({"error": error}), 400
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
 
-        UserService.clear_reset_token(user)
+        UserService.clear_reset_token(session, user)
 
-        AuthService.revoke_all_user_tokens(user.id)
+        AuthService.revoke_all_user_tokens(session, user.id)
 
         logger.info("Password reset successful", extra={"user_id": user.id})
-        return (
-            jsonify({"message": "Password reset successful. Please login with your new password."}),
-            200,
+        return JSONResponse(
+            {"message": "Password reset successful. Please login with your new password."}
         )
 
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Unexpected error during password reset")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None
 
 
-@auth_bp.route("/verify-token", methods=["POST"])
-def verify_token():
+@router.get("/verify-token")
+@router.post("/verify-token")
+async def verify_token(
+    request: Request,
+) -> JSONResponse:
     """
     Verify if an access token is valid.
-    Supports token from Authorization header, cookies, or JSON body.
+
+    Uses middleware-validated user context from request.state.user.
+    Token can be provided via:
+    - Authorization: Bearer <token> header (preferred)
+    - access_token cookie
+    - JSON body with 'token' or 'access_token' field (POST only)
+
+    Returns user context if token is valid, or error if invalid/missing.
     """
-    try:
-        token = None
+    # Middleware already validated token and populated request.state.user if valid
+    user_context = getattr(request.state, "user", None)
 
-        # Try Authorization header first
-        auth_header = request.headers.get("Authorization")
-        if auth_header:
-            parts = auth_header.split()
-            if len(parts) == 2 and parts[0].lower() == "bearer":
-                token = parts[1]
-
-        # Fallback to cookie
-        if not token:
-            token = request.cookies.get("access_token")
-
-        # Fallback to request body
-        if not token:
-            data = request.get_json() if request.is_json else {}
-            if data:
-                token = data.get("token") or data.get("access_token")
-
-        if not token:
-            logger.warning("Token verification attempt with no token")
-            return jsonify({"error": "Token is required"}), 400
-
-        logger.info("Attempting to verify token")
-        payload, error = AuthService.verify_access_token(token)
-
-        if error or payload is None:
-            logger.warning(
-                "Token verification failed", extra={"error": error if error else ERROR_UNKNOWN}
-            )
-            return jsonify({"valid": False, "error": error if error else "Invalid token"}), 401
-
-        logger.info("Token verified successfully", extra={"user_id": payload.get("user_id")})
-        return (
-            jsonify(
-                {
-                    "valid": True,
-                    "user_id": payload.get("user_id"),
-                    "username": payload.get("username"),
-                    "email": payload.get("email"),
-                    "role": payload.get("role"),
-                }
-            ),
-            200,
+    if not user_context:
+        logger.warning("Token verification failed: no valid token provided")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing token",
         )
 
+    # Convert UserContext to dict format for response
+    from app.utils.token_validator import create_validation_response
+
+    payload_data = {
+        "user_id": user_context.user_id,
+        "username": user_context.username,
+        "email": user_context.email,
+        "role": user_context.roles[0] if user_context.roles else "public",
+        "roles": user_context.roles,
+        "country_code": user_context.country_code,
+    }
+
+    logger.info("Token verified successfully", extra={"user_id": user_context.user_id})
+    return JSONResponse(create_validation_response(payload_data))
+
+
+@router.post("/change-password")
+@limiter.limit("5 per hour")
+async def change_password(
+    request: Request,
+    payload: ChangePasswordRequest,
+    user: AuthenticatedUser,
+    session: DatabaseSession,
+) -> JSONResponse:
+    """
+    Change password for authenticated user.
+    Requires current password and new password.
+    """
+    try:
+        user_id = user.user_id
+
+        # Get user directly from database
+        from app.models.user import User
+
+        db_user = session.query(User).filter_by(user_id=user_id).first()
+        if not db_user:
+            logger.warning("User not found for password change", extra={"user_id": user_id})
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        # Verify current password
+        # Extract password_hash value (SQLAlchemy Column[str] returns str at runtime)
+        password_hash: str = db_user.password_hash  # type: ignore[assignment]
+        if not verify_password(password_hash, payload.current_password):
+            logger.warning(
+                "Password change failed: incorrect current password", extra={"user_id": user_id}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect"
+            )
+
+        # Update password
+        success, error = UserService.update_password(session, db_user, payload.new_password)
+        if not success:
+            logger.warning("Password update failed", extra={"user_id": user_id, "error": error})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
+
+        # Revoke all tokens to force re-login
+        AuthService.revoke_all_user_tokens(session, db_user.id)
+
+        logger.info("Password changed successfully", extra={"user_id": user_id})
+        return JSONResponse({"message": "Password changed successfully"})
+
+    except HTTPException:
+        raise
     except Exception:
-        logger.exception("Unexpected error during token verification")
-        return jsonify({"error": ERROR_UNEXPECTED}), 500
+        logger.exception("Unexpected error during password change")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_UNEXPECTED
+        ) from None

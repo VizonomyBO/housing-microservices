@@ -1,18 +1,20 @@
 """
 User service for managing user profiles and data
 """
+
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, List, cast
+from datetime import UTC, datetime
+from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from app import db
 from app.models.user import User
 from app.utils.validators import (
+    validate_country_code,
     validate_email_format,
     validate_name,
-    validate_country_code,
     validate_role,
     validate_status,
 )
@@ -24,27 +26,26 @@ class UserService:
     """Service for user management operations"""
 
     @staticmethod
-    def get_user_by_id(user_id: int) -> Optional[User]:
+    def get_user_by_id(session: Session, user_id: int) -> User | None:
         """Get user by ID"""
-        result = User.query.filter_by(user_id=user_id).first()
-        return cast(Optional[User], result)
+        return session.query(User).filter_by(user_id=user_id).first()
 
     @staticmethod
-    def get_user_by_email(email: str) -> Optional[User]:
+    def get_user_by_email(session: Session, email: str) -> User | None:
         """Get user by email"""
-        result = User.query.filter_by(email=email).first()
-        return cast(Optional[User], result)
+        return session.query(User).filter_by(email=email).first()
 
     @staticmethod
     def get_all_users(
+        session: Session,
         page: int = 1,
         per_page: int = 20,
-        role: Optional[str] = None,
-        status: Optional[str] = None,
-        country_code: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        role: str | None = None,
+        status: str | None = None,
+        country_code: str | None = None,
+    ) -> dict[str, Any]:
         """Get all users with pagination and filtering"""
-        query = User.query
+        query = session.query(User)
 
         if role:
             query = query.filter_by(role=role)
@@ -54,24 +55,29 @@ class UserService:
             query = query.filter_by(country_code=country_code)
 
         query = query.order_by(User.date_created.desc())
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Manual pagination
+        total = query.count()
+        offset = (page - 1) * per_page
+        items = query.offset(offset).limit(per_page).all()
+        pages = (total + per_page - 1) // per_page if total > 0 else 0
 
         return {
-            "users": [user.to_dict() for user in pagination.items],
-            "total": pagination.total,
-            "page": pagination.page,
-            "per_page": pagination.per_page,
-            "pages": pagination.pages,
-            "has_next": pagination.has_next,
-            "has_prev": pagination.has_prev,
+            "users": [user.to_dict() for user in items],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": pages,
+            "has_next": page < pages,
+            "has_prev": page > 1,
         }
 
     @staticmethod
     def update_user(
-        user_id: int, data: Dict[str, Any], updated_by: Optional[int] = None
-    ) -> tuple[Optional[User], Optional[str]]:
+        session: Session, user_id: int, data: dict[str, Any], updated_by: int | None = None
+    ) -> tuple[User | None, str | None]:
         """Update user information"""
-        user = UserService.get_user_by_id(user_id)
+        user = UserService.get_user_by_id(session, user_id)
         if not user:
             logger.warning("User not found for update", extra={"user_id": user_id})
             return None, "User not found"
@@ -94,7 +100,7 @@ class UserService:
                 )
                 return None, "Invalid email format"
 
-            existing_user = UserService.get_user_by_email(data["email"])
+            existing_user = UserService.get_user_by_email(session, data["email"])
             if existing_user and existing_user.user_id != user_id:
                 logger.warning(
                     "Email already in use", extra={"user_id": user_id, "email": data["email"]}
@@ -102,7 +108,7 @@ class UserService:
                 return None, "Email already in use"
 
             user.email = data["email"]
-            user.email_verified = False
+            user.email_verified = False  # type: ignore[assignment]
 
         if "country_code" in data:
             is_valid, message = validate_country_code(data["country_code"])
@@ -125,47 +131,48 @@ class UserService:
         if "notes" in data:
             user.notes = data["notes"]
 
-        user.date_modified = datetime.utcnow()
+        user.date_modified = datetime.now(UTC)  # type: ignore[assignment]
 
         try:
-            db.session.commit()
+            session.commit()
             logger.info(
                 "User updated successfully", extra={"user_id": user_id, "updated_by": updated_by}
             )
             return user, None
         except IntegrityError as e:
-            db.session.rollback()
+            session.rollback()
             logger.error(
                 "Database error during update", extra={"user_id": user_id, "error": str(e)}
             )
-            return None, f"Database error: {str(e)}"
+            return None, f"Database error: {e!s}"
 
     @staticmethod
-    def delete_user(user_id: int) -> tuple[bool, Optional[str]]:
+    def delete_user(session: Session, user_id: int) -> tuple[bool, str | None]:
         """Delete a user"""
-        user = UserService.get_user_by_id(user_id)
+        user = UserService.get_user_by_id(session, user_id)
         if not user:
             logger.warning("User not found for deletion", extra={"user_id": user_id})
             return False, "User not found"
 
         try:
-            db.session.delete(user)
-            db.session.commit()
+            session.delete(user)
+            session.commit()
             logger.info("User deleted", extra={"user_id": user_id})
             return True, None
         except Exception as e:
-            db.session.rollback()
+            session.rollback()
             logger.error("Error deleting user", extra={"user_id": user_id, "error": str(e)})
-            return False, f"Error deleting user: {str(e)}"
+            return False, f"Error deleting user: {e!s}"
 
     @staticmethod
-    def search_users(query: str, limit: int = 10) -> List[User]:
+    def search_users(session: Session, query: str, limit: int = 10) -> list[User]:
         """Search users by email, first name, or last name"""
         search_pattern = f"%{query}%"
 
         users = (
-            User.query.filter(
-                db.or_(
+            session.query(User)
+            .filter(
+                or_(
                     User.email.ilike(search_pattern),
                     User.first_name.ilike(search_pattern),
                     User.last_name.ilike(search_pattern),
@@ -176,22 +183,22 @@ class UserService:
         )
 
         logger.info("User search executed", extra={"query": query, "results": len(users)})
-        return cast(List[User], users)
+        return users
 
     @staticmethod
-    def update_last_login(user_id: int) -> bool:
+    def update_last_login(session: Session, user_id: int) -> bool:
         """Update user's last login timestamp"""
-        user = UserService.get_user_by_id(user_id)
+        user = UserService.get_user_by_id(session, user_id)
         if not user:
             return False
 
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(UTC)  # type: ignore[assignment]
 
         try:
-            db.session.commit()
+            session.commit()
             logger.debug("Last login updated", extra={"user_id": user_id})
             return True
         except Exception as e:
-            db.session.rollback()
+            session.rollback()
             logger.error("Failed to update last login", extra={"user_id": user_id, "error": str(e)})
             return False

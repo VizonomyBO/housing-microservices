@@ -1,13 +1,14 @@
 """
 Unit tests for validation utilities
 """
+
 import pytest
 
 from app.utils.validators import (
-    validate_email_format,
-    validate_password_strength,
-    validate_name,
     validate_country_code,
+    validate_email_format,
+    validate_name,
+    validate_password_strength,
     validate_role,
     validate_status,
 )

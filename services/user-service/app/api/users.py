@@ -1,124 +1,151 @@
 """
-User management API endpoints
+FastAPI user endpoints.
 """
+
+from __future__ import annotations
+
 import logging
+from typing import Any
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
+from app.dependencies import DatabaseSession
 from app.services.user_service import UserService
-from app.utils.auth import token_required, admin_required
+from app.utils.auth import UserContext, validate_token
 
-users_bp = Blueprint("users", __name__)
 logger = logging.getLogger(__name__)
 
 
-@users_bp.route("/me", methods=["GET"])
-@token_required
-def get_current_user(**kwargs):
-    """Get current user profile"""
-    current_user_id = kwargs.get("current_user_id")
+class UserSelfUpdate(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    country_code: str | None = Field(default=None, min_length=2, max_length=3)
 
-    logger.info("Get current user request", extra={"user_id": current_user_id})
-    user = UserService.get_user_by_id(current_user_id)
+
+class UserAdminUpdate(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    country_code: str | None = Field(default=None, min_length=2, max_length=3)
+    role: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+router = APIRouter(prefix="/v1/users", tags=["users"])
+
+
+async def _require_user_context(request: Request) -> UserContext:
+    """Validate token by calling auth-service and return user context."""
+    from app.config import Config
+
+    config = Config()
+    return await validate_token(request, config.AUTH_SERVICE_URL)
+
+
+def _require_admin(user: UserContext) -> None:
+    roles = user.roles or []
+    if "admin" not in [r.lower() for r in roles]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+
+@router.get("/me")
+async def get_current_user(request: Request, session: DatabaseSession) -> JSONResponse:
+    """Return the authenticated user's profile."""
+    user_ctx = await _require_user_context(request)
+    logger.info("Get current user request", extra={"user_id": user_ctx.user_id})
+
+    user = UserService.get_user_by_id(session, user_ctx.user_id)
     if not user:
-        logger.warning("User not found", extra={"user_id": current_user_id})
-        return jsonify({"error": "User not found"}), 404
+        logger.warning("User not found", extra={"user_id": user_ctx.user_id})
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    logger.info("User profile retrieved", extra={"user_id": current_user_id})
-    return jsonify({"user": user.to_dict()}), 200
+    return JSONResponse({"user": user.to_dict()})
 
 
-@users_bp.route("/me", methods=["PUT", "PATCH"])
-@token_required
-def update_current_user(**kwargs):
-    """Update current user profile"""
-    current_user_id = kwargs.get("current_user_id")
-    data = request.get_json()
-
-    if not data:
-        logger.warning("Update profile attempt with no data", extra={"user_id": current_user_id})
-        return jsonify({"error": "No data provided"}), 400
-
-    allowed_fields = {"first_name", "last_name", "country_code"}
-    update_data = {k: v for k, v in data.items() if k in allowed_fields}
+@router.put("/me")
+@router.patch("/me")
+async def update_current_user(
+    request: Request, payload: UserSelfUpdate, session: DatabaseSession
+) -> JSONResponse:
+    """Update the authenticated user's profile."""
+    user_ctx = await _require_user_context(request)
+    update_data = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
 
     if not update_data:
-        logger.warning(
-            "No valid fields to update", extra={"user_id": current_user_id, "data": data}
-        )
-        return jsonify({"error": "No valid fields to update"}), 400
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No valid fields to update")
 
     logger.info(
         "Updating user profile",
-        extra={"user_id": current_user_id, "fields": list(update_data.keys())},
+        extra={"user_id": user_ctx.user_id, "fields": list(update_data.keys())},
     )
-    user, error = UserService.update_user(current_user_id, update_data, current_user_id)
+    user, error = UserService.update_user(session, user_ctx.user_id, update_data, user_ctx.user_id)
+    if error or not user:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=error or "User not found")
 
-    if error:
-        logger.warning("Profile update failed", extra={"user_id": current_user_id, "error": error})
-        return jsonify({"error": error}), 400
-
-    logger.info("Profile updated successfully", extra={"user_id": current_user_id})
-    return jsonify({"message": "Profile updated successfully", "user": user.to_dict()}), 200
+    return JSONResponse(
+        {"message": "Profile updated successfully", "user": user.to_dict()}, status_code=200
+    )
 
 
-@users_bp.route("/<int:user_id>", methods=["GET"])
-@token_required
-def get_user(user_id, **kwargs):
-    """Get user by ID"""
-    current_user_id = kwargs.get("current_user_id")
-    current_user_role = kwargs.get("current_user_role")
+@router.get("/search")
+async def search_users(
+    request: Request,
+    session: DatabaseSession,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+) -> JSONResponse:
+    """Search users by email or name (admin only)."""
+    user_ctx = await _require_user_context(request)
+    _require_admin(user_ctx)
 
-    if current_user_role != "admin" and current_user_id != user_id:
-        logger.warning(
-            "Access denied to user profile",
-            extra={"current_user_id": current_user_id, "requested_user_id": user_id},
-        )
-        return jsonify({"error": "Access denied"}), 403
+    logger.info(
+        "User search request", extra={"admin_id": user_ctx.user_id, "query": q, "limit": limit}
+    )
+    users = UserService.search_users(session, q, limit)
+    return JSONResponse({"users": [user.to_dict() for user in users], "count": len(users)})
+
+
+@router.get("/{user_id}")
+async def get_user(user_id: int, request: Request, session: DatabaseSession) -> JSONResponse:
+    """Return a user profile by ID. Admins can view any user; others can only view themselves."""
+    user_ctx = await _require_user_context(request)
+    roles = user_ctx.roles or []
+    if "admin" not in [r.lower() for r in roles] and user_ctx.user_id != user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     logger.info(
         "Get user request",
-        extra={
-            "current_user_id": current_user_id,
-            "requested_user_id": user_id,
-            "role": current_user_role,
-        },
+        extra={"requested_user_id": user_id, "request_user_id": user_ctx.user_id},
     )
-    user = UserService.get_user_by_id(user_id)
+    user = UserService.get_user_by_id(session, user_id)
     if not user:
-        logger.warning("User not found", extra={"user_id": user_id})
-        return jsonify({"error": "User not found"}), 404
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    include_sensitive = current_user_role == "admin"
-    logger.info("User profile retrieved", extra={"user_id": user_id, "by_user_id": current_user_id})
-    return jsonify({"user": user.to_dict(include_sensitive=include_sensitive)}), 200
+    include_sensitive = "admin" in [r.lower() for r in roles]
+    return JSONResponse({"user": user.to_dict(include_sensitive=include_sensitive)})
 
 
-@users_bp.route("", methods=["GET"])
-@admin_required
-def list_users(**kwargs):
-    """List all users with pagination and filtering"""
-    current_user_id = kwargs.get("current_user_id")
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 20, type=int)
-    role = request.args.get("role")
-    status = request.args.get("status")
-    country_code = request.args.get("country_code")
-
-    if page < 1:
-        logger.warning("Invalid page parameter", extra={"page": page, "user_id": current_user_id})
-        return jsonify({"error": "Page must be greater than 0"}), 400
-
-    if per_page < 1 or per_page > 100:
-        logger.warning(
-            "Invalid per_page parameter", extra={"per_page": per_page, "user_id": current_user_id}
-        )
-        return jsonify({"error": "Per page must be between 1 and 100"}), 400
+@router.get("")
+async def list_users(
+    request: Request,
+    session: DatabaseSession,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    role: str | None = None,
+    status: str | None = None,
+    country_code: str | None = None,
+) -> JSONResponse:
+    """List users with pagination and filtering (admin only)."""
+    user_ctx = await _require_user_context(request)
+    _require_admin(user_ctx)
 
     logger.info(
         "List users request",
         extra={
-            "user_id": current_user_id,
+            "admin_id": user_ctx.user_id,
             "page": page,
             "per_page": per_page,
             "role": role,
@@ -126,118 +153,59 @@ def list_users(**kwargs):
         },
     )
     result = UserService.get_all_users(
-        page=page, per_page=per_page, role=role, status=status, country_code=country_code
+        session, page=page, per_page=per_page, role=role, status=status, country_code=country_code
     )
-
-    logger.info(
-        "Users list retrieved",
-        extra={"user_id": current_user_id, "total": result["total"], "page": page},
-    )
-    return jsonify(result), 200
+    return JSONResponse(result)
 
 
-@users_bp.route("/<int:user_id>", methods=["PUT", "PATCH"])
-@admin_required
-def update_user(user_id, **kwargs):
-    """Update user by ID"""
-    current_user_id = kwargs.get("current_user_id")
-    data = request.get_json()
+@router.put("/{user_id}")
+@router.patch("/{user_id}")
+async def update_user(
+    user_id: int, request: Request, payload: UserAdminUpdate, session: DatabaseSession
+) -> JSONResponse:
+    """Admin update endpoint."""
+    user_ctx = await _require_user_context(request)
+    _require_admin(user_ctx)
 
-    if not data:
-        logger.warning(
-            "Update user attempt with no data",
-            extra={"admin_id": current_user_id, "target_user_id": user_id},
-        )
-        return jsonify({"error": "No data provided"}), 400
-
-    allowed_fields = {"first_name", "last_name", "email", "country_code", "role", "status", "notes"}
-    update_data = {k: v for k, v in data.items() if k in allowed_fields}
-
+    update_data: dict[str, Any] = {
+        k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None
+    }
     if not update_data:
-        logger.warning(
-            "No valid fields to update",
-            extra={"admin_id": current_user_id, "target_user_id": user_id, "data": data},
-        )
-        return jsonify({"error": "No valid fields to update"}), 400
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No valid fields to update")
 
     logger.info(
         "Admin updating user",
         extra={
-            "admin_id": current_user_id,
+            "admin_id": user_ctx.user_id,
             "target_user_id": user_id,
-            "fields": list(update_data.keys()),
+            "fields": list(update_data),
         },
     )
-    user, error = UserService.update_user(user_id, update_data, current_user_id)
-
+    user, error = UserService.update_user(session, user_id, update_data, user_ctx.user_id)
     if error:
-        logger.warning(
-            "User update failed",
-            extra={"admin_id": current_user_id, "target_user_id": user_id, "error": error},
-        )
-        return jsonify({"error": error}), 400
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=error)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    logger.info(
-        "User updated successfully", extra={"admin_id": current_user_id, "target_user_id": user_id}
-    )
-    return (
-        jsonify(
-            {"message": "User updated successfully", "user": user.to_dict(include_sensitive=True)}
-        ),
-        200,
+    return JSONResponse(
+        {
+            "message": "User updated successfully",
+            "user": user.to_dict(include_sensitive=True),
+        }
     )
 
 
-@users_bp.route("/<int:user_id>", methods=["DELETE"])
-@admin_required
-def delete_user(user_id, **kwargs):
-    """Delete user by ID"""
-    current_user_id = kwargs.get("current_user_id")
+@router.delete("/{user_id}")
+async def delete_user(user_id: int, request: Request, session: DatabaseSession) -> JSONResponse:
+    """Delete a user (admin only)."""
+    user_ctx = await _require_user_context(request)
+    _require_admin(user_ctx)
 
-    if current_user_id == user_id:
-        logger.warning("Admin attempted to delete own account", extra={"admin_id": current_user_id})
-        return jsonify({"error": "Cannot delete your own account"}), 400
+    if user_ctx.user_id == user_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account")
 
-    logger.info(
-        "Admin deleting user", extra={"admin_id": current_user_id, "target_user_id": user_id}
-    )
-    success, error = UserService.delete_user(user_id)
-
+    success, error = UserService.delete_user(session, user_id)
     if not success:
-        logger.warning(
-            "User deletion failed",
-            extra={"admin_id": current_user_id, "target_user_id": user_id, "error": error},
-        )
-        return jsonify({"error": error}), 400
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=error or "Delete failed")
 
-    logger.info(
-        "User deleted successfully", extra={"admin_id": current_user_id, "deleted_user_id": user_id}
-    )
-    return jsonify({"message": "User deleted successfully"}), 200
-
-
-@users_bp.route("/search", methods=["GET"])
-@admin_required
-def search_users(**kwargs):
-    """Search users by email, first name, or last name"""
-    current_user_id = kwargs.get("current_user_id")
-    query = request.args.get("q")
-
-    if not query:
-        logger.warning("Search attempt without query", extra={"admin_id": current_user_id})
-        return jsonify({"error": "Search query is required"}), 400
-
-    limit = request.args.get("limit", 10, type=int)
-    if limit < 1 or limit > 50:
-        logger.warning("Invalid search limit", extra={"admin_id": current_user_id, "limit": limit})
-        return jsonify({"error": "Limit must be between 1 and 50"}), 400
-
-    logger.info(
-        "User search request", extra={"admin_id": current_user_id, "query": query, "limit": limit}
-    )
-    users = UserService.search_users(query, limit)
-
-    logger.info(
-        "Search completed", extra={"admin_id": current_user_id, "results_count": len(users)}
-    )
-    return jsonify({"users": [user.to_dict() for user in users], "count": len(users)}), 200
+    return JSONResponse({"message": "User deleted successfully"})

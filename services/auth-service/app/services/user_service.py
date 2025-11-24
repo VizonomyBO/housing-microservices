@@ -4,7 +4,8 @@ User management service layer
 
 from datetime import datetime
 
-from app import db
+from sqlalchemy.orm import Session
+
 from app.models.user import User
 from app.utils.security import hash_password
 from app.utils.validators import (
@@ -20,6 +21,7 @@ class UserService:
 
     @staticmethod
     def create_user(
+        session: Session,
         email: str,
         username: str,
         password: str,
@@ -60,11 +62,11 @@ class UserService:
             return None, error
 
         # Check if email already exists
-        if User.query.filter_by(email=normalized_email).first():
+        if session.query(User).filter_by(email=normalized_email).first():
             return None, "Email already registered"
 
         # Check if username already exists (by checking email prefix)
-        if User.query.filter(User.email.like(f"{username}@%")).first():
+        if session.query(User).filter(User.email.like(f"{username}@%")).first():
             return None, "Username already taken"
 
         # Create user
@@ -80,67 +82,69 @@ class UserService:
                 email_verified=False,
             )
 
-            db.session.add(user)
-            db.session.commit()
+            session.add(user)
+            session.commit()
 
             return user, None
         except Exception as e:
-            db.session.rollback()
-            return None, f"Failed to create user: {str(e)}"
+            session.rollback()
+            return None, f"Failed to create user: {e!s}"
 
     @staticmethod
-    def get_user_by_id(user_id: int) -> User | None:
+    def get_user_by_id(session: Session, user_id: int) -> User | None:
         """Get user by ID"""
-        result = User.query.filter_by(user_id=user_id, status="active").first()
-        return result  # type: ignore[no-any-return]
+        result = session.query(User).filter_by(user_id=user_id, status="active").first()
+        return result
 
     @staticmethod
-    def get_user_by_email(email: str) -> User | None:
+    def get_user_by_email(session: Session, email: str) -> User | None:
         """Get user by email"""
-        result = User.query.filter_by(email=email).first()
-        return result  # type: ignore[no-any-return]
+        result = session.query(User).filter_by(email=email).first()
+        return result
 
     @staticmethod
-    def get_user_by_username(username: str) -> User | None:
+    def get_user_by_username(session: Session, username: str) -> User | None:
         """Get user by username (searches by email prefix)"""
         # Username is derived from email, so search by email prefix
-        result = User.query.filter(User.email.like(f"{username}@%")).first()
-        return result  # type: ignore[no-any-return]
+        result = session.query(User).filter(User.email.like(f"{username}@%")).first()
+        return result
 
     @staticmethod
-    def update_last_login(user: User) -> None:
+    def update_last_login(session: Session, user: User) -> None:
         """Update user's last login timestamp"""
         try:
             # Update via query to ensure it works across sessions
-            User.query.filter_by(user_id=user.user_id).update({"last_login": datetime.utcnow()})
-            db.session.commit()
+            session.query(User).filter_by(user_id=user.user_id).update(
+                {"last_login": datetime.utcnow()}
+            )
+            session.commit()
         except Exception:
-            db.session.rollback()
+            session.rollback()
 
     @staticmethod
-    def set_reset_token(user: User, token: str, expires_at: datetime) -> bool:
+    def set_reset_token(session: Session, user: User, token: str, expires_at: datetime) -> bool:
         """Set password reset token for user"""
         try:
-            user.reset_token = token
-            user.reset_token_expires = expires_at
-            db.session.commit()
+            user.reset_token = token  # type: ignore[assignment]
+            user.reset_token_expires = expires_at  # type: ignore[assignment]
+            session.commit()
             return True
         except Exception:
-            db.session.rollback()
+            session.rollback()
             return False
 
     @staticmethod
-    def clear_reset_token(user: User) -> None:
+    def clear_reset_token(session: Session, user: User) -> None:
         """Clear password reset token"""
         try:
-            user.reset_token = None
-            user.reset_token_expires = None
-            db.session.commit()
+            user.reset_token = None  # type: ignore[assignment]
+            user.reset_token_expires = None  # type: ignore[assignment]
+            session.commit()
         except Exception:
-            db.session.rollback()
+            session.rollback()
 
     @staticmethod
-    def update_password(user: User, new_password: str) -> tuple[bool, str]:
+    def update_password(session: Session, user: User, new_password: str) -> tuple[bool, str]:
         """Update user password"""
         # Validate new password
         is_valid, error = validate_password(new_password)
@@ -148,9 +152,9 @@ class UserService:
             return False, error
 
         try:
-            user.password_hash = hash_password(new_password)
-            db.session.commit()
+            user.password_hash = hash_password(new_password)  # type: ignore[assignment]
+            session.commit()
             return True, ""
         except Exception as e:
-            db.session.rollback()
-            return False, f"Failed to update password: {str(e)}"
+            session.rollback()
+            return False, f"Failed to update password: {e!s}"

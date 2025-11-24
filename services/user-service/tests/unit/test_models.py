@@ -1,6 +1,7 @@
 """
 Unit tests for User model
 """
+
 import pytest
 
 from app.models.user import User
@@ -44,10 +45,9 @@ class TestUserModel:
         assert user_dict["role"] == sample_user.role
         assert "password_hash" not in user_dict
 
-    def test_user_to_dict_with_sensitive(self, sample_user):
+    def test_user_to_dict_with_sensitive(self, sample_user, db_session):
         """Test converting user to dictionary with sensitive fields"""
         sample_user.notes = "Test notes"
-        db_session = sample_user.query.session
         db_session.commit()
 
         user_dict = sample_user.to_dict(include_sensitive=True)

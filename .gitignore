@@ -88,3 +88,4 @@ dist/
 # Logs
 logs/
 *.log
+assistant-folder/

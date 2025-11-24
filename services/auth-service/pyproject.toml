@@ -1,30 +1,36 @@
-[tool.black]
+[tool.ruff]
 line-length = 100
-target-version = ['py311']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+target-version = "py311"
 
-[tool.isort]
-profile = "black"
-line_length = 100
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
-skip_gitignore = true
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID", "UP", "N", "B", "A", "C4", "DTZ", "T10", "ISC", "ICN", "PIE", "PT", "RET", "SIM", "ARG", "PTH", "PL", "RUF"]
+extend-select = ["F401", "F811", "TID252"]
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "PLR0913",  # Too many arguments
+    "PLR2004",  # Magic value used in comparison
+    "ISC001",  # Conflicts with formatter
+    "PLR0911",  # Too many return statements (acceptable for complex functions)
+    "PLR0915",  # Too many statements (acceptable for complex validation functions)
+    "PLW1508",  # Invalid type for env var default (int() and timedelta() are fine)
+    "DTZ003",  # datetime.utcnow() used (acceptable pattern)
+    "DTZ006",  # fromtimestamp without tz (acceptable in tests)
+    "N818",  # Exception name should end with Error (style preference)
+    "RET504",  # Unnecessary assignment before return (minor style)
+    "PT003",  # scope='function' is implied (explicit is fine)
+    "ARG001",  # Unused function argument (common in pytest fixtures)
+    "ARG002",  # Unused method argument (common in pytest fixtures)
+    "ARG003",  # Unused class method argument (acceptable)
+    "RUF012",  # Mutable class attributes (acceptable for config classes)
+    "RUF015",  # Prefer next() over slice (minor style preference)
+    "B017",  # pytest.raises(Exception) (acceptable in tests)
+    "PT011",  # pytest.raises too broad (acceptable in tests)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.11"

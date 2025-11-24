@@ -4,32 +4,36 @@ Refresh Token model for JWT token rotation
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
 
-from app import db
+from app.database import Base
 
 
-class RefreshToken(db.Model):  # type: ignore[name-defined]
+class RefreshToken(Base):  # type: ignore[misc,valid-type]
     """Refresh token model for secure token rotation"""
 
     __tablename__ = "refresh_tokens"
 
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(
-        BigInteger().with_variant(db.Integer, "sqlite"),
-        db.ForeignKey("users.user_id", ondelete="CASCADE"),
+    id = Column(Integer, primary_key=True)
+    user_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    token = db.Column(db.String(500), unique=True, nullable=False, index=True)
+    token = Column(String(500), unique=True, nullable=False, index=True)
 
     # Token metadata
-    is_revoked = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    expires_at = db.Column(db.DateTime, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
 
     # Device/session tracking
-    user_agent = db.Column(db.String(500))
-    ip_address = db.Column(db.String(45))
+    user_agent = Column(String(500))
+    ip_address = Column(String(45))
+
+    # Relationship
+    user = relationship("User", back_populates="refresh_tokens")
 
     def is_expired(self):
         """Check if token is expired"""
@@ -41,7 +45,7 @@ class RefreshToken(db.Model):  # type: ignore[name-defined]
 
     def revoke(self):
         """Revoke the token"""
-        self.is_revoked = True
+        self.is_revoked = True  # type: ignore[assignment]
 
     def to_dict(self):
         """Convert token to dictionary"""

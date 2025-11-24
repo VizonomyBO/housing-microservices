@@ -1,26 +1,26 @@
-.PHONY: help install install-dev run test test-unit test-integration coverage lint format clean
+.PHONY: help install install-dev test test-unit test-integration test-coverage lint format format-check type-check clean run
 
 help:
 	@echo "Available commands:"
-	@echo "  make install          Install production dependencies"
-	@echo "  make install-dev      Install development dependencies"
-	@echo "  make run              Run the service"
-	@echo "  make test             Run all tests"
-	@echo "  make test-unit        Run unit tests only"
-	@echo "  make test-integration Run integration tests only"
-	@echo "  make coverage         Run tests with coverage report"
-	@echo "  make lint             Run linters"
-	@echo "  make format           Format code with black"
-	@echo "  make clean            Clean temporary files"
+	@echo "  install          Install production dependencies"
+	@echo "  install-dev      Install development dependencies"
+	@echo "  test             Run all tests"
+	@echo "  test-unit        Run unit tests only"
+	@echo "  test-integration Run integration tests only"
+	@echo "  test-coverage    Run tests with coverage report"
+	@echo "  lint             Run linting checks (ruff)"
+	@echo "  format           Format code with ruff"
+	@echo "  format-check     Check code formatting without modifying"
+	@echo "  type-check       Run type checking with mypy"
+	@echo "  clean            Clean up temporary files and caches"
+	@echo "  run              Run the development server"
 
 install:
 	pip install -r requirements.txt
 
 install-dev:
 	pip install -r requirements/dev.txt
-
-run:
-	python run.py
+	pip install -r requirements/test.txt
 
 test:
 	pytest
@@ -31,24 +31,37 @@ test-unit:
 test-integration:
 	pytest -m integration
 
-coverage:
-	pytest --cov=app --cov-report=html --cov-report=term-missing
+test-coverage:
+	pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml
 
 lint:
-	flake8 app/ tests/
-	mypy app/
+	python -m ruff check .
 
 format:
-	black app/ tests/
+	python -m ruff format .
+	python -m ruff check --fix .
+
+format-check:
+	python -m ruff format --check .
+	python -m ruff check .
+
+type-check:
+	mypy app
 
 clean:
-	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
-	rm -rf .pytest_cache
-	rm -rf htmlcov
-	rm -rf .coverage
-	rm -rf coverage.xml
-	rm -rf dist
-	rm -rf build
-	rm -rf *.egg-info
+	find . -type f -name "*.pyo" -delete
+	find . -type f -name "*.coverage" -delete
+	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 
+run:
+	python run.py
+
+# Quality check - run all checks
+quality: format-check lint type-check
+	@echo "All quality checks passed!"

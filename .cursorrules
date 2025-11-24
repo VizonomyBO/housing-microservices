@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "python_mcp_search",
+      "description": "Use serper-search MCP for all web search actions.",
+      "triggers": ["search", "google", "lookup"],
+      "actions": [
+        {
+          "type": "run_mcp",
+          "tool": "serper-search"
+        }
+      ]
+    },
+    {
+      "id": "python_context7_best_practices",
+      "description": "Use context7 MCP for Python refactoring, explanations, and best practices.",
+      "triggers": ["explain python", "best practices", "refactor", "clean code"],
+      "actions": [
+        {
+          "type": "run_mcp",
+          "tool": "context7"
+        }
+      ]
+    },
+    {
+      "id": "factory_boy_testing_only",
+      "description": "Factory Boy must be used strictly for creating test fixtures (pytest).",
+      "triggers": ["factoryboy", "factory boy", "sqlalchemy factories", "fixtures"],
+      "actions": [
+        {
+          "type": "insert_text",
+          "content": "# Factory Boy is for TESTING ONLY — generating fixtures. Example with SQLAlchemy:\nimport factory\nfrom factory.alchemy import SQLAlchemyModelFactory\nfrom myapp.models import User\nfrom myapp.database import SessionLocal\n\n\nclass UserFactory(SQLAlchemyModelFactory):\nclass Meta:\nmodel = User\nsqlalchemy_session = SessionLocal()\nsqlalchemy_session_persistence = 'commit'\n\n\nid = factory.Sequence(lambda n: n + 1)\nname = factory.Faker('name')\nemail = factory.Faker('email')"
+        }
+      ]
+    },
+    {
+      "id": "python_quality_defaults",
+      "description": "Recommended Python tooling.",
+      "triggers": ["init python project", "setup project", "python tooling"],
+      "actions": [
+        {
+          "type": "insert_text",
+          "content": "Recommended stack:\n- Ruff (lint)\n- Black (format)\n- Mypy (types)\n- Pytest (tests)\n- Factory Boy (test fixtures)\n- SQLAlchemy (ORM)"
+        }
+      ]
+    }
+  ]
+}

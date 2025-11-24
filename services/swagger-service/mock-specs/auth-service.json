@@ -1,0 +1,111 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Auth Service API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/auth/register": {
+      "post": {
+        "summary": "Register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "summary": "Login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "User email address"
+          },
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 80,
+            "description": "Username (3-80 characters)"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "User password (minimum 8 characters)"
+          },
+          "first_name": {
+            "type": "string",
+            "nullable": true,
+            "description": "User's first name"
+          },
+          "last_name": {
+            "type": "string",
+            "nullable": true,
+            "description": "User's last name"
+          },
+          "country_code": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "default": "USA",
+            "description": "ISO country code (3 uppercase letters)"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^(admin|public|government|staff)$",
+            "default": "public",
+            "description": "User role"
+          }
+        },
+        "required": ["email", "username", "password"]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string",
+            "description": "Email address or username"
+          },
+          "password": {
+            "type": "string",
+            "description": "User password"
+          }
+        },
+        "required": ["login", "password"]
+      }
+    }
+  }
+}

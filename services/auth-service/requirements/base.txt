@@ -1,13 +1,29 @@
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
-Flask-CORS==4.0.0
-Flask-Limiter==3.5.0
+# FastAPI and ASGI server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+slowapi==0.1.9  # Rate limiting for FastAPI
+
+# Database
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.11
+
+# Authentication & Security
 PyJWT==2.8.0
 argon2-cffi==23.1.0
-psycopg2-binary==2.9.11
-python-dotenv==1.0.0
+
+# Validation
+pydantic==2.5.0
+pydantic[email]==2.5.0
 email-validator==2.1.0
-apispec==6.3.1
-apispec-webframeworks==1.0.0
-marshmallow==3.20.1
+
+# HTTP client for middleware
+httpx==0.28.1
+
+# Utilities
+python-dotenv==1.0.0
+
+# Keep Flask-SQLAlchemy for model compatibility (models use db.Model)
+# Flask is required for Flask-SQLAlchemy to work
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
 

@@ -73,18 +73,20 @@ function createApp(): Express {
     });
   }, config.specRefreshInterval);
 
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully');
-    healthMonitor.stop();
-    process.exit(0);
-  });
+  // Graceful shutdown (skip in test environment)
+  if (process.env.NODE_ENV !== 'test') {
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM received, shutting down gracefully');
+      healthMonitor.stop();
+      process.exit(0);
+    });
 
-  process.on('SIGINT', () => {
-    logger.info('SIGINT received, shutting down gracefully');
-    healthMonitor.stop();
-    process.exit(0);
-  });
+    process.on('SIGINT', () => {
+      logger.info('SIGINT received, shutting down gracefully');
+      healthMonitor.stop();
+      process.exit(0);
+    });
+  }
 
   return app;
 }
@@ -116,7 +118,9 @@ function startServer(): void {
   });
 }
 
-// Start the server
-startServer();
+// Start the server only if not in test environment and this is the main module
+if (process.env.NODE_ENV !== 'test' && require.main === module) {
+  startServer();
+}
 
 export { createApp };
