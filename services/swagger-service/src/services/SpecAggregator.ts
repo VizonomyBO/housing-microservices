@@ -67,20 +67,20 @@ export class SpecAggregator {
     service: ServiceConfig,
     spec: OpenAPISpec
   ): void {
+    const componentPrefix = this.sanitizeServiceName(service.name);
+    const serviceExternalUrl = this.convertToExternalUrl(service.url);
+
     // Add service to x-services
     aggregated['x-services'].push({
       name: service.name,
       version: spec.info.version,
-      pathPrefix: `/${this.sanitizeServiceName(service.name)}`,
+      pathPrefix: `/${componentPrefix}`,
     });
 
-    const pathPrefix = `/${this.sanitizeServiceName(service.name)}`;
-    const serviceExternalUrl = this.convertToExternalUrl(service.url);
-    const componentPrefix = this.sanitizeServiceName(service.name);
-
     for (const [path, pathItem] of Object.entries(spec.paths)) {
-      // Always prefix paths with service name to avoid conflicts
-      const finalPath = `${pathPrefix}${path}`;
+      // Keep original path from the service - tags handle organization in the UI
+      // This ensures Swagger UI calls the correct endpoint on the actual service
+      const finalPath = path;
 
       // Add service tag to all operations in this path
       const taggedPathItem = this.addServiceTagToPathItem(pathItem, service.name);
@@ -91,25 +91,8 @@ export class SpecAggregator {
         componentPrefix
       ) as PathItem;
 
-      // Debug logging
-      if (path === '/v1/auth/register') {
-        const requestBody = taggedPathItem?.post?.requestBody;
-        const updatedRequestBody = updatedPathItem?.post?.requestBody;
-        const originalSchema =
-          requestBody &&
-          !('$ref' in requestBody) &&
-          requestBody.content?.['application/json']?.schema;
-        const updatedSchema =
-          updatedRequestBody &&
-          !('$ref' in updatedRequestBody) &&
-          updatedRequestBody.content?.['application/json']?.schema;
-        logger.info(`Updating schema refs for ${path}:`, {
-          componentPrefix,
-          original: JSON.stringify(originalSchema),
-          updated: JSON.stringify(updatedSchema),
-        });
-      }
-
+      // Set per-path server to point directly to the service
+      // Path remains as-is from the service spec, so Swagger UI calls work correctly
       updatedPathItem.servers = [
         {
           url: serviceExternalUrl,
@@ -117,7 +100,21 @@ export class SpecAggregator {
         },
       ];
 
-      aggregated.paths[finalPath] = updatedPathItem;
+      // Handle path conflicts by checking if path already exists
+      // If it does, skip (first service wins) or we could merge operations
+      if (!aggregated.paths[finalPath]) {
+        aggregated.paths[finalPath] = updatedPathItem;
+      } else {
+        // Path already exists from another service - merge HTTP methods
+        const existingPath = aggregated.paths[finalPath];
+        const methods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head'] as const;
+        for (const method of methods) {
+          if (updatedPathItem[method] && !existingPath[method]) {
+            existingPath[method] = updatedPathItem[method];
+          }
+        }
+        logger.warn(`Path conflict for ${path} - merged operations from ${service.name}`);
+      }
     }
 
     // Merge components
@@ -174,6 +171,9 @@ export class SpecAggregator {
     }
 
     // Merge tags
+    // We skip merging original service tags to avoid duplication in the UI.
+    // We only want to group by Service Name.
+    /*
     if (spec.tags) {
       const serviceTags = spec.tags.map((tag) => ({
         ...tag,
@@ -181,6 +181,7 @@ export class SpecAggregator {
       }));
       aggregated.tags = [...(aggregated.tags || []), ...serviceTags];
     }
+    */
 
     // Add service tag if not present
     const serviceTag = {
@@ -235,7 +236,9 @@ export class SpecAggregator {
       if (tagged[method]) {
         tagged[method] = {
           ...tagged[method],
-          tags: [serviceName, ...(tagged[method]?.tags || [])],
+          // Only use the Service Name as the tag.
+          // This prevents endpoints from appearing twice (under Service Name AND original tag).
+          tags: [serviceName],
         };
       }
     }

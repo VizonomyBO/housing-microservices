@@ -19,7 +19,7 @@ export const services: ServiceConfig[] = [
     name: 'User Service',
     url: config.userServiceUrl,
     specEndpoint: '/openapi.json',
-    healthEndpoint: '/health',
+    healthEndpoint: '/v1/health',
     description: 'User profile management service',
     version: '1.0.0',
     tags: ['users', 'profiles', 'management'],
