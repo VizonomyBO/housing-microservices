@@ -1,0 +1,43 @@
+[project]
+name = "shared-data-layer"
+version = "0.1.0"
+description = "Shared async SQLAlchemy data layer for the Agentic monorepo"
+requires-python = ">=3.9"
+dependencies = [
+  "sqlalchemy[asyncio]>=2.0.0",
+  "asyncpg>=0.30.0",
+  "alembic>=1.13.0",
+  "pydantic>=2.7.0",
+  "pgvector[psycopg2-binary]>=0.2.0",
+  "pydantic-settings>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff",
+  "mypy",
+]
+test = [
+  "pytest",
+  "pytest-asyncio",
+  "pytest-xdist",
+  "testcontainers[postgresql]>=4.0.0",
+  "polyfactory>=2.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+shared-data-layer = "shared_data_layer.manage:main"
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
