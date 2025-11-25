@@ -1,6 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, Float, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +14,7 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     type: Mapped[str] = mapped_column(String, nullable=False) # e.g. "Person", "Organization"
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(512), nullable=True) # Per docs
     
     # Scope
     country_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True, index=True)
@@ -32,6 +34,7 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     target_id: Mapped[UUID] = mapped_column(ForeignKey("graph_entities.id"), nullable=False)
     relation: Mapped[str] = mapped_column(String, nullable=False) # e.g. "WORKS_FOR"
     weight: Mapped[float] = mapped_column(Float, default=1.0)
+    evidence_span: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     source = relationship("GraphEntity", foreign_keys=[source_id], back_populates="edges_out")
     target = relationship("GraphEntity", foreign_keys=[target_id], back_populates="edges_in")

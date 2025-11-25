@@ -5,13 +5,17 @@ from shared_data_layer.db.models.retrieval import Chunk, ChunkMetrics, Retrieval
 
 class ChunkFactory(AsyncSQLAlchemyFactory[Chunk]):
     __model__ = Chunk
-    embedding = Use(lambda: [0.1] * 1536)
+    @classmethod
+    def embedding(cls) -> list[float]:
+        return [0.1] * 1024
 
 class ChunkMetricsFactory(AsyncSQLAlchemyFactory[ChunkMetrics]):
     __model__ = ChunkMetrics
 
-class RetrievalRunFactory(AsyncSQLAlchemyFactory[RetrievalRun]):
-    __model__ = RetrievalRun
-
 class RetrievalRunItemFactory(AsyncSQLAlchemyFactory[RetrievalRunItem]):
     __model__ = RetrievalRunItem
+    chunk = Use(ChunkFactory.build)
+
+class RetrievalRunFactory(AsyncSQLAlchemyFactory[RetrievalRun]):
+    __model__ = RetrievalRun
+    items = Use(RetrievalRunItemFactory.batch, size=2)

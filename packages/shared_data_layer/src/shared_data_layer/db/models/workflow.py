@@ -15,6 +15,7 @@ class WorkflowGraph(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     domain: Mapped[str] = mapped_column(String, nullable=False) # e.g. "policy_analysis"
     country_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_depth: Mapped[int] = mapped_column(Integer, default=10)
     
     versions = relationship("WorkflowVersion", back_populates="graph")
 
@@ -52,6 +53,7 @@ class WorkflowEdge(Base, UUIDPrimaryKeyMixin):
     version_id: Mapped[UUID] = mapped_column(ForeignKey("workflow_versions.id"), nullable=False)
     source_node_id: Mapped[str] = mapped_column(String, nullable=False)
     target_node_id: Mapped[str] = mapped_column(String, nullable=False)
+    transition_type: Mapped[str] = mapped_column(String, nullable=False, default="success") # success, failure, clarification, repair
     condition: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     version = relationship("WorkflowVersion", back_populates="edges")

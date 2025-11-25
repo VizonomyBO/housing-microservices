@@ -85,4 +85,10 @@ async def run_migrations_online() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    # Check if connection is passed via config attributes (from tests)
+    connectable = context.config.attributes.get("connection", None)
+    
+    if connectable:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_migrations_online())

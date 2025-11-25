@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.repositories.base import BaseRepository
@@ -17,10 +17,10 @@ class DocumentRepository(BaseRepository[Document]):
         stmt = (
             select(Document)
             .where(Document.id == document_id)
-            .options(selectinload(Document.chunks)) # Assuming 'chunks' relationship exists on Document
+            .options(selectinload(Document.chunks))
         )
         result = await self.session.execute(stmt)
-        document = result.scalar_one_or_none()
+        document = result.unique().scalar_one_or_none()
         if document:
             return DocumentWithChunksRead.model_validate(document)
         return None

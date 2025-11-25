@@ -14,7 +14,7 @@ class Chunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1536))  # Voyage-3.5-lite dim? Or OpenAI? Docs say Voyage 3.5 lite.
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024))  # Voyage-3.5-lite dim per docs
     # Voyage 3.5 lite dimension is 1536? Actually Voyage-3-lite is 512 or 1024? 
     # Let's check system_architecture.md again or assume 1536 for now (OpenAI compat).
     # Wait, system_architecture says "Voyage AI for embeddings (voyage-3.5-lite)". 
@@ -71,4 +71,36 @@ class RetrievalRunItem(Base, UUIDPrimaryKeyMixin):
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
 
     run = relationship("RetrievalRun", back_populates="items")
+    chunk = relationship("Chunk")
+
+
+class PillarAnswer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "pillar_answers"
+
+    owner_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    pillar_name: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    summary_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False) # draft, running, published, superseded, rejected
+    generated_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True) # Timestamp
+    expires_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True) # Timestamp
+
+    sources = relationship("PillarAnswerSource", back_populates="pillar_answer", cascade="all, delete-orphan")
+
+
+class PillarAnswerSource(Base, UUIDPrimaryKeyMixin):
+    __tablename__ = "pillar_answer_sources"
+
+    pillar_answer_id: Mapped[UUID] = mapped_column(ForeignKey("pillar_answers.id"), nullable=False)
+    chunk_id: Mapped[UUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    contribution_type: Mapped[str] = mapped_column(String, nullable=False)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
+    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    pillar_answer = relationship("PillarAnswer", back_populates="sources")
     chunk = relationship("Chunk")

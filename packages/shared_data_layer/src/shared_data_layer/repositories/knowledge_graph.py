@@ -19,8 +19,8 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
             select(GraphEntity)
             .where(GraphEntity.id == entity_id)
             .options(
-                selectinload(GraphEntity.edges_out).selectinload(GraphEdge.target),
-                selectinload(GraphEntity.edges_in).selectinload(GraphEdge.source)
+                selectinload(GraphEntity.edges_out).options(selectinload(GraphEdge.target), selectinload(GraphEdge.evidence)),
+                selectinload(GraphEntity.edges_in).options(selectinload(GraphEdge.source), selectinload(GraphEdge.evidence))
             )
         )
         result = await self.session.execute(stmt)
