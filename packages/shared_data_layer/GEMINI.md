@@ -1,13 +1,14 @@
-# Agent Guide for Shared Data Layer
+# Gemini Agent Context & Protocols
 
-This document is the **authoritative source of truth** for AI agents working on the `shared_data_layer` package. Follow these protocols strictly to ensure high-quality, bug-free code.
+This `GEMINI.md` file provides specific context and instructions for Google Gemini models working on the `shared_data_layer` package. It serves as the **authoritative source of truth** alongside `AGENTS.md`.
 
-## 🧠 Cognitive Workflow (Plan -> Act -> Verify)
-Before writing any code, you **MUST** follow this process:
-1.  **Plan**: Analyze the request. Identify which files need changes. Check `AGENTS.md` for known patterns.
-2.  **Research**: If you are unsure about a library (e.g., `polyfactory`, `ltree`, `pgvector`), use `context7` or `serper-search` **IMMEDIATELY**. Do not guess.
-3.  **Act**: Make atomic changes. Focus on one file/module at a time.
-4.  **Verify**: Run tests immediately after changes. Do not accumulate technical debt.
+## 🧠 Cognitive Workflow (Gemini Optimized)
+You have a **long context window**. Use it to your advantage:
+1.  **Ingest Context**: Before planning, read `README.md`, `pyproject.toml`, and `AGENTS.md` to ground your responses.
+2.  **Plan**: Analyze the request. Identify which files need changes.
+3.  **Research**: If you are unsure about a library (e.g., `polyfactory`, `ltree`, `pgvector`), use `context7` or `serper-search` **IMMEDIATELY**. Do not guess.
+4.  **Act**: Make atomic changes. Focus on one file/module at a time.
+5.  **Verify**: Run tests immediately after changes.
 
 ## 🛑 Stuck State Protocol (CRITICAL)
 **Trigger**: If you fail to fix an error or implement a feature **3 times in a row**.
