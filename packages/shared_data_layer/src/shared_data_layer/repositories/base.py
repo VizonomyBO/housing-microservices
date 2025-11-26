@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar, Type, Optional, List, Any
+from typing import Generic, List, Optional, Type, TypeVar
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,11 +15,15 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
 
     async def get(self, id: UUID) -> Optional[ModelType]:
-        result = await self.session.execute(select(self.model).where(self.model.id == id))
+        result = await self.session.execute(
+            select(self.model).where(self.model.id == id)
+        )
         return result.scalar_one_or_none()
 
     async def list(self, limit: int = 100, offset: int = 0) -> List[ModelType]:
-        result = await self.session.execute(select(self.model).limit(limit).offset(offset))
+        result = await self.session.execute(
+            select(self.model).limit(limit).offset(offset)
+        )
         return list(result.scalars().all())
 
     async def create(self, **kwargs) -> ModelType:

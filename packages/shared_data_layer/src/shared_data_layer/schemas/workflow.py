@@ -1,7 +1,7 @@
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from typing import Optional, List, Dict, Any
+
 from pydantic import field_validator
-from datetime import datetime
 
 from .common import ORMBaseSchema
 

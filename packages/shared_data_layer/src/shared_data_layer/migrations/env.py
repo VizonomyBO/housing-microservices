@@ -1,16 +1,16 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-
 from shared_data_layer.config.settings import settings
-from shared_data_layer.db.base import Base
+
 # Import all models to ensure they are registered with Base.metadata
 from shared_data_layer.db import models  # noqa
+from shared_data_layer.db.base import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -87,7 +87,7 @@ if context.is_offline_mode():
 else:
     # Check if connection is passed via config attributes (from tests)
     connectable = context.config.attributes.get("connection", None)
-    
+
     if connectable:
         do_run_migrations(connectable)
     else:

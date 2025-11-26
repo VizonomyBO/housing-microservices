@@ -15,7 +15,13 @@ class DatabaseSessionManager:
     _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
     @classmethod
-    def init(cls, database_url: str, echo: bool = False, pool_size: int = 10, max_overflow: int = 20) -> None:
+    def init(
+        cls,
+        database_url: str,
+        echo: bool = False,
+        pool_size: int = 10,
+        max_overflow: int = 20,
+    ) -> None:
         cls._engine = create_async_engine(
             database_url,
             echo=echo,
@@ -33,7 +39,7 @@ class DatabaseSessionManager:
     async def session(cls) -> AsyncIterator[AsyncSession]:
         if cls._session_factory is None:
             raise Exception("DatabaseSessionManager is not initialized")
-        
+
         async with cls._session_factory() as session:
             try:
                 yield session

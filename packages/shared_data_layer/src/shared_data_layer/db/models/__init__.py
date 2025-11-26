@@ -1,8 +1,7 @@
-from .documents import Document, IngestionJob, Artifact, ConversationDocument
-
+from .documents import Artifact, ConversationDocument, Document, IngestionJob
+from .knowledge_graph import GraphCommunity, GraphEdge, GraphEntity, GraphEvidence
 from .retrieval import Chunk, ChunkMetrics, RetrievalRun, RetrievalRunItem
-from .knowledge_graph import GraphEntity, GraphEdge, GraphEvidence, GraphCommunity
-from .workflow import WorkflowGraph, WorkflowNode, WorkflowEdge, WorkflowVersion
+from .workflow import WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowVersion
 
 __all__ = [
     "Document",

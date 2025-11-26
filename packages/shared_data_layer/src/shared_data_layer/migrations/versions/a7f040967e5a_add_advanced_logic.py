@@ -5,15 +5,14 @@ Revises: 3d2859a21d27
 Create Date: 2025-11-25 18:22:51.745054
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
-revision: str = 'a7f040967e5a'
-down_revision: Union[str, None] = '3d2859a21d27'
+revision: str = "a7f040967e5a"
+down_revision: Union[str, None] = "3d2859a21d27"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -30,8 +29,12 @@ def upgrade() -> None:
     FROM graph_evidence
     GROUP BY edge_id;
     """)
-    op.execute("CREATE INDEX ix_graph_edge_evidence_rollup_edge_id ON graph_edge_evidence_rollup (edge_id);")
-    op.execute("CREATE INDEX ix_graph_edge_evidence_rollup_evidence_chunk_ids ON graph_edge_evidence_rollup USING GIN (evidence_chunk_ids);")
+    op.execute(
+        "CREATE INDEX ix_graph_edge_evidence_rollup_edge_id ON graph_edge_evidence_rollup (edge_id);"
+    )
+    op.execute(
+        "CREATE INDEX ix_graph_edge_evidence_rollup_evidence_chunk_ids ON graph_edge_evidence_rollup USING GIN (evidence_chunk_ids);"
+    )
 
     # 2. Materialized View: base_documents_by_country
     op.execute("""
@@ -39,7 +42,9 @@ def upgrade() -> None:
     SELECT * FROM documents
     WHERE access_scope = 'base';
     """)
-    op.execute("CREATE INDEX ix_base_documents_by_country_country_code ON base_documents_by_country (country_code);")
+    op.execute(
+        "CREATE INDEX ix_base_documents_by_country_country_code ON base_documents_by_country (country_code);"
+    )
 
     # 3. Trigger: active_chat_refs
     op.execute("""
@@ -56,7 +61,7 @@ def upgrade() -> None:
     END;
     $$ LANGUAGE plpgsql;
     """)
-    
+
     op.execute("""
     CREATE TRIGGER trg_update_active_chat_refs
     AFTER INSERT OR DELETE ON conversation_documents
@@ -110,7 +115,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS workflow_nodes_move_subtree")
-    op.execute("DROP TRIGGER IF EXISTS trg_update_active_chat_refs ON conversation_documents")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_update_active_chat_refs ON conversation_documents"
+    )
     op.execute("DROP FUNCTION IF EXISTS update_active_chat_refs")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS base_documents_by_country")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_edge_evidence_rollup")

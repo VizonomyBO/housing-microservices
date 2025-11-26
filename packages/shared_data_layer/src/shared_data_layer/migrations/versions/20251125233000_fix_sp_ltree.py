@@ -5,15 +5,14 @@ Revises: 20251125231500
 Create Date: 2025-11-25 23:30:00.000000
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
-revision: str = '20251125233000'
-down_revision: Union[str, None] = '20251125231500'
+revision: str = "20251125233000"
+down_revision: Union[str, None] = "20251125231500"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -112,6 +112,25 @@ To run the tests for this package:
 
 For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
+## Linting & Formatting
+
+This project uses `ruff` for linting and formatting, configured to match `flake8`, `isort`, and `black` (line length 88).
+
+To check for linting errors:
+```bash
+.venv/bin/ruff check .
+```
+
+To fix linting errors automatically:
+```bash
+.venv/bin/ruff check --fix .
+```
+
+To format code:
+```bash
+.venv/bin/ruff format .
+```
+
 ### Writing Tests for Other Services
 You can reuse the testing infrastructure provided by this package in other services.
 

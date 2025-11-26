@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -15,7 +14,9 @@ def main():
 
     # Migrate command
     migrate_parser = subparsers.add_parser("migrate", help="Run database migrations")
-    migrate_parser.add_argument("--revision", default="head", help="Revision to upgrade to (default: head)")
+    migrate_parser.add_argument(
+        "--revision", default="head", help="Revision to upgrade to (default: head)"
+    )
 
     args = parser.parse_args()
 
@@ -38,10 +39,10 @@ def run_migrations(revision: str):
 
     # Create Alembic Config
     alembic_cfg = Config(str(alembic_ini_path))
-    
+
     # Set script location explicitly to absolute path
     alembic_cfg.set_main_option("script_location", str(migrations_dir))
-    
+
     # Set sqlalchemy.url from settings
     alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
