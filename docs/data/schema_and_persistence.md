@@ -67,7 +67,7 @@ User identity is managed externally. The `shared_data_layer` stores `owner_user_
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key referenced by all downstream tables. |
-| `owner_user_id` | `uuid` | FK → `users.id`, nullable for base documents. |
+| `owner_user_id` | `uuid` | Raw UUID provided by upstream identity service; nullable for base documents. |
 | `access_scope` | `text` | Enum (`base`, `user_private`, `user_shared`). Determines default visibility. |
 | `canonical_name` | `text` | Display name. Unique per user within active docs. |
 | `country_code` | `char(3)` | Required for base docs; optional for user docs to enforce retrieval filters. |
@@ -132,7 +132,7 @@ Indexes: `(document_id, artifact_type)` and GIN on `metadata`.
 | --- | --- | --- |
 | `conversation_id` | `text` | FK → `conversations`. |
 | `document_id` | `uuid` | FK → `documents`. |
-| `attached_by_user_id` | `uuid` | FK → `users`; null when auto-attached base docs. |
+| `attached_by_user_id` | `uuid` | Raw UUID recording who attached the doc; null when auto-attached base docs. |
 | `attach_source` | `text` | Enum (`base_auto`, `user_upload`, `admin_attach`). |
 | `role` | `text` | Enum (`primary`, `supplemental`). |
 | `visibility_override` | `text` | Enum (`visible`, `hidden`, `read_only`). |
@@ -199,7 +199,7 @@ Indexes: pgvector HNSW/IVFFlat on `embedding`; GIN on `text_tsv`; B-tree `(docum
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
-| `owner_user_id` | `uuid` | FK → `users`. |
+| `owner_user_id` | `uuid` | Raw UUID from the calling service; required. |
 | `country_code` | `char(3)` | Pillar scope. |
 | `pillar_name` | `text` | Enum referencing `pillar_catalog`. |
 | `document_id` | `uuid` | FK → `documents` (base or user). |
@@ -390,7 +390,7 @@ Indexes: `(workflow_version_id, source_node_id)` and `(workflow_version_id, targ
 | `workflow_graph_id` | `uuid` | FK. |
 | `from_version` / `to_version` | `text` | Records migration history. |
 | `change_log` | `jsonb` | Diff summary. |
-| `approved_by` | `uuid` | FK → `users`. |
+| `approved_by` | `uuid` | UUID referencing the approving operator in the upstream identity system. |
 | `approved_at` | `timestamptz` | Audit. |
 
 ## 4. Persistence Rules & Flow
@@ -493,7 +493,7 @@ All models share a common `DeclarativeBase` and a set of mixins to standardize p
 
 Key decisions:
 
-- **Primary Keys**: Use UUID primary keys for all top-level entities (`User`, `Course`, `Document`, etc.).
+- **Primary Keys**: Use UUID primary keys for all top-level entities (`Document`, `Conversation`, `WorkflowGraph`, etc.).
 - **Timestamps**: Use timezone-aware `created_at` and `updated_at` columns with server-side defaults.
 - **Naming Conventions**: Configure SQLAlchemy's `MetaData` with explicit naming conventions for constraints and indexes to keep Alembic migrations deterministic.
 
@@ -549,45 +549,18 @@ Additional mixins (e.g., soft delete) can be introduced if they become part of t
 
 ### Entity Mapping Strategy
 
-The logical entities defined earlier (User, Course hierarchy, Documents, Chunks, UploadedFile, AgentRun, AgentEvent, etc.) are mapped into SQLAlchemy models with the following principles:
+The logical entities defined earlier (Documents, Conversations, Chunks, UploadedFile, AgentRun, AgentEvent, etc.) are mapped into SQLAlchemy models with the following principles:
 
 #### General Principles
 
-- **Schemas / Namespaces**: Tables may be grouped under Postgres schemas (e.g., `core.users`, `content.courses`, `content.documents`) to mirror logical domains.
+- **Schemas / Namespaces**: Tables may be grouped under Postgres schemas (e.g., `content.documents`, `retrieval.chunks`, `workflow.graphs`) to mirror logical domains.
 - **Relationships**:
-  - Use explicit `ForeignKey` constraints with `ondelete="CASCADE"` where the logical schema implies removal of dependent entities (e.g., deleting a `Course` deletes its modules, sections, subsections, and document associations).
-  - Use `relationship(..., cascade="all, delete-orphan")` on parent collections where appropriate.
+  - Use explicit `ForeignKey` constraints with `ondelete="CASCADE"` where both sides of the relationship live inside the shared data layer (documents ↔ chunks, conversations ↔ conversation_documents, etc.).
+  - Use `relationship(..., cascade="all, delete-orphan")` on parent collections where appropriate so cleanup flows stay deterministic.
 - **Ordering**:
-  - Positional fields for modules, sections, subsections (e.g., `position` as `Numeric`) are indexed and used for ordering queries.
+  - Where ordering matters (e.g., workflow nodes, message sequences), include explicit positional columns and supporting indexes.
 - **Uniqueness & Constraints**:
-  - Use unique constraints (e.g., unique email on `User`) and composite uniqueness where the logical schema implies it (e.g., position uniqueness per parent, if required).
-  - Enforce invariants in the database where possible, leaving cross-aggregate invariants to the application layer.
-
-#### Users & Identity
-
-- **Table**: `core.users`
-- **Core fields**:
-  - `id`: UUID PK.
-  - `email`: Unique, indexed.
-  - `hashed_password`, `is_active`, plus any profile/metadata fields.
-- **Indexes**:
-  - Unique index on `email`.
-  - Optional additional indexes to support authentication or ownership queries.
-
-#### Course Hierarchy
-
-- **Tables**:
-  - `content.courses`
-  - `content.course_modules`
-  - `content.course_sections`
-  - `content.course_subsections`
-- **Relationships**:
-  - `Course` -> `CourseModule` -> `CourseSection` -> `CourseSubsection` via FK chains.
-  - Cascading deletes from parent to children.
-- **Ordering**:
-  - `position` fields model intra-parent order. Index these per parent (e.g., `(course_id, position)`).
-- **Eager Loading**:
-  - Repository layer uses `selectinload` to load full hierarchies efficiently for API responses and agent workflows.
+  - Prefer database-enforced uniqueness/`CHECK` constraints for invariants such as deduplication hashes, workflow node keys, and chunk token limits.
 
 #### Documents, Chunks & Uploaded Files
 
@@ -596,14 +569,20 @@ The logical entities defined earlier (User, Course hierarchy, Documents, Chunks,
   - `content.document_chunks`
   - `content.uploaded_files`
 - **Documents**:
-  - Belong to both `User` (owner) and `Course` (context).
-  - Track metadata such as filename, content type, storage path/URI, size, checksums.
+  - Anchor every downstream artifact and store metadata such as filename, content type, storage pointers, byte size, and `owner_user_id` (as a raw UUID reference to the external identity provider).
 - **Chunks**:
-  - Store parsed text chunks and vector embeddings used for RAG operations.
-  - Use `pgvector` for the embedding column.
-  - Index embeddings for approximate nearest-neighbor queries (e.g., HNSW where available).
+  - Store parsed text/table/image slices and vector embeddings used for RAG operations.
+  - Use `pgvector` for embeddings and index them with HNSW/IVFFlat once the corpus size warrants ANN acceleration.
 - **Uploaded Files**:
-  - Track raw uploads tied to users/courses and integrate with storage backends.
+  - Track raw uploads tied to `owner_user_id` and ingestion context without introducing first-class course or user tables inside this package.
+
+#### Conversations & Agent State
+
+- **Tables**:
+  - `conversations`, `messages`, `message_tool_calls`, `message_citations`, `agent_state_checkpoints`.
+- **Relationships**:
+  - Conversations own messages and checkpoints; conversation_documents map chats to documents using composite keys for ref-counting.
+  - Tool calls and citations reference messages and chunks respectively to support deterministic replay.
 
 #### Agent Runs & Events
 
@@ -611,10 +590,10 @@ The logical entities defined earlier (User, Course hierarchy, Documents, Chunks,
   - `agents.agent_runs`
   - `agents.agent_events`
 - **Relationships**:
-  - `AgentRun` references `Course` and `User`.
-  - `AgentEvent` references `AgentRun` and optionally `User`.
+  - `AgentRun` records execution metadata (prompt, planner, document scope) keyed by `owner_user_id` and optional conversation IDs—no FK to a local `users` table is required.
+  - `AgentEvent` references `AgentRun` and optionally stores additional `owner_user_id` context.
 - **Payloads**:
-  - JSON fields for agent state/payloads, as defined in the logical schema.
+  - JSON fields capture agent state transitions, tool inputs/outputs, and telemetry required for observability.
 
 ---
 
@@ -776,9 +755,10 @@ Key decisions:
   ```
 
 - **Per-entity schemas**:
-  - `UserCreate`, `UserUpdate`, `UserRead`
-  - `CourseCreate`, `CourseUpdate`, `CourseRead`, `CourseWithHierarchyRead`
   - `DocumentRead`, `DocumentChunkRead`, `UploadedFileRead`
+  - `KnowledgeGraphEntityRead`, `GraphEdgeRead`
+  - `WorkflowGraphRead`, `WorkflowVersionRead`, `WorkflowNodeRead`
+  - `RetrievalRunRead`, `PillarAnswerRead`
   - `AgentRunRead`, `AgentEventRead`
 
 - **DTO Semantics**:
@@ -793,9 +773,11 @@ Because SQLAlchemy async models cannot safely lazy-load outside of a running eve
 - Only after the necessary data is loaded do we call Pydantic serializers:
 
   ```python
-  result = await session.execute(query.options(selectinload(Course.modules)))
-  course = result.scalar_one()
-  return CourseWithHierarchyRead.model_validate(course)
+  result = await session.execute(
+      query.options(selectinload(Document.chunks))
+  )
+  document = result.scalar_one()
+  return DocumentWithChunksRead.model_validate(document)
   ```
 
 - Tests and factories follow the same pattern, ensuring that Pydantic never triggers unexpected lazy loads.
@@ -826,7 +808,7 @@ Highlights:
   - Exported via `shared_data_layer.testing` so that downstream apps can do:
 
     ```python
-    from shared_data_layer.testing import UserFactory, CourseFactory
+    from shared_data_layer.testing import DocumentFactory, ChunkFactory
     ```
 
   - Factories always accept a session parameter to ensure they participate in the same transactions/fixtures as the tests that call them.

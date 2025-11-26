@@ -99,13 +99,10 @@ packages/shared_data_layer/
 │       │   ├── session.py          # DatabaseSessionManager (async engine & sessionmaker)
 │       │   └── models/             # SQLAlchemy models, grouped by bounded context
 │       │       ├── __init__.py
-│       │       ├── users.py        # User & identity models
 │       │       ├── documents.py    # Documents, artifacts, ingestion jobs, conversation_documents
-│       │       ├── retrieval.py    # Chunks, chunk metrics, retrieval runs/items
+│       │       ├── retrieval.py    # Chunks, chunk metrics, retrieval runs/items, pillar answers
 │       │       ├── knowledge_graph.py # Graph entities, edges, evidence, communities
-│       │       ├── workflow.py     # Workflow graphs, nodes, edges, versions
-│       │       ├── conversations.py # Conversations, messages, tool calls, citations, checkpoints
-│       │       └── insights.py     # Pillar answers and async insights
+│       │       └── workflow.py     # Workflow graphs, nodes, edges, versions
 │       ├── migrations/             # In-package Alembic environment
 │       │   ├── alembic.ini         # Shipped config, points to this script directory
 │       │   ├── env.py              # Async Alembic environment
@@ -114,23 +111,17 @@ packages/shared_data_layer/
 │       ├── repositories/           # Query / persistence patterns, no heavy domain logic
 │       │   ├── __init__.py
 │       │   ├── base.py
-│       │   ├── users.py
 │       │   ├── documents.py
-│       │   ├── retrieval.py
 │       │   ├── knowledge_graph.py
 │       │   ├── workflow.py
-│       │   ├── conversations.py
-│       │   └── insights.py
+│       │   └── retrieval.py        # (future homes for convo/insights can live here)
 │       ├── schemas/                # Pydantic v2 DTOs
 │       │   ├── __init__.py
 │       │   ├── common.py
-│       │   ├── users.py
 │       │   ├── documents.py
 │       │   ├── retrieval.py
 │       │   ├── knowledge_graph.py
-│       │   ├── workflow.py
-│       │   ├── conversations.py
-│       │   └── insights.py
+│       │   └── workflow.py
 │       └── testing/                # Reusable test infra for any consumer
 │           ├── __init__.py
 │           ├── conftest.py         # Re-exportable pytest fixtures
@@ -139,12 +130,10 @@ packages/shared_data_layer/
 │           └── factories/          # Polyfactory-based factories
 │               ├── __init__.py
 │               ├── base.py
-│               ├── users.py
 │               ├── documents.py
 │               ├── retrieval.py
 │               ├── knowledge_graph.py
-│               ├── workflow.py
-│               └── files.py
+│               └── workflow.py
 └── tests/                          # Package's own test suite (uses testing/ utilities)
 ```
 
@@ -152,13 +141,10 @@ packages/shared_data_layer/
 
 The logical schema in `data/schema_and_persistence.md` is mapped into SQLAlchemy models as follows:
 
-- `users.py`: `User` plus audit mixins used by downstream tables.
 - `documents.py`: `Document`, `Artifact`, `ConversationDocument`, and `IngestionJob` — everything that manages uploads, deduplication, and attachment scope.
-- `retrieval.py`: `Chunk`, `ChunkMetrics`, `RetrievalRun`, `RetrievalRunItem`, including pgvector columns and LIST partition metadata.
+- `retrieval.py`: `Chunk`, `ChunkMetrics`, `RetrievalRun`, `RetrievalRunItem`, and the `PillarAnswer` tables, including pgvector columns and LIST partition metadata.
 - `knowledge_graph.py`: `GraphEntity`, `GraphEdge`, `GraphEvidence`, `GraphCommunity`, and helper views/materialized views for evidence rollups.
 - `workflow.py`: `WorkflowGraph`, `WorkflowNode`, `WorkflowEdge`, `WorkflowVersion`, plus helper constraints/triggers described in `schema_and_persistence.md §3.10`.
-- `conversations.py`: `Conversation`, `Message`, `MessageToolCall`, `MessageCitation`, `AgentStateCheckpoint` — the LangGraph execution trace.
-- `insights.py`: `PillarAnswer` and `PillarAnswerSource` for async analytics artifacts that outlive a single conversation.
 
 Each module stays aligned with the logical schema so repositories can target a bounded context without guessing which file owns which table.
 
@@ -398,13 +384,14 @@ class ORMBaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 ```
 
-Each domain module (`users.py`, `documents.py`, `knowledge_graph.py`, etc.) then defines its own:
+Each domain module (`documents.py`, `retrieval.py`, `knowledge_graph.py`, `workflow.py`) then defines its own:
 
-- `UserCreate`, `UserUpdate`, `UserRead`
-- `DocumentCreate`, `DocumentUpdate`, `DocumentRead`, `DocumentWithChunksRead`
-- `ChunkRead`, `RetrievalRunRead`, `RetrievalRunItemRead`
+- `DocumentRead`, `DocumentWithChunksRead`
+- `ChunkRead`, `RetrievalRunRead`, `RetrievalRunItemRead`, `PillarAnswerRead`
 - `GraphEntityRead`, `GraphEdgeRead`, `GraphCommunityRead`
 - `WorkflowGraphRead`, `WorkflowNodeRead`, `WorkflowEdgeRead`
+
+> Note: `schemas/users.py` only mirrors upstream User Service payloads for callers that need to echo identity details; the shared data layer still does **not** own a `users` table.
 
 ### 6.2 Avoiding Lazy Loading Pitfalls
 
@@ -505,22 +492,9 @@ While pytest is function-based, some teams prefer class-based test patterns simi
 
 Design:
 
-- Implemented as a mixin using pytest markers and class-level fixtures.
-- Provides class-level hooks that align with Django semantics:
-
-  - `@classmethod async def async_set_up_class(cls): ...`
-  - `@classmethod async def async_tear_down_class(cls): ...`
-
-- Exposes convenience helpers:
-
-  - `async def create_user(self, **overrides) -> User`
-  - `async def create_document_with_chunks(self, owner: User | None, **overrides) -> Document`
-
-These helpers internally:
-
-- Use the `db_session` fixture.
-- Call Polyfactory-based factories (see below) to construct and persist objects.
-- Are designed so test classes can inherit from `AsyncBaseTestCase` and annotate `db` or `session` attributes with `AsyncSession`.
+- Implemented as a pytest-friendly mixin decorated with `@pytest.mark.asyncio`.
+- Injects the shared `db_session` fixture automatically and stores it on `self.session`.
+- Keeps the API intentionally tiny so individual test suites can mix in their own helpers without fighting hidden magic.
 
 Example usage:
 
@@ -528,11 +502,12 @@ Example usage:
 import pytest
 from shared_data_layer.testing.base import AsyncBaseTestCase
 
+from shared_data_layer.testing.factories.documents import DocumentFactory
+
 @pytest.mark.asyncio
 class TestDocumentFlows(AsyncBaseTestCase):
     async def test_can_create_document_with_chunks(self, db_session):
-        user = await self.create_user(session=db_session)
-        document = await self.create_document_with_chunks(owner=user, session=db_session)
+        document = await DocumentFactory.create_with_chunks_async(session=db_session)
         assert document.chunks
 ```
 
@@ -554,12 +529,10 @@ Factories live in:
 shared_data_layer/testing/factories/
 ├── __init__.py
 ├── base.py             # Common helpers and base factory classes
-├── users.py            # UserFactory
 ├── documents.py        # Document & artifact factories
 ├── retrieval.py        # Chunk & retrieval-run factories
 ├── knowledge_graph.py  # Graph entity/edge factories
-├── workflow.py         # Workflow graph/node factories
-└── files.py            # UploadedFile factories
+└── workflow.py         # Workflow graph/node factories
 ```
 
 Responsibilities:
@@ -571,17 +544,14 @@ Example interface:
 
 ```python
 from uuid import UUID
-from shared_data_layer.testing.factories import (
-    UserFactory,
-    DocumentFactory,
-    GraphEntityFactory,
-)
+from shared_data_layer.testing.factories import DocumentFactory, GraphEntityFactory
 
 async def test_uses_factories(db_session):
-    user = await UserFactory.create_async(session=db_session, email="admin@example.com")
-    document = await DocumentFactory.create_with_chunks_async(session=db_session, owner=user)
-    entity = await GraphEntityFactory.create_async(session=db_session, owner_user_id=user.id)
-    assert isinstance(user.id, UUID)
+    document = await DocumentFactory.create_with_chunks_async(session=db_session)
+    entity = await GraphEntityFactory.create_async(
+        session=db_session, owner_user_id=document.owner_user_id
+    )
+    assert isinstance(document.id, UUID)
     assert document.chunks
     assert entity.country_code
 ```
@@ -589,22 +559,19 @@ async def test_uses_factories(db_session):
 `shared_data_layer/testing/__init__.py` will **re-export** the main factories:
 
 ```python
-from .factories.users import UserFactory
 from .factories.documents import DocumentFactory, DocumentChunkFactory
-from .factories.retrieval import RetrievalRunFactory
+from .factories.retrieval import ChunkFactory, RetrievalRunFactory
 from .factories.knowledge_graph import GraphEntityFactory, GraphEdgeFactory
 from .factories.workflow import WorkflowGraphFactory
-from .factories.files import UploadedFileFactory
 
 __all__ = [
-    "UserFactory",
     "DocumentFactory",
     "DocumentChunkFactory",
+    "ChunkFactory",
     "RetrievalRunFactory",
     "GraphEntityFactory",
     "GraphEdgeFactory",
     "WorkflowGraphFactory",
-    "UploadedFileFactory",
 ]
 ```
 
@@ -618,14 +585,14 @@ from shared_data_layer.testing import DocumentFactory, GraphEntityFactory, Workf
 
 Consuming services:
 
-- Reuse shared factories for core schema entities (user, document, graph, workflow, etc.).
+- Reuse shared factories for core schema entities (document, graph, workflow, retrieval, etc.).
 - Layer on top their own factories for app-specific models, pointing them at the **same `db_session`** fixture:
 
 ```python
 # services/agent-api/tests/factories/api_tokens.py
 class ApiTokenFactory(...):
     @classmethod
-    async def create_async(cls, session: AsyncSession, user: User, **kwargs) -> ApiToken:
+    async def create_async(cls, session: AsyncSession, document: Document, **kwargs) -> ApiToken:
         ...
 ```
 
