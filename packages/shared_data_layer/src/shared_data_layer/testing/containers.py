@@ -10,5 +10,5 @@ class PostgresContainerWithVector(PostgresContainer):
             "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off"
         )
 
-    def get_connection_url(self, driver="asyncpg"):
-        return super().get_connection_url(driver=driver)
+    def get_connection_url(self, host=None, driver="asyncpg"):
+        return super().get_connection_url(host=host, driver=driver)

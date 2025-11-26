@@ -12,7 +12,7 @@ class AsyncSQLAlchemyFactory(Generic[T], SQLAlchemyFactory[T]):
     __is_base_factory__ = True
 
     @classmethod
-    async def create_async(cls, session: AsyncSession, **kwargs):
+    async def create_async(cls, session: AsyncSession, **kwargs):  # type: ignore
         instance = cls.build(**kwargs)
         session.add(instance)
         await session.flush()

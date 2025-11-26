@@ -17,6 +17,7 @@ dependencies = [
 dev = [
   "ruff",
   "mypy",
+  "ty",
 ]
 test = [
   "pytest",
@@ -54,4 +55,9 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "src/shared_data_layer/migrations/versions/*" = ["E501"]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.1a28",
+]
 

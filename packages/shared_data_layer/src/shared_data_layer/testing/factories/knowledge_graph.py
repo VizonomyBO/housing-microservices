@@ -17,9 +17,6 @@ class GraphEntityFactory(AsyncSQLAlchemyFactory[GraphEntity]):
     edges_in = Ignore()
 
 
-
-
-
 class GraphEvidenceFactory(AsyncSQLAlchemyFactory[GraphEvidence]):
     __model__ = GraphEvidence
     chunk = Use(ChunkFactory.build)

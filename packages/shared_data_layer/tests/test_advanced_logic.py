@@ -62,7 +62,7 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         await db_session.refresh(edge, attribute_names=["evidence"])
         assert len(edge.evidence) == 1
         evidence = edge.evidence[0]
-        
+
         # Refresh MV (if it's a materialized view, we need to refresh it
         # manually or wait?)
         # The migration defined it as a VIEW or MATERIALIZED VIEW?

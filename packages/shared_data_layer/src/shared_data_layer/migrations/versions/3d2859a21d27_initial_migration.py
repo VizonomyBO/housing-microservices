@@ -9,6 +9,7 @@ Create Date: 2025-11-25 17:37:50.156120
 from typing import Sequence, Union
 
 import pgvector
+import pgvector.sqlalchemy
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
