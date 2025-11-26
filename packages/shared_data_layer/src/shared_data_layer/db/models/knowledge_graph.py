@@ -119,3 +119,34 @@ class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     algo_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class GraphEdgeEvidenceRollup(Base):
+    """
+    Materialized view for edge evidence aggregation.
+    """
+
+    __tablename__ = "graph_edge_evidence_rollup"
+    __table_args__ = {"info": {"is_view": True}}
+
+    edge_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("graph_edges.id"), primary_key=True
+    )
+    evidence_chunk_ids: Mapped[list[PyUUID]] = mapped_column(ARRAY(PG_UUID))
+    evidence_count: Mapped[int] = mapped_column(Integer)
+    last_refreshed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True))
+
+
+class GraphHotEntity(Base):
+    """
+    Materialized view for hot entities.
+    """
+
+    __tablename__ = "graph_hot_entities"
+    __table_args__ = {"info": {"is_view": True}}
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    type: Mapped[str] = mapped_column(String)
+    country_code: Mapped[Optional[str]] = mapped_column(String(2))
+    edge_count: Mapped[int] = mapped_column(Integer)

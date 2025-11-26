@@ -108,3 +108,17 @@ class ConversationDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "conversation_id", "document_id", name="uq_conversation_documents_conv_doc"
         ),
     )
+
+
+class BaseDocumentByCountry(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Materialized view for base documents partitioned by country.
+    """
+
+    __tablename__ = "base_documents_by_country"
+    __table_args__ = {"info": {"is_view": True}}
+
+    access_scope: Mapped[str] = mapped_column(String)
+    country_code: Mapped[Optional[str]] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(String)
+    content_hash: Mapped[str] = mapped_column(String)

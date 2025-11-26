@@ -1,6 +1,7 @@
 from typing import Optional
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
 from shared_data_layer.db.models.workflow import WorkflowGraph, WorkflowVersion
@@ -39,3 +40,28 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
         if workflow:
             return WorkflowGraphRead.model_validate(workflow)
         return None
+
+    async def move_subtree(
+        self, version_id: UUID, source_path: str, target_parent_path: str
+    ) -> None:
+        """
+        Move a subtree within a workflow version using the stored procedure.
+
+        Args:
+            version_id: The workflow version ID.
+            source_path: The ltree path of the subtree root to move (e.g. "A.B").
+            target_parent_path: The ltree path of the new parent (e.g. "A.D").
+        """
+        await self.session.execute(
+            text("SELECT workflow_nodes_move_subtree(:v_id, :src, :dst)"),
+            {"v_id": version_id, "src": source_path, "dst": target_parent_path},
+        )
+        # We don't commit here, letting the unit of work handle it,
+        # but we should probably expire objects to ensure consistency if they are
+        # loaded. However, repository methods usually don't expire all.
+        # The caller should handle session lifecycle or we assume this is part
+        # of a larger transaction. But since this modifies data via SP
+        # (side-effecting SQL), the ORM doesn't know about it.
+        # It's safer to expire relevant objects or all.
+        # Let's expire all for safety in this specific operation.
+        self.session.expire_all()

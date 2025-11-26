@@ -1,11 +1,15 @@
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
-from shared_data_layer.db.models.knowledge_graph import GraphEdge, GraphEntity
+from shared_data_layer.db.models.knowledge_graph import (
+    GraphEdge,
+    GraphEntity,
+    GraphEvidence,
+)
 from shared_data_layer.repositories.base import BaseRepository
 from shared_data_layer.schemas.knowledge_graph import GraphEdgeRead, GraphEntityRead
 
@@ -102,7 +106,18 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         ).returning(GraphEntity)
 
         result = await self.session.execute(stmt)
-        return result.scalar_one()
+        entity = result.scalar_one()
+
+        # Refresh hot entities view as entity creation/update might affect it
+        # (though mostly edges do). But if we update properties that might be
+        # relevant later, or if we just want to be safe.
+        # Actually hot entities is based on edge count, so mostly edges matter.
+        # But if we add a new entity, it has 0 edges, so it might not appear in
+        # top N anyway. Let's leave it for now or add it if we think it's needed.
+        # The plan says "Call refresh_hot_entities in upsert_entity / upsert_edge".
+        await self.refresh_hot_entities()
+
+        return entity
 
     async def upsert_edge(self, edge_data: dict) -> GraphEdge:
         """
@@ -122,4 +137,46 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         ).returning(GraphEdge)
 
         result = await self.session.execute(stmt)
-        return result.scalar_one()
+        edge = result.scalar_one()
+
+        # Refresh hot entities as edge count changed (or might have if new edge)
+        await self.refresh_hot_entities()
+
+        return edge
+
+    async def add_evidence(
+        self, edge_id: UUID, chunk_id: UUID, evidence_text: str = "evidence"
+    ) -> GraphEvidence:
+        """
+        Add evidence to an edge and refresh the rollup view.
+        """
+        evidence = GraphEvidence(
+            edge_id=edge_id, chunk_id=chunk_id, evidence_text=evidence_text
+        )
+        self.session.add(evidence)
+        await self.session.flush()
+
+        await self.refresh_edge_evidence_rollup()
+
+        return evidence
+
+    async def refresh_edge_evidence_rollup(self, concurrently: bool = False) -> None:
+        """
+        Refresh the graph_edge_evidence_rollup materialized view.
+        """
+        concurrently_clause = "CONCURRENTLY" if concurrently else ""
+        await self.session.execute(
+            text(
+                f"REFRESH MATERIALIZED VIEW {concurrently_clause} "
+                "graph_edge_evidence_rollup"
+            )
+        )
+
+    async def refresh_hot_entities(self, concurrently: bool = False) -> None:
+        """
+        Refresh the graph_hot_entities materialized view.
+        """
+        concurrently_clause = "CONCURRENTLY" if concurrently else ""
+        await self.session.execute(
+            text(f"REFRESH MATERIALIZED VIEW {concurrently_clause} graph_hot_entities")
+        )

@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import selectinload
 
 from shared_data_layer.db.models.documents import ConversationDocument, Document
@@ -61,6 +61,10 @@ class DocumentRepository(BaseRepository[Document]):
         self.session.add(new_doc)
         await self.session.flush()
         await self.session.refresh(new_doc)
+
+        if new_doc.access_scope == "base":
+            await self.refresh_base_documents()
+
         return new_doc
 
     async def attach_to_conversation(
@@ -134,3 +138,15 @@ class DocumentRepository(BaseRepository[Document]):
         )
 
         return True
+
+    async def refresh_base_documents(self, concurrently: bool = False) -> None:
+        """
+        Refresh the base_documents_by_country materialized view.
+        """
+        concurrently_clause = "CONCURRENTLY" if concurrently else ""
+        await self.session.execute(
+            text(
+                f"REFRESH MATERIALIZED VIEW {concurrently_clause} "
+                "base_documents_by_country"
+            )
+        )

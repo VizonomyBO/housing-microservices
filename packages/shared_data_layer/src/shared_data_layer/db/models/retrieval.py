@@ -144,3 +144,20 @@ class PillarAnswerSource(Base, UUIDPrimaryKeyMixin):
 
     pillar_answer = relationship("PillarAnswer", back_populates="sources")
     chunk = relationship("Chunk")
+
+
+class ActiveChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Read-only view of chunks belonging to active documents.
+    """
+
+    __tablename__ = "active_chunks"
+    __table_args__ = {"info": {"is_view": True}}
+
+    # We need to redefine columns if we don't inherit.
+    # Or we can inherit from a Mixin if we had one for Chunk fields.
+    # For now, let's just define the ones we need for tests/usage.
+    document_id: Mapped[PyUUID] = mapped_column(ForeignKey("documents.id"))
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    # ... other fields as needed
