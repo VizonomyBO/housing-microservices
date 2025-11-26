@@ -8,6 +8,14 @@ This document provides context and instructions for AI agents working on the `sh
 - **Testing**: Use `.venv/bin/pytest`.
 - **Parallel Execution**: Tests support parallel execution: `.venv/bin/pytest -n auto`.
 
+## Definition of Done
+After any task is considered finished, you **MUST** run the following commands to ensure the codebase is correctly linted and typed:
+1.  **Format**: `.venv/bin/ruff format .`
+2.  **Lint**: `.venv/bin/ruff check --fix .`
+3.  **Type Check**: `.venv/bin/ty check .`
+
+If any of these commands report errors, you **MUST** fix them before considering the task finally done.
+
 ## Testing Infrastructure
 - **Container**: `PostgresContainerWithVector` (in `testing/containers.py`) is optimized with `fsync=off` and `tmpfs` for performance.
 - **Asyncio**: `pytest-asyncio` is configured for `session` scope in `pytest.ini`.

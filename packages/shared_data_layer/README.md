@@ -131,6 +131,11 @@ To format code:
 .venv/bin/ruff format .
 ```
 
+To run type checking:
+```bash
+.venv/bin/ty check .
+```
+
 ### Writing Tests for Other Services
 You can reuse the testing infrastructure provided by this package in other services.
 
