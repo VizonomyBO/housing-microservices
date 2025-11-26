@@ -18,7 +18,7 @@
 
 | Domain | Core Tables | Purpose |
 | --- | --- | --- |
-| Identity | `users` | Canonical user registry. |
+
 | Document registry | `documents`, `ingestion_jobs`, `artifacts` | Track uploads (base + user), ingestion stages, and dedup metadata. |
 | Conversation access | `conversation_documents` | Attach documents (base or user) to chats, maintain ref counts. |
 | Retrieval corpus | `chunks`, `chunk_metrics` | Embeddable units keyed by `document_id` + `content_hash`. |
@@ -56,18 +56,9 @@ erDiagram
 
 ### 3.1 Identity
 
-**Table: users**
+**Identity Management**
+User identity is managed externally. The `shared_data_layer` stores `owner_user_id` as a raw UUID for scoping but does not maintain a `users` table or enforce foreign key constraints.
 
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | `uuid` | Primary key from upstream IdP. |
-| `external_ref` | `text` | Immutable reference (email hash, employee id). |
-| `status` | `text` | Enum (`active`, `suspended`, `deleted`). |
-| `roles` | `text[]` | Cached roles for RLS. |
-| `metadata` | `jsonb` | Preferences, locale. |
-| `created_at` / `updated_at` | `timestamptz` | Audit columns. |
-
-Indexes: unique `external_ref`; partial `(status) WHERE status='active'`.
 
 ### 3.2 Document Lifecycle
 
