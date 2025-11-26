@@ -159,27 +159,49 @@ To run type checking:
 ### Writing Tests for Other Services
 You can reuse the testing infrastructure provided by this package in other services.
 
-**`conftest.py` example:**
+**1. Setup `conftest.py`**
+
+In your service's `tests/conftest.py`, import the shared fixtures. This ensures that a single Postgres container is spun up for the entire test session, and each test gets an isolated transaction.
 
 ```python
+# tests/conftest.py
 import pytest
-from shared_data_layer.testing.conftest import postgres_container, engine, db_session
-
-# These fixtures will automatically spin up a Postgres container with pgvector
-# and provide an isolated async session for each test.
+# Import the shared fixtures to make them available in this test suite
+from shared_data_layer.testing.conftest import (
+    postgres_container,
+    engine,
+    session_factory,
+    db_session,
+    event_loop,
+)
 ```
 
-**Using Factories:**
+**2. Write an Integration Test**
+
+You can now use `db_session` in your tests. It will automatically roll back changes after each test.
 
 ```python
+# tests/test_my_service.py
+import pytest
 from shared_data_layer.testing.factories.users import UserFactory
 from shared_data_layer.testing.factories.documents import DocumentFactory
 
-async def test_my_service(db_session):
+@pytest.mark.asyncio
+async def test_create_document_for_user(db_session):
+    # 1. Setup data using factories
     user = await UserFactory.create_async(session=db_session)
+    
+    # 2. Perform action (e.g., call your service logic)
+    # doc = await my_service.create_doc(user_id=user.id, ...)
+    # For demonstration, we'll use the factory directly:
     doc = await DocumentFactory.create_async(session=db_session, owner_user_id=user.id)
-    # ... test logic ...
+
+    # 3. Verify
+    assert doc.owner_user_id == user.id
+    assert doc.id is not None
 ```
+
+
 
 ## Migrations
 
