@@ -2,7 +2,8 @@ from typing import Optional
 from uuid import UUID as PyUUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -33,8 +34,22 @@ class Chunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     artifact_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     schema_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(
+        nullable=True
+    )  # Denormalized for RLS
+    country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    section_path: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(String), nullable=True
+    )
+    bbox: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    text_tsv: Mapped[Optional[str]] = mapped_column(
+        TSVECTOR, nullable=True
+    )  # Generated column
+    table_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     # Metadata for filtering
-    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
     # Relationships
     document = relationship("Document", back_populates="chunks")
@@ -65,7 +80,7 @@ class RetrievalRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "retrieval_runs"
 
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
-    filters: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    filters: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     top_k: Mapped[int] = mapped_column(Integer, default=10)
 
     items = relationship("RetrievalRunItem", back_populates="run")
@@ -97,7 +112,7 @@ class PillarAnswer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     summary_markdown: Mapped[str] = mapped_column(Text, nullable=False)
-    answer_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    answer_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(
         String, nullable=False
     )  # draft, running, published, superseded, rejected

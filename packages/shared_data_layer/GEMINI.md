@@ -30,16 +30,16 @@ You have a **long context window**. Use it to your advantage:
 ## 🛠️ Environment & Execution
 - **Package Manager**: Use `uv` strictly.
     - Install: `uv sync --all-extras`
-- **Interpreter**: `.venv/bin/python`
-- **Testing**: `.venv/bin/pytest`
-    - Parallel: `.venv/bin/pytest -n auto`
-    - Single Test: `.venv/bin/pytest tests/path/to/test.py::test_name`
+- **Interpreter**: `./.venv/bin/python`
+- **Testing**: `./.venv/bin/pytest`
+    - Parallel: `./.venv/bin/pytest -n auto`
+    - Single Test: `./.venv/bin/pytest tests/path/to/test.py::test_name`
 
 ## ✅ Definition of Done
 You are NOT done until you have run these commands and they pass with **zero errors**:
-1.  **Format**: `.venv/bin/ruff format .`
-2.  **Lint**: `.venv/bin/ruff check --fix .`
-3.  **Type Check**: `.venv/bin/ty check .` (Astral's Rust-based type checker)
+1.  **Format**: `./.venv/bin/ruff format .`
+2.  **Lint**: `./.venv/bin/ruff check --fix .`
+3.  **Type Check**: `./.venv/bin/ty check .` (Astral's Rust-based type checker)
 
 ## 🏗️ Architecture & Patterns
 
@@ -52,6 +52,8 @@ You are NOT done until you have run these commands and they pass with **zero err
     - *Note*: Enabled in `initial_migration`.
 - **Migrations**: Located in `src/shared_data_layer/migrations`.
     - **Tests**: Migrations run automatically via `engine` fixture in `conftest.py`.
+    - **Generation**: Use `tests/test_migrations.py` to generate migrations using Testcontainers.
+        - Run: `DATABASE_URL=postgresql://user:pass@localhost:5432/db uv run pytest -s tests/test_migrations.py`
     - **Manual**: `alembic upgrade head`.
 - **Stored Procedures**: `workflow_nodes_move_subtree` handles ltree moves.
     - **Quirk**: The SP requires explicit casting to `ltree` for updates: `SET path = (...)::ltree`.

@@ -30,18 +30,33 @@ class WorkflowNodeFactory(BaseWorkflowFactory[WorkflowNode]):
     __model__ = WorkflowNode
 
     path = Ltree("top.child")
+    type = Use(lambda: "task")
+    level = Use(lambda: "coarse")
+    description = Use(lambda: "desc")
+    preconditions = Use(lambda: {"cond": "val"})
+    tool_hints = Use(lambda: ["hint"])
+    artifacts = Use(lambda: {"art": "val"})
 
 
 class WorkflowEdgeFactory(BaseWorkflowFactory[WorkflowEdge]):
     __model__ = WorkflowEdge
+    transition_type = Use(lambda: "success")
+    confidence = Use(lambda: 0.9)
+    metadata_ = Use(lambda: {"meta": "data"})
 
 
 class WorkflowVersionFactory(BaseWorkflowFactory[WorkflowVersion]):
     __model__ = WorkflowVersion
     nodes = Use(WorkflowNodeFactory.batch, size=2)
     edges = Use(WorkflowEdgeFactory.batch, size=1)
+    version_number = Use(lambda: 1)
+    definition = Use(lambda: {"def": "val"})
 
 
 class WorkflowGraphFactory(BaseWorkflowFactory[WorkflowGraph]):
     __model__ = WorkflowGraph
     versions = Use(WorkflowVersionFactory.batch, size=1)
+    name = Use(lambda: "graph")
+    domain = Use(lambda: "domain")
+    status = Use(lambda: "published")
+    metadata_ = Use(lambda: {"meta": "data"})

@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID as PyUUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,6 +21,26 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     embedding: Mapped[Optional[Vector]] = mapped_column(
         Vector(512), nullable=True
     )  # Per docs
+
+    # Provenance
+    document_id: Mapped[Optional[PyUUID]] = mapped_column(
+        ForeignKey("documents.id"), nullable=True
+    )
+    chunk_id: Mapped[Optional[PyUUID]] = mapped_column(
+        ForeignKey("chunks.id"), nullable=True
+    )
+    algo_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    first_seen_at: Mapped[Optional[DateTime]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[Optional[DateTime]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Metadata
+    labels: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
+    properties: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    score: Mapped[float] = mapped_column(Float, default=1.0)
 
     # Scope
     country_code: Mapped[Optional[str]] = mapped_column(
@@ -53,6 +73,16 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     evidence_span: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    directional: Mapped[bool] = mapped_column(Boolean, default=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    first_seen_at: Mapped[Optional[DateTime]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[Optional[DateTime]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    algo_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     source = relationship(
         "GraphEntity", foreign_keys=[source_id], back_populates="edges_out"
     )
@@ -81,8 +111,8 @@ class GraphEvidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "graph_communities"
 
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    community_key: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     level: Mapped[int] = mapped_column(Integer, default=0)  # Hierarchical level
 
     entity_ids: Mapped[list[PyUUID]] = mapped_column(ARRAY(PG_UUID), nullable=True)

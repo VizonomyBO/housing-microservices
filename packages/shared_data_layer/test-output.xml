@@ -1,0 +1,424 @@
+<test-run id="2" testcasecount="1" result="Passed" start-time="2025-11-26 17:59:43.500647" end-time="2025-11-26 17:59:45.655826" duration="2" total="1" passed="0" failed="1" inconclusive="0" skipped="0" asserts="0" clr-version="3.9.7 (default, Sep 16 2021, 13:09:58) &#10;[GCC 7.5.0]" engine-version="3.6.2"><command-line>/home/nubol23/anaconda3/bin/pytest -s tests/test_migrations.py</command-line><filter><test re="0">tests/test_migrations.py</test></filter><test-suite id="tests/test_migrations.py" name="tests/test_migrations.py" fullname="tests/test_migrations.py" methodname="" classname="" runstate="Runnable" type="Assembly" testcasecount="1" result="Passed" label="" start-time="2025-11-26 17:59:43.701342" end-time="2025-11-26 17:59:45.655680" duration="1.954338" asserts="0" total="1" passed="0" failed="1" warnings="0" inconclusive="0" skipped="0"><properties><property name="python_version" value="3.9.7 (default, Sep 16 2021, 13:09:58) &#10;[GCC 7.5.0]" /></properties><test-case id="100" name="tests/test_migrations.py::test_generate_migration" fullname="tests/test_migrations.py::test_generate_migration" methodname="test_generate_migration" classname="tests/test_migrations.py" runstate="Runnable" seed="1" result="Failed" label="Starts a Postgres container and generates an Alembic migration&#10;    based on the current model definitions." start-time="2025-11-26 17:59:43.701342" end-time="2025-11-26 17:59:45.655680" duration="1.954338" asserts="0"><properties><property name="python-version" value="3.9.7 (default, Sep 16 2021, 13:09:58) &#10;[GCC 7.5.0]" /><property name="fspath" value="tests/test_migrations.py" /></properties><environment framework-version="3.6.2" clr-version="3.9.7 (default, Sep 16 2021, 13:09:58) &#10;[GCC 7.5.0]" os-version="6.8.0-87-generic" platform="Linux" cwd="/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer" machine-name="x86_64" user="" user-domain="" culture="en_US" uiculture="en_US" os-architecture="64bit" /><failure><message><![CDATA[@pytest.mark.asyncio
+    async def test_generate_migration():
+        """
+        Starts a Postgres container and generates an Alembic migration
+        based on the current model definitions.
+        """
+        with PostgresContainerWithVector() as postgres:
+            # Get connection URL (asyncpg is default in container, but alembic uses sync driver usually?
+            # Actually env.py uses async_engine_from_config, so it expects an async url)
+            # However, for the *initial* connection check or if we were using sync alembic, we might need sync.
+            # But our env.py is async.
+    
+            db_url = postgres.get_connection_url(driver="asyncpg")
+    
+            # Monkeypatch settings so env.py picks up the container URL
+            settings.DATABASE_URL = db_url
+    
+            # Setup paths
+            base_dir = Path(__file__).parent.parent
+            migrations_dir = base_dir / "src" / "shared_data_layer" / "migrations"
+            alembic_ini_path = migrations_dir / "alembic.ini"
+            versions_dir = migrations_dir / "versions"
+    
+            assert alembic_ini_path.exists(), f"alembic.ini not found at {alembic_ini_path}"
+    
+            # Count existing migrations
+            existing_versions = list(versions_dir.glob("*.py"))
+            initial_count = len(existing_versions)
+    
+            # Configure Alembic
+            alembic_cfg = Config(str(alembic_ini_path))
+            alembic_cfg.set_main_option("script_location", str(migrations_dir))
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    
+            # Run revision --autogenerate
+            print(f"Generating migration connected to {db_url}...", flush=True)
+    
+            # Ensure we don't drop into PDB
+            import os
+            os.environ["PYTHONBREAKPOINT"] = "0"
+    
+            # We wrap this in a try/except to print output if it fails
+            try:
+                # We need to run this in a sync context, but command.revision is sync.
+                # The env.py will handle the async engine creation.
+&gt;               command.revision(
+                    alembic_cfg,
+                    message="align_models_with_design",
+                    autogenerate=True
+                )
+
+tests/test_migrations.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+config = &lt;alembic.config.Config object at 0x79e1477ac670&gt;
+message = 'align_models_with_design'
+autogenerate = True, sql = False
+head = 'head', splice = False
+branch_label = None, version_path = None
+rev_id = None, depends_on = None
+process_revision_directives = None
+
+    def revision(
+        config: Config,
+        message: Optional[str] = None,
+        autogenerate: bool = False,
+        sql: bool = False,
+        head: str = "head",
+        splice: bool = False,
+        branch_label: Optional[_RevIdType] = None,
+        version_path: Union[str, os.PathLike[str], None] = None,
+        rev_id: Optional[str] = None,
+        depends_on: Optional[str] = None,
+        process_revision_directives: Optional[ProcessRevisionDirectiveFn] = None,
+    ) -&gt; Union[Optional[Script], List[Optional[Script]]]:
+        """Create a new revision file.
+    
+        :param config: a :class:`.Config` object.
+    
+        :param message: string message to apply to the revision; this is the
+         ``-m`` option to ``alembic revision``.
+    
+        :param autogenerate: whether or not to autogenerate the script from
+         the database; this is the ``--autogenerate`` option to
+         ``alembic revision``.
+    
+        :param sql: whether to dump the script out as a SQL string; when specified,
+         the script is dumped to stdout.  This is the ``--sql`` option to
+         ``alembic revision``.
+    
+        :param head: head revision to build the new revision upon as a parent;
+         this is the ``--head`` option to ``alembic revision``.
+    
+        :param splice: whether or not the new revision should be made into a
+         new head of its own; is required when the given ``head`` is not itself
+         a head.  This is the ``--splice`` option to ``alembic revision``.
+    
+        :param branch_label: string label to apply to the branch; this is the
+         ``--branch-label`` option to ``alembic revision``.
+    
+        :param version_path: string symbol identifying a specific version path
+         from the configuration; this is the ``--version-path`` option to
+         ``alembic revision``.
+    
+        :param rev_id: optional revision identifier to use instead of having
+         one generated; this is the ``--rev-id`` option to ``alembic revision``.
+    
+        :param depends_on: optional list of "depends on" identifiers; this is the
+         ``--depends-on`` option to ``alembic revision``.
+    
+        :param process_revision_directives: this is a callable that takes the
+         same form as the callable described at
+         :paramref:`.EnvironmentContext.configure.process_revision_directives`;
+         will be applied to the structure generated by the revision process
+         where it can be altered programmatically.   Note that unlike all
+         the other parameters, this option is only available via programmatic
+         use of :func:`.command.revision`.
+    
+        """
+    
+        script_directory = ScriptDirectory.from_config(config)
+    
+        command_args = dict(
+            message=message,
+            autogenerate=autogenerate,
+            sql=sql,
+            head=head,
+            splice=splice,
+            branch_label=branch_label,
+            version_path=version_path,
+            rev_id=rev_id,
+            depends_on=depends_on,
+        )
+        revision_context = autogen.RevisionContext(
+            config,
+            script_directory,
+            command_args,
+            process_revision_directives=process_revision_directives,
+        )
+    
+        environment = util.asbool(
+            config.get_alembic_option("revision_environment")
+        )
+    
+        if autogenerate:
+            environment = True
+    
+            if sql:
+                raise util.CommandError(
+                    "Using --sql with --autogenerate does not make any sense"
+                )
+    
+            def retrieve_migrations(rev, context):
+                revision_context.run_autogenerate(rev, context)
+                return []
+    
+        elif environment:
+    
+            def retrieve_migrations(rev, context):
+                revision_context.run_no_autogenerate(rev, context)
+                return []
+    
+        elif sql:
+            raise util.CommandError(
+                "Using --sql with the revision command when "
+                "revision_environment is not configured does not make any sense"
+            )
+    
+        if environment:
+            with EnvironmentContext(
+                config,
+                script_directory,
+                fn=retrieve_migrations,
+                as_sql=sql,
+                template_args=revision_context.template_args,
+                revision_context=revision_context,
+            ):
+&gt;               script_directory.run_env()
+
+/home/nubol23/anaconda3/lib/python3.9/site-packages/alembic/command.py:309: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;alembic.script.base.ScriptDirectory object at 0x79e1477acc70&gt;
+
+    def run_env(self) -&gt; None:
+        """Run the script environment.
+    
+        This basically runs the ``env.py`` script present
+        in the migration environment.   It is called exclusively
+        by the command functions in :mod:`alembic.command`.
+    
+    
+        """
+&gt;       util.load_python_file(self.dir, "env.py")
+
+/home/nubol23/anaconda3/lib/python3.9/site-packages/alembic/script/base.py:549: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+dir_ = PosixPath('/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer/src/shared_data_layer/migrations')
+filename = 'env.py'
+
+    def load_python_file(
+        dir_: Union[str, os.PathLike[str]], filename: Union[str, os.PathLike[str]]
+    ) -&gt; ModuleType:
+        """Load a file from the given path as a Python module."""
+    
+        dir_ = pathlib.Path(dir_)
+        filename_as_path = pathlib.Path(filename)
+        filename = filename_as_path.name
+    
+        module_id = re.sub(r"\W", "_", filename)
+        path = dir_ / filename
+        ext = path.suffix
+        if ext == ".py":
+            if path.exists():
+&gt;               module = load_module_py(module_id, path)
+
+/home/nubol23/anaconda3/lib/python3.9/site-packages/alembic/util/pyfiles.py:116: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+module_id = 'env_py'
+path = PosixPath('/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer/src/shared_data_layer/migrations/env.py')
+
+    def load_module_py(
+        module_id: str, path: Union[str, os.PathLike[str]]
+    ) -&gt; ModuleType:
+        spec = importlib.util.spec_from_file_location(module_id, path)
+        assert spec
+        module = importlib.util.module_from_spec(spec)
+&gt;       spec.loader.exec_module(module)  # type: ignore
+
+/home/nubol23/anaconda3/lib/python3.9/site-packages/alembic/util/pyfiles.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;_frozen_importlib_external.SourceFileLoader object at 0x79e147746190&gt;
+module = &lt;module 'env_py' from '/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer/src/shared_data_layer/migrations/env.py'&gt;
+
+&gt;   ???
+
+&lt;frozen importlib._bootstrap_external&gt;:850: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+f = &lt;built-in function exec&gt;
+args = (&lt;code object &lt;module&gt; at 0x79e147756030, file "/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/sh...ces/packages/shared_data_layer/src/shared_data_layer/migrations/__pycache__/env.cpython-39.pyc', '__doc__': None, ...})
+kwds = {}
+
+&gt;   ???
+
+&lt;frozen importlib._bootstrap&gt;:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    import asyncio
+    from logging.config import fileConfig
+    
+    from alembic import context
+    from sqlalchemy import pool
+    from sqlalchemy.engine import Connection
+    from sqlalchemy.ext.asyncio import async_engine_from_config
+    
+    from shared_data_layer.config.settings import settings
+    
+    # Import all models to ensure they are registered with Base.metadata
+&gt;   from shared_data_layer.db import models  # noqa
+
+src/shared_data_layer/migrations/env.py:12: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    from .documents import Artifact, ConversationDocument, Document, IngestionJob
+    from .knowledge_graph import GraphCommunity, GraphEdge, GraphEntity, GraphEvidence
+&gt;   from .retrieval import Chunk, ChunkMetrics, RetrievalRun, RetrievalRunItem
+
+src/shared_data_layer/db/models/__init__.py:3: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    from typing import Optional
+    from uuid import UUID as PyUUID
+    
+    from pgvector.sqlalchemy import Vector
+    from sqlalchemy import Float, ForeignKey, Integer, String, Text
+    from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+    from sqlalchemy.orm import Mapped, mapped_column, relationship
+    
+    from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+    
+    
+    class Chunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+        __tablename__ = "chunks"
+    
+        document_id: Mapped[PyUUID] = mapped_column(
+            ForeignKey("documents.id"), nullable=False
+        )
+        chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+        text: Mapped[str] = mapped_column(Text, nullable=False)
+        embedding: Mapped[Optional[Vector]] = mapped_column(
+            Vector(1024)
+        )  # Voyage-3.5-lite dim per docs
+        # Voyage 3.5 lite dimension is 1536? Actually Voyage-3-lite is 512 or 1024?
+        # Let's check system_architecture.md again or assume 1536 for now (OpenAI compat).
+        # Wait, system_architecture says "Voyage AI for embeddings (voyage-3.5-lite)".
+        # Voyage-3-lite is 512 dimensions usually? No, let's check.
+        # Actually, let's make it configurable or just use a standard size.
+        # But wait, the reference implementation used `settings.VECTOR_DIMENSION`.
+        # I should check settings.py or just import settings.
+    
+        token_count: Mapped[int] = mapped_column(Integer, nullable=True)
+        page_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+        type: Mapped[str] = mapped_column(String, default="text")  # text, table, image
+        artifact_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+        schema_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+        content_hash: Mapped[str] = mapped_column(String, nullable=False)
+        owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(
+            nullable=True
+        )  # Denormalized for RLS
+        country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+        section_path: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
+        bbox: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+        text_tsv: Mapped[Optional[str]] = mapped_column(
+            TSVECTOR, nullable=True
+        )  # Generated column
+        table_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    
+        # Metadata for filtering
+        metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    
+        # Relationships
+        document = relationship("Document", back_populates="chunks")
+        metrics = relationship("ChunkMetrics", back_populates="chunk", uselist=False)
+    
+        __table_args__ = (
+            # Indexes will be defined in migrations or here if we want to be explicit
+            # Index("ix_chunks_embedding", "embedding", postgresql_using="hnsw",
+            # postgresql_with={"m": 16, "ef_construction": 64}),
+        )
+    
+    
+    class ChunkMetrics(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+        __tablename__ = "chunk_metrics"
+    
+        chunk_id: Mapped[PyUUID] = mapped_column(
+            ForeignKey("chunks.id"), unique=True, nullable=False
+        )
+        retrieval_count: Mapped[int] = mapped_column(Integer, default=0)
+        last_retrieved_at: Mapped[Optional[float]] = mapped_column(
+            Float, nullable=True
+        )  # Timestamp
+    
+        chunk = relationship("Chunk", back_populates="metrics")
+    
+    
+&gt;   class RetrievalRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+
+src/shared_data_layer/db/models/retrieval.py:77: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    class RetrievalRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+        __tablename__ = "retrieval_runs"
+    
+        query_text: Mapped[str] = mapped_column(Text, nullable=False)
+&gt;       filters: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+E       NameError: name 'JSON' is not defined
+
+src/shared_data_layer/db/models/retrieval.py:81: NameError
+
+During handling of the above exception, another exception occurred:
+
+    @pytest.mark.asyncio
+    async def test_generate_migration():
+        """
+        Starts a Postgres container and generates an Alembic migration
+        based on the current model definitions.
+        """
+        with PostgresContainerWithVector() as postgres:
+            # Get connection URL (asyncpg is default in container, but alembic uses sync driver usually?
+            # Actually env.py uses async_engine_from_config, so it expects an async url)
+            # However, for the *initial* connection check or if we were using sync alembic, we might need sync.
+            # But our env.py is async.
+    
+            db_url = postgres.get_connection_url(driver="asyncpg")
+    
+            # Monkeypatch settings so env.py picks up the container URL
+            settings.DATABASE_URL = db_url
+    
+            # Setup paths
+            base_dir = Path(__file__).parent.parent
+            migrations_dir = base_dir / "src" / "shared_data_layer" / "migrations"
+            alembic_ini_path = migrations_dir / "alembic.ini"
+            versions_dir = migrations_dir / "versions"
+    
+            assert alembic_ini_path.exists(), f"alembic.ini not found at {alembic_ini_path}"
+    
+            # Count existing migrations
+            existing_versions = list(versions_dir.glob("*.py"))
+            initial_count = len(existing_versions)
+    
+            # Configure Alembic
+            alembic_cfg = Config(str(alembic_ini_path))
+            alembic_cfg.set_main_option("script_location", str(migrations_dir))
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    
+            # Run revision --autogenerate
+            print(f"Generating migration connected to {db_url}...", flush=True)
+    
+            # Ensure we don't drop into PDB
+            import os
+            os.environ["PYTHONBREAKPOINT"] = "0"
+    
+            # We wrap this in a try/except to print output if it fails
+            try:
+                # We need to run this in a sync context, but command.revision is sync.
+                # The env.py will handle the async engine creation.
+                command.revision(
+                    alembic_cfg,
+                    message="align_models_with_design",
+                    autogenerate=True
+                )
+                print("Alembic revision command completed.", flush=True)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+&gt;               pytest.fail(f"Alembic revision failed: {e}")
+E               Failed: Alembic revision failed: name 'JSON' is not defined
+
+tests/test_migrations.py:62: Failed]]></message><stack-trace><![CDATA[/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer/tests/test_migrations.py:62: Failed: Alembic revision failed: name 'JSON' is not defined]]></stack-trace></failure><reason><message><![CDATA[]]></message></reason><output><![CDATA[]]></output></test-case><environment framework-version="3.6.2" clr-version="3.9.7 (default, Sep 16 2021, 13:09:58) &#10;[GCC 7.5.0]" os-version="6.8.0-87-generic" platform="Linux" cwd="/home/nubol23/Desktop/Codes/Vizonomy/housing-microservices/packages/shared_data_layer" machine-name="x86_64" user="" user-domain="" culture="en_US" uiculture="en_US" os-architecture="64bit" /></test-suite></test-run>
