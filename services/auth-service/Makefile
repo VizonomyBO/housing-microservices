@@ -66,3 +66,4 @@ run:
 quality: format-check lint type-check
 	@echo "All quality checks passed!"
 
+

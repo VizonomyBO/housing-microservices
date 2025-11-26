@@ -89,3 +89,21 @@ dist/
 logs/
 *.log
 assistant-folder/
+.cursor/
+.cursorrules
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+terraform.tfplan
+tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.md
