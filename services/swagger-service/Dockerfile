@@ -56,6 +56,9 @@ RUN npm ci --only=production
 # Copy built application from test stage
 COPY --from=test /app/dist ./dist
 
+# Copy static spec files for Lambda services
+COPY mock-specs ./mock-specs
+
 # Create non-root user (handle existing GID/UID gracefully)
 RUN (getent group appuser >/dev/null 2>&1 || \
      (addgroup -g 1000 appuser 2>/dev/null || addgroup appuser)) && \
