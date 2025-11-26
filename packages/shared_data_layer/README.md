@@ -32,24 +32,44 @@ This package is intended to be installed as a local dependency in other services
 
 ### Development Setup
 
-This project uses `uv` for dependency management.
+This project uses `uv` for all dependency management. We rely on `pyproject.toml` as the single source of truth.
 
 1.  **Install uv** (if not already installed):
     ```bash
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 
-2.  **Create Virtual Environment (Python 3.13)**:
+2.  **Sync Dependencies**:
+    This will create the virtual environment and install all dependencies (including dev and test) defined in `pyproject.toml`.
     ```bash
-    uv venv --python 3.13
+    uv sync --all-extras
     ```
 
-3.  **Install Dependencies**:
+3.  **Activate Virtual Environment** (Optional but recommended for IDEs):
     ```bash
-    uv pip install -e .
-    # Or if using pyproject.toml directly
-    uv sync
+    source .venv/bin/activate
     ```
+
+### Adding Dependencies
+
+To add a new dependency:
+```bash
+uv add <package_name>
+```
+
+To add a dev dependency:
+```bash
+uv add --dev <package_name>
+```
+
+### Deployment (Production)
+
+To install **only** the production dependencies (excluding development tools and test libraries):
+
+```bash
+uv sync --no-dev
+```
+This command installs the packages defined in `[project.dependencies]` and excludes `[dependency-groups]` and `[project.optional-dependencies]`.
 
 ### Installation (as dependency)
 In your service's `pyproject.toml`:

@@ -3,7 +3,7 @@
 This document provides context and instructions for AI agents working on the `shared_data_layer` package.
 
 ## Environment & Execution
-- **Setup**: Use `uv` to set up the environment: `uv venv --python 3.13` and `uv sync`.
+- **Setup**: Use `uv` strictly. Run `uv sync --all-extras` to install everything. Do NOT use `pip` or `requirements.txt`.
 - **Interpreter**: Use the virtual environment directly: `.venv/bin/python`.
 - **Testing**: Use `.venv/bin/pytest`.
 - **Parallel Execution**: Tests support parallel execution: `.venv/bin/pytest -n auto`.
