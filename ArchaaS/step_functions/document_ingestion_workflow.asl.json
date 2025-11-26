@@ -1,0 +1,333 @@
+{
+  "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts",
+  "StartAt": "Preflight",
+  "States": {
+    "Preflight": {
+      "Type": "Task",
+      "Comment": "Validate MIME type, check deduplication, create artifact placeholders",
+      "Resource": "${PreflightValidatorLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "access_scope.$": "$.access_scope",
+        "s3_key.$": "$.s3_key",
+        "s3_bucket.$": "$.s3_bucket",
+        "country_code.$": "$.country_code",
+        "language.$": "$.language",
+        "content_hash.$": "$.content_hash",
+        "trace_id.$": "$.trace_id",
+        "callback_url.$": "$.callback_url",
+        "retries.$": "$.retries"
+      },
+      "ResultPath": "$.preflight_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["ValidationTransientError", "ServiceException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["DuplicateDocumentError"],
+          "ResultPath": "$.error",
+          "Next": "HandleDuplicate"
+        },
+        {
+          "ErrorEquals": ["ValidationPermanentError"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "Convert"
+    },
+    "HandleDuplicate": {
+      "Type": "Task",
+      "Comment": "Handle deduplicated documents - skip to finalize with reference to existing doc",
+      "Resource": "${IngestionFinalizerLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "status": "DEDUPED",
+        "deduped_from.$": "$.error.existing_document_id",
+        "trace_id.$": "$.trace_id",
+        "callback_url.$": "$.callback_url"
+      },
+      "ResultPath": "$.finalize_result",
+      "End": true
+    },
+    "Convert": {
+      "Type": "Task",
+      "Comment": "Convert PDF/DOCX to Markdown and structured JSON using Marker",
+      "Resource": "${MarkerConverterLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "s3_key.$": "$.preflight_result.validated_s3_key",
+        "s3_bucket.$": "$.s3_bucket",
+        "converted_key_prefix.$": "$.preflight_result.converted_key_prefix",
+        "source_type.$": "$.preflight_result.source_type",
+        "trace_id.$": "$.trace_id"
+      },
+      "ResultPath": "$.convert_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["ConversionTransientError", "ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "Chunk"
+    },
+    "Chunk": {
+      "Type": "Task",
+      "Comment": "Split converted content into semantic chunks (~500 tokens)",
+      "Resource": "${ChunkBuilderLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "country_code.$": "$.country_code",
+        "language.$": "$.language",
+        "block_inventory.$": "$.convert_result.block_inventory",
+        "converted_key_prefix.$": "$.preflight_result.converted_key_prefix",
+        "trace_id.$": "$.trace_id"
+      },
+      "ResultPath": "$.chunk_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "ParallelProcessing"
+    },
+    "ParallelProcessing": {
+      "Type": "Parallel",
+      "Comment": "Process tables, images, and embeddings in parallel",
+      "Branches": [
+        {
+          "StartAt": "NormalizeTables",
+          "States": {
+            "NormalizeTables": {
+              "Type": "Task",
+              "Comment": "Normalize table blocks to structured JSON",
+              "Resource": "${TableNormalizerLambdaArn}",
+              "Parameters": {
+                "ingestion_id.$": "$.ingestion_id",
+                "document_id.$": "$.document_id",
+                "table_blocks.$": "$.convert_result.block_inventory.tables",
+                "trace_id.$": "$.trace_id"
+              },
+              "ResultPath": "$.table_result",
+              "Retry": [
+                {
+                  "ErrorEquals": ["ThrottlingException", "ServiceException"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 5,
+                  "BackoffRate": 1.5
+                }
+              ],
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "CaptionImages",
+          "States": {
+            "CaptionImages": {
+              "Type": "Task",
+              "Comment": "Generate captions for figure/image blocks",
+              "Resource": "${FigureCaptionerLambdaArn}",
+              "Parameters": {
+                "ingestion_id.$": "$.ingestion_id",
+                "document_id.$": "$.document_id",
+                "figure_blocks.$": "$.convert_result.block_inventory.figures",
+                "trace_id.$": "$.trace_id"
+              },
+              "ResultPath": "$.caption_result",
+              "Retry": [
+                {
+                  "ErrorEquals": ["LLMTimeoutError"],
+                  "IntervalSeconds": 10,
+                  "MaxAttempts": 1,
+                  "BackoffRate": 1.0
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.parallel_results",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "Embed"
+    },
+    "Embed": {
+      "Type": "Task",
+      "Comment": "Generate Voyage AI embeddings and write to PostgreSQL/pgvector",
+      "Resource": "${EmbeddingWriterLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "access_scope.$": "$.access_scope",
+        "country_code.$": "$.country_code",
+        "chunk_ids.$": "$.chunk_result.chunk_ids",
+        "chunks_s3_path.$": "$.chunk_result.chunks_s3_path",
+        "table_schemas.$": "$.parallel_results[0].table_result.schema_summaries",
+        "figure_captions.$": "$.parallel_results[1].caption_result.captions",
+        "trace_id.$": "$.trace_id"
+      },
+      "ResultPath": "$.embed_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["VoyageRateLimitError", "VoyageServiceError"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 5,
+          "BackoffRate": 2.0,
+          "JitterStrategy": "FULL"
+        },
+        {
+          "ErrorEquals": ["DatabaseTransientError"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "Finalize"
+    },
+    "Finalize": {
+      "Type": "Task",
+      "Comment": "Update document status to READY and emit completion event",
+      "Resource": "${IngestionFinalizerLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "access_scope.$": "$.access_scope",
+        "content_hash.$": "$.preflight_result.content_hash",
+        "status": "READY",
+        "chunk_count.$": "$.chunk_result.chunk_count",
+        "embed_count.$": "$.embed_result.vectors_written",
+        "trace_id.$": "$.trace_id",
+        "callback_url.$": "$.callback_url",
+        "timestamps": {
+          "started_at.$": "$$.Execution.StartTime",
+          "completed_at.$": "$$.State.EnteredTime"
+        }
+      },
+      "ResultPath": "$.finalize_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["ServiceException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 1,
+          "BackoffRate": 1.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "EmitCompletionEvent"
+    },
+    "EmitCompletionEvent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.completed",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "content_hash.$": "$.preflight_result.content_hash",
+              "access_scope.$": "$.access_scope",
+              "chunk_count.$": "$.chunk_result.chunk_count",
+              "execution_arn.$": "$$.Execution.Id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "End": true
+    },
+    "DeadLetter": {
+      "Type": "Task",
+      "Comment": "Handle failed ingestions - update status and emit failure event",
+      "Resource": "${IngestionFinalizerLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "status": "FAILED",
+        "error.$": "$.error",
+        "trace_id.$": "$.trace_id",
+        "callback_url.$": "$.callback_url"
+      },
+      "ResultPath": "$.dlq_result",
+      "Next": "EmitFailureEvent"
+    },
+    "EmitFailureEvent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.failed",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "failed_state.$": "$.error.state",
+              "error_code.$": "$.error.Cause",
+              "will_retry": false,
+              "execution_arn.$": "$$.Execution.Id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "End": true
+    }
+  }
+}
+
+

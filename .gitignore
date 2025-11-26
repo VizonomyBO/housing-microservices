@@ -105,3 +105,9 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Lambda packaging artifacts
+**/layer_package/
+**/dist/*.zip
+*.zip
+*.md
