@@ -26,7 +26,7 @@
 | Term | Definition | Implementation detail |
 | --- | --- | --- |
 | **Workflow graph** | Versioned playbook (coarse/mid/fine) describing how experts triage incidents, budget questions, etc. | `workflow_graphs` table; each row has domain, country, status, semantic version. |
-| **Node** | A single step with granularity (`coarse`, `mid`, `fine`) and metadata (preconditions, tool hints). | `workflow_nodes` with `ltree path` (e.g., `triage.validate_data.check_ledger`). |
+| **Node** | A single step with granularity (`coarse`, `mid`, `fine`) and metadata (preconditions, tool hints). | `workflow_nodes` linked to `workflow_versions` with `ltree path` (e.g., `triage.validate_data.check_ledger`). |
 | **Edge** | Transition between nodes with type (`success`, `repair`, `clarification`). | `workflow_edges` referencing source/target nodes; includes confidence and constraints. |
 | **Version history** | Auditable log of playbook changes. | `workflow_versions` ties together reviewers, diffs, timestamps. |
 

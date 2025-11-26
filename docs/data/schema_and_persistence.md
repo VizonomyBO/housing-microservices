@@ -165,6 +165,12 @@ Primary key `(conversation_id, document_id)`. Triggers increment/decrement `docu
 | `bbox` | `jsonb` | `[x1,y1,x2,y2]`. |
 | `embedding` | `vector(1024)` | Voyage 3.5-lite vector (normalized). |
 | `metadata` | `jsonb` | Pillar tags, languages. |
+| `owner_user_id` | `uuid` | Denormalized for RLS. Null for base docs. |
+| `country_code` | `char(3)` | Partition key. |
+| `section_path` | `text[]` | Hierarchical headings. |
+| `bbox` | `jsonb` | `[x1,y1,x2,y2]`. |
+| `text_tsv` | `tsvector` | Generated column for keyword search. |
+| `table_payload` | `jsonb` | Normalized table data, queryable via Polars SQL. |
 | `created_at` | `timestamptz` | Insert timestamp. |
 
 Indexes: pgvector HNSW/IVFFlat on `embedding`; GIN on `text_tsv`; B-tree `(document_id, chunk_type, position)`; partial `(country_code, chunk_type)`; LIST partition by `country_code` (default partition for misc).
@@ -339,7 +345,7 @@ Indexes: unique `(community_key, algo_version)`; GIN on `entity_ids`.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
-| `workflow_graph_id` | `uuid` | FK → `workflow_graphs`. |
+| `workflow_version_id` | `uuid` | FK → `workflow_versions`. | |
 | `node_key` | `text` | Unique within graph. |
 | `level` | `text` | Enum (`coarse`, `mid`, `fine`). |
 | `path` | `ltree` | `coarse.mid.fine` path for quick traversal. |
@@ -349,11 +355,11 @@ Indexes: unique `(community_key, algo_version)`; GIN on `entity_ids`.
 | `artifacts` | `jsonb` | Example SQL, prompts, doc references. |
 | `created_at` | `timestamptz` | Audit. |
 
-Indexes: unique `(workflow_graph_id, node_key)`; GIST on `path` via `ltree`.
+Indexes: unique `(workflow_version_id, node_key)`; GIST on `path` via `ltree`.
 
 **Workflow guardrails**
 - Depth ceiling: `workflow_graphs.max_depth` (default 6 covering coarse→mid→fine) and a `CHECK (nlevel(path) <= max_depth)` constraint prevent runaway recursion, aligning with ltree guidance on bounded hierarchies ([DEV Community](https://dev.to/dowerdev/implementing-hierarchical-data-structures-in-postgresql-ltree-vs-adjacency-list-vs-closure-table-2jpb)).
-- Cycle prevention: a `BEFORE INSERT OR UPDATE` trigger asserts that `path` is never a parent/descendant of itself by checking `EXISTS (SELECT 1 FROM workflow_nodes WHERE workflow_graph_id = NEW.workflow_graph_id AND NEW.path <@ path)` and the inverse. Failed checks raise a descriptive error so authoring UIs can surface the violation.
+- Cycle prevention: a `BEFORE INSERT OR UPDATE` trigger asserts that `path` is never a parent/descendant of itself by checking `EXISTS (SELECT 1 FROM workflow_nodes WHERE workflow_version_id = NEW.workflow_version_id AND NEW.path <@ path)` and the inverse. Failed checks raise a descriptive error so authoring UIs can surface the violation.
 - Safe moves: re-parenting is only done through `workflow_nodes_move_subtree(graph_id uuid, source_path ltree, target_parent_path ltree)` which:
   1. Locks the source subtree (`FOR UPDATE` on `path <@ source_path`).
   2. Validates that `target_parent_path` is not within the subtree, preserving acyclicity.
@@ -366,7 +372,7 @@ Indexes: unique `(workflow_graph_id, node_key)`; GIST on `path` via `ltree`.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
-| `workflow_graph_id` | `uuid` | FK → `workflow_graphs`. |
+| `workflow_version_id` | `uuid` | FK → `workflow_versions`. | |
 | `source_node_id` | `uuid` | FK → `workflow_nodes`. |
 | `target_node_id` | `uuid` | FK → `workflow_nodes`. |
 | `transition_type` | `text` | Enum (`success`, `failure`, `clarification`, `repair`). |
@@ -374,7 +380,7 @@ Indexes: unique `(workflow_graph_id, node_key)`; GIST on `path` via `ltree`.
 | `metadata` | `jsonb` | Additional constraints (e.g., max retries). |
 | `created_at` | `timestamptz` | Audit. |
 
-Indexes: `(workflow_graph_id, source_node_id)` and `(workflow_graph_id, target_node_id)`.
+Indexes: `(workflow_version_id, source_node_id)` and `(workflow_version_id, target_node_id)`.
 
 **Table: workflow_versions**
 
