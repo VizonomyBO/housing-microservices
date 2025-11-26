@@ -2,8 +2,8 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Document Service API",
-    "version": "1.0.0",
-    "description": "Document ingestion and management API (AWS Lambda)"
+    "version": "2.0.0",
+    "description": "Document ingestion and management API (AWS Lambda). Simplified flow - no manual hash calculation required!"
   },
   "servers": [
     {
@@ -15,7 +15,7 @@
     "/v1/documents/upload": {
       "post": {
         "summary": "Upload Document",
-        "description": "Registers a new document for upload and returns a presigned S3 URL. If a document with the same content_hash already exists for this user, returns DEDUPED status instead.",
+        "description": "**Simplified Upload Flow:**\n\n1. Call this endpoint with document metadata (name, type, size)\n2. Receive a presigned S3 URL\n3. Upload your file directly to S3 using the presigned URL\n4. System automatically calculates hash and checks for duplicates\n5. If new: document is processed through the ingestion pipeline\n6. If duplicate: returns existing document reference\n\n**No manual hash calculation required!**",
         "operationId": "uploadDocument",
         "tags": ["Documents"],
         "security": [
@@ -39,7 +39,6 @@
                     "country_code": "ARG",
                     "language": "en",
                     "tags": ["housing", "finance", "subsidies"],
-                    "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
                     "file_size_bytes": 1841305,
                     "access_scope": "user_private"
                   }
@@ -52,7 +51,6 @@
                     "country_code": "USA",
                     "language": "en",
                     "tags": ["policy", "report"],
-                    "content_hash": "a1b2c3d4e5f6...",
                     "file_size_bytes": 524288,
                     "access_scope": "user_private"
                   }
@@ -63,7 +61,7 @@
         },
         "responses": {
           "201": {
-            "description": "Document registered successfully, presigned URL returned",
+            "description": "Document registered - use the presigned URL to upload your file",
             "content": {
               "application/json": {
                 "schema": {
@@ -71,43 +69,19 @@
                 },
                 "example": {
                   "document_id": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
-                  "ingestion_id": "d562fd26-f7a3-41b8-968f-270a2d0beeed",
-                  "status": "PENDING_UPLOAD",
-                  "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
-                  "access_scope": "user_private",
-                  "deduped_from": null,
+                  "status": "UPLOADING",
                   "upload": {
                     "url": "https://vizonomy-raw-docs-dev-xxx.s3.amazonaws.com/",
                     "fields": {
-                      "key": "raw/d562fd26-f7a3-41b8-968f-270a2d0beeed/source.pdf",
+                      "key": "raw/ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5/source.pdf",
                       "Content-Type": "application/pdf",
-                      "x-amz-meta-content-hash": "568166f...",
                       "AWSAccessKeyId": "ASIA...",
                       "policy": "eyJ...",
                       "signature": "..."
                     },
                     "expires_in_sec": 900
                   },
-                  "request_id": "abc123"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Document deduplicated (same content already exists)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DocumentUploadResponse"
-                },
-                "example": {
-                  "document_id": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
-                  "ingestion_id": null,
-                  "status": "DEDUPED",
-                  "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
-                  "access_scope": "user_private",
-                  "deduped_from": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
-                  "upload": null,
+                  "message": "Upload your file to the presigned URL. After upload, the system will automatically validate and process your document.",
                   "request_id": "abc123"
                 }
               }
@@ -170,27 +144,6 @@
               }
             }
           },
-          "413": {
-            "description": "File too large",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "error": {
-                    "code": "FILE_TOO_LARGE",
-                    "message": "File size exceeds maximum allowed (104857600 bytes)",
-                    "details": {
-                      "max_size_bytes": 104857600,
-                      "provided_size_bytes": 200000000
-                    },
-                    "request_id": "abc123"
-                  }
-                }
-              }
-            }
-          },
           "500": {
             "description": "Internal server error",
             "content": {
@@ -200,6 +153,46 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}": {
+      "get": {
+        "summary": "Get Document Status",
+        "description": "Get the current status of a document. Use this to poll for processing completion after uploading.",
+        "operationId": "getDocumentStatus",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Document ID returned from upload endpoint"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
           }
         }
       }
@@ -217,7 +210,7 @@
     "schemas": {
       "DocumentUploadRequest": {
         "type": "object",
-        "required": ["document_name", "source_type", "content_hash", "file_size_bytes"],
+        "required": ["document_name", "source_type", "file_size_bytes"],
         "properties": {
           "document_name": {
             "type": "string",
@@ -232,12 +225,6 @@
             "description": "File type/extension",
             "example": "pdf"
           },
-          "content_hash": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$",
-            "description": "SHA-256 hash of file content (hex encoded, 64 chars). Used for deduplication and S3 upload validation.",
-            "example": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256"
-          },
           "file_size_bytes": {
             "type": "integer",
             "minimum": 1,
@@ -247,8 +234,8 @@
           },
           "country_code": {
             "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "description": "ISO 3166-1 alpha-3 country code",
+            "pattern": "^[A-Z]{2,3}$",
+            "description": "ISO country code (optional)",
             "example": "ARG"
           },
           "language": {
@@ -283,7 +270,7 @@
           "callback_url": {
             "type": "string",
             "format": "uri",
-            "description": "Optional webhook URL to call when ingestion completes"
+            "description": "Optional webhook URL to call when processing completes"
           }
         }
       },
@@ -296,40 +283,15 @@
             "description": "Unique document identifier",
             "example": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5"
           },
-          "ingestion_id": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true,
-            "description": "Ingestion workflow identifier (null if deduplicated)",
-            "example": "d562fd26-f7a3-41b8-968f-270a2d0beeed"
-          },
           "status": {
             "type": "string",
-            "enum": ["PENDING_UPLOAD", "DEDUPED"],
-            "description": "Document status after registration",
-            "example": "PENDING_UPLOAD"
-          },
-          "content_hash": {
-            "type": "string",
-            "description": "SHA-256 hash echoed back",
-            "example": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256"
-          },
-          "access_scope": {
-            "type": "string",
-            "description": "Document access scope",
-            "example": "user_private"
-          },
-          "deduped_from": {
-            "type": "string",
-            "format": "uuid",
-            "nullable": true,
-            "description": "Original document ID if this was a duplicate",
-            "example": null
+            "enum": ["UPLOADING"],
+            "description": "Initial status - changes after S3 upload completes",
+            "example": "UPLOADING"
           },
           "upload": {
             "type": "object",
-            "nullable": true,
-            "description": "S3 presigned POST details (null if deduplicated)",
+            "description": "S3 presigned POST details - use this to upload your file",
             "properties": {
               "url": {
                 "type": "string",
@@ -350,9 +312,46 @@
               }
             }
           },
+          "message": {
+            "type": "string",
+            "description": "Instructions for next step"
+          },
           "request_id": {
             "type": "string",
             "description": "Request tracking ID"
+          }
+        }
+      },
+      "DocumentStatusResponse": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["UPLOADING", "PENDING_VALIDATION", "PROCESSING", "COMPLETED", "DEDUPED", "FAILED"],
+            "description": "Current document status"
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 hash (available after upload)",
+            "nullable": true
+          },
+          "deduped_from": {
+            "type": "string",
+            "format": "uuid",
+            "description": "If DEDUPED, the ID of the original document",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -393,4 +392,3 @@
     }
   ]
 }
-
