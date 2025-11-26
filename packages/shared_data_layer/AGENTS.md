@@ -1,49 +1,100 @@
 # Agent Guide for Shared Data Layer
 
-This document provides context and instructions for AI agents working on the `shared_data_layer` package.
+This document is the **authoritative source of truth** for AI agents working on the `shared_data_layer` package. Follow these protocols strictly to ensure high-quality, bug-free code.
 
-## Environment & Execution
-- **Setup**: Use `uv` strictly. Run `uv sync --all-extras` to install everything. Do NOT use `pip` or `requirements.txt`.
-- **Interpreter**: Use the virtual environment directly: `.venv/bin/python`.
-- **Testing**: Use `.venv/bin/pytest`.
-- **Parallel Execution**: Tests support parallel execution: `.venv/bin/pytest -n auto`.
+## 🧠 Cognitive Workflow (Plan -> Act -> Verify)
+Before writing any code, you **MUST** follow this process:
+1.  **Plan**: Analyze the request. Identify which files need changes. Check `AGENTS.md` for known patterns.
+2.  **Research**: If you are unsure about a library (e.g., `polyfactory`, `ltree`, `pgvector`), use `context7` or `serper-search` **IMMEDIATELY**. Do not guess.
+3.  **Act**: Make atomic changes. Focus on one file/module at a time.
+4.  **Verify**: Run tests immediately after changes. Do not accumulate technical debt.
 
-## Definition of Done
-After any task is considered finished, you **MUST** run the following commands to ensure the codebase is correctly linted and typed:
+## 🛑 Stuck State Protocol (CRITICAL)
+**Trigger**: If you fail to fix an error or implement a feature **3 times in a row**.
+
+**Action**:
+1.  **STOP** coding immediately.
+2.  **Create a Reproduction Script**: Write a minimal standalone script in `tests/reproduce_issue.py` to isolate the failure.
+3.  **Research**: Use `serper-search` and `context7` to find solutions.
+    *   *Query Template*: "python <library_name> <error_message> solution"
+    *   *Query Template*: "how to use <feature> in <library_name>"
+4.  **Hypothesize**: Formulate a NEW approach based on research.
+5.  **Implement**: Apply the new fix.
+
+**Prohibited Behavior**:
+- ❌ Do NOT blindly apply the same fix multiple times.
+- ❌ Do NOT remove tests to "fix" failures.
+- ❌ Do NOT apologize in the chat; just fix the issue.
+
+## 🛠️ Environment & Execution
+- **Package Manager**: Use `uv` strictly.
+    - Install: `uv sync --all-extras`
+- **Interpreter**: `.venv/bin/python`
+- **Testing**: `.venv/bin/pytest`
+    - Parallel: `.venv/bin/pytest -n auto`
+    - Single Test: `.venv/bin/pytest tests/path/to/test.py::test_name`
+
+## ✅ Definition of Done
+You are NOT done until you have run these commands and they pass with **zero errors**:
 1.  **Format**: `.venv/bin/ruff format .`
 2.  **Lint**: `.venv/bin/ruff check --fix .`
 3.  **Type Check**: `.venv/bin/ty check .`
 
-If any of these commands report errors, you **MUST** fix them before considering the task finally done.
+## 🏗️ Architecture & Patterns
 
-## Testing Infrastructure
-- **Container**: `PostgresContainerWithVector` (in `testing/containers.py`) is optimized with `fsync=off` and `tmpfs` for performance.
-- **Asyncio**: `pytest-asyncio` is configured for `session` scope in `pytest.ini`.
-    - **Critical**: All async fixtures must be `scope="session"` to avoid `RuntimeError: Task attached to a different loop`.
-- **Factories**: We use `polyfactory`.
-    - **Ltree**: `WorkflowNodeFactory` uses `Ltree` objects. `WorkflowNodeRead` schema has a validator for `Ltree`.
-    - **Vectors**: `GraphEntityFactory` must explicitly set embedding: `embedding = Use(lambda: [0.0] * 512)` to avoid `StatementError` with `pgvector`.
-    - **Relationships**: `GraphEdgeFactory` explicitly builds source/target using `GraphEntityFactory.build`.
-
-## Database & Migrations
-- **Extensions**: `ltree` and `vector` extensions are enabled in `initial_migration`.
+### Database & Migrations
+- **Extensions**: `ltree` (hierarchy) and `vector` (embeddings) are enabled in `initial_migration`.
+- **Asyncio Scope**: All async fixtures MUST be `scope="session"` in `conftest.py` to match `pytest-asyncio` config.
+- **Migrations**: Located in `src/shared_data_layer/migrations`.
+    - Run migrations: `alembic upgrade head` (handled automatically by `engine` fixture in tests).
 - **Stored Procedures**: `workflow_nodes_move_subtree` handles ltree moves.
     - **Quirk**: The SP requires explicit casting to `ltree` for updates: `SET path = (...)::ltree`.
-- **Alembic**: Migrations are in `src/shared_data_layer/migrations`.
-    - Run migrations: `alembic upgrade head` (handled automatically by `engine` fixture in tests).
 
-## Common Issues & Fixes
-- **`RuntimeError: Task <...> got Future <...> attached to a different loop`**:
-    - **Cause**: Fixture or test running in a different event loop.
-    - **Fix**: Ensure `pytest.ini` has `asyncio_default_fixture_loop_scope = session` and fixtures use `scope="session"`.
-- **`StatementError: (builtins.ValueError) expected 512 dimensions, not 0`**:
-    - **Cause**: `GraphEntityFactory` generating empty list for embedding.
-    - **Fix**: Use `embedding = Use(lambda: [0.0] * 512)`.
-- **`ProgrammingError: column "path" is of type ltree but expression is of type text`**:
-    - **Cause**: Stored procedure trying to update `ltree` column with `text`.
-    - **Fix**: Cast to `::ltree` in SQL.
+### Testing Infrastructure
+- **Container**: `PostgresContainerWithVector` (in `testing/containers.py`) is optimized with `fsync=off` and `tmpfs` for performance.
+- **Asyncio**: `pytest-asyncio` is configured for `session` scope in `pytest.ini`.
 
-## Key Files
-- `src/shared_data_layer/testing/conftest.py`: Session-scoped fixtures (`engine`, `db_session`).
-- `src/shared_data_layer/testing/containers.py`: Optimized Postgres container.
-- `src/shared_data_layer/testing/factories/`: Polyfactory definitions.
+### Factories (`polyfactory`)
+We use `polyfactory` for test data. Follow these strict patterns:
+
+**1. Vectors (pgvector)**
+*   **Problem**: `pgvector` fails if the embedding list is empty or has the wrong dimension.
+*   **Solution**: Explicitly define the embedding field.
+```python
+# ✅ GOOD
+class GraphEntityFactory(ModelFactory[GraphEntity]):
+    embedding = Use(lambda: [0.0] * 512)
+
+# ❌ BAD
+class GraphEntityFactory(ModelFactory[GraphEntity]):
+    ... # relying on default random generation often fails validation
+```
+
+**2. Ltree (Hierarchical Data)**
+*   **Problem**: `ltree` paths must be valid strings (alphanumeric + dots).
+*   **Solution**: Use a dedicated provider or validator.
+    *   *Note*: `WorkflowNodeRead` schema has a validator for `Ltree`. `WorkflowNodeFactory` uses `Ltree` objects.
+
+**3. Relationships**
+*   **Problem**: Foreign key constraints fail if related objects aren't created first.
+*   **Solution**: Explicitly build related objects in the factory.
+```python
+# ✅ GOOD
+class GraphEdgeFactory(ModelFactory[GraphEdge]):
+    source_node = Use(GraphEntityFactory.build)
+    target_node = Use(GraphEntityFactory.build)
+```
+
+## 🐛 Common Issues & Fixes
+
+| Error | Cause | Fix |
+| :--- | :--- | :--- |
+| `RuntimeError: Task ... attached to a different loop` | Fixture scope mismatch | Set fixture `scope="session"` in `conftest.py`. |
+| `StatementError: expected 512 dimensions, not 0` | Empty embedding vector | Update Factory: `embedding = Use(lambda: [0.0] * 512)` |
+| `ProgrammingError: column "path" is of type ltree` | SQL type mismatch | Cast explicitly in SQL: `SET path = (...)::ltree` |
+
+## 📂 Key Files Map
+- **Fixtures**: `src/shared_data_layer/testing/conftest.py` (Session-scoped fixtures: `engine`, `db_session`)
+- **Containers**: `src/shared_data_layer/testing/containers.py` (Optimized Postgres container)
+- **Factories**: `src/shared_data_layer/testing/factories/` (Polyfactory definitions)
+- **Models**: `src/shared_data_layer/models/`
