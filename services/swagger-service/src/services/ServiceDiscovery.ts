@@ -2,6 +2,8 @@
  * Service discovery and health monitoring
  */
 import axios, { AxiosError } from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ServiceConfig, ServiceHealth, ServiceStatus } from '../types/service.types';
 import { OpenAPISpec } from '../types/openapi.types';
 import logger from '../utils/logger';
@@ -36,6 +38,18 @@ export class ServiceDiscovery {
    * Check health of a single service
    */
   async checkServiceHealth(service: ServiceConfig): Promise<ServiceHealth> {
+    // For Lambda/serverless services, skip health check and assume healthy
+    if (service.skipHealthCheck) {
+      const health: ServiceHealth = {
+        name: service.name,
+        status: 'healthy',
+        lastChecked: new Date(),
+        metadata: { type: 'serverless', note: 'Health check skipped for Lambda service' },
+      };
+      this.healthCache.set(service.name, health);
+      return health;
+    }
+
     const startTime = Date.now();
 
     try {
@@ -98,9 +112,26 @@ export class ServiceDiscovery {
   }
 
   /**
-   * Fetch OpenAPI spec from a service
+   * Fetch OpenAPI spec from a service (or load from static file for Lambda services)
    */
   async fetchServiceSpec(service: ServiceConfig): Promise<OpenAPISpec | null> {
+    // For Lambda/serverless services, load static spec from file
+    if (service.staticSpecPath) {
+      try {
+        const specPath = path.resolve(__dirname, '../../', service.staticSpecPath);
+        const specContent = fs.readFileSync(specPath, 'utf-8');
+        const spec = JSON.parse(specContent) as OpenAPISpec;
+        this.specCache.set(service.name, spec);
+        logger.info(`Loaded static OpenAPI spec for ${service.name} from ${service.staticSpecPath}`);
+        return spec;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error(`Failed to load static spec for ${service.name}: ${errorMessage}`);
+        return null;
+      }
+    }
+
+    // For regular services, fetch from URL
     try {
       const response = await axios.get<OpenAPISpec>(`${service.url}${service.specEndpoint}`, {
         timeout: config.httpTimeout,

@@ -25,6 +25,18 @@ export const services: ServiceConfig[] = [
     tags: ['users', 'profiles', 'management'],
     enabled: true,
   },
+  {
+    name: 'Document Service',
+    url: config.documentServiceUrl,
+    specEndpoint: '', // Not used for Lambda services
+    healthEndpoint: '', // Not used for Lambda services
+    description: 'Document ingestion and management API (AWS Lambda)',
+    version: '1.0.0',
+    tags: ['documents', 'upload', 'ingestion', 'lambda'],
+    enabled: true,
+    staticSpecPath: 'mock-specs/document-service.json',
+    skipHealthCheck: true,
+  },
 ];
 
 export default services;

@@ -316,6 +316,11 @@ export class SpecAggregator {
       return internalUrl;
     }
 
+    // Preserve external URLs (like AWS API Gateway, external APIs)
+    if (internalUrl.includes('amazonaws.com') || internalUrl.startsWith('https://')) {
+      return internalUrl;
+    }
+
     const servicePortMap: Record<string, number> = {
       'auth-service': 5001,
       'user-service': 5002,

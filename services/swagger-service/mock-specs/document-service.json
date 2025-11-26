@@ -1,0 +1,396 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Document Service API",
+    "version": "1.0.0",
+    "description": "Document ingestion and management API (AWS Lambda)"
+  },
+  "servers": [
+    {
+      "url": "https://z1xfknvwo3.execute-api.us-east-1.amazonaws.com/dev",
+      "description": "AWS API Gateway (dev)"
+    }
+  ],
+  "paths": {
+    "/v1/documents/upload": {
+      "post": {
+        "summary": "Upload Document",
+        "description": "Registers a new document for upload and returns a presigned S3 URL. If a document with the same content_hash already exists for this user, returns DEDUPED status instead.",
+        "operationId": "uploadDocument",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentUploadRequest"
+              },
+              "examples": {
+                "pdf_upload": {
+                  "summary": "PDF Document Upload",
+                  "value": {
+                    "document_name": "ARG_1988_Housing Finance Subsidies",
+                    "source_type": "pdf",
+                    "country_code": "ARG",
+                    "language": "en",
+                    "tags": ["housing", "finance", "subsidies"],
+                    "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
+                    "file_size_bytes": 1841305,
+                    "access_scope": "user_private"
+                  }
+                },
+                "docx_upload": {
+                  "summary": "Word Document Upload",
+                  "value": {
+                    "document_name": "Policy Report 2024",
+                    "source_type": "docx",
+                    "country_code": "USA",
+                    "language": "en",
+                    "tags": ["policy", "report"],
+                    "content_hash": "a1b2c3d4e5f6...",
+                    "file_size_bytes": 524288,
+                    "access_scope": "user_private"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document registered successfully, presigned URL returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentUploadResponse"
+                },
+                "example": {
+                  "document_id": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
+                  "ingestion_id": "d562fd26-f7a3-41b8-968f-270a2d0beeed",
+                  "status": "PENDING_UPLOAD",
+                  "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
+                  "access_scope": "user_private",
+                  "deduped_from": null,
+                  "upload": {
+                    "url": "https://vizonomy-raw-docs-dev-xxx.s3.amazonaws.com/",
+                    "fields": {
+                      "key": "raw/d562fd26-f7a3-41b8-968f-270a2d0beeed/source.pdf",
+                      "Content-Type": "application/pdf",
+                      "x-amz-meta-content-hash": "568166f...",
+                      "AWSAccessKeyId": "ASIA...",
+                      "policy": "eyJ...",
+                      "signature": "..."
+                    },
+                    "expires_in_sec": 900
+                  },
+                  "request_id": "abc123"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Document deduplicated (same content already exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentUploadResponse"
+                },
+                "example": {
+                  "document_id": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
+                  "ingestion_id": null,
+                  "status": "DEDUPED",
+                  "content_hash": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256",
+                  "access_scope": "user_private",
+                  "deduped_from": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5",
+                  "upload": null,
+                  "request_id": "abc123"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Invalid source_type: exe",
+                    "details": {
+                      "field": "source_type",
+                      "allowed": ["pdf", "docx", "doc", "txt", "md", "html", "csv", "xlsx", "json"]
+                    },
+                    "request_id": "abc123"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing user_id in authorization context",
+                    "details": {},
+                    "request_id": "abc123"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - Insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Only admin/service roles can create base documents",
+                    "details": {},
+                    "request_id": "abc123"
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": "File size exceeds maximum allowed (104857600 bytes)",
+                    "details": {
+                      "max_size_bytes": 104857600,
+                      "provided_size_bytes": 200000000
+                    },
+                    "request_id": "abc123"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token from auth-service /v1/auth/login endpoint"
+      }
+    },
+    "schemas": {
+      "DocumentUploadRequest": {
+        "type": "object",
+        "required": ["document_name", "source_type", "content_hash", "file_size_bytes"],
+        "properties": {
+          "document_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Human-readable document name",
+            "example": "ARG_1988_Housing Finance Subsidies"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": ["pdf", "docx", "doc", "txt", "md", "html", "csv", "xlsx", "json"],
+            "description": "File type/extension",
+            "example": "pdf"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 hash of file content (hex encoded, 64 chars). Used for deduplication and S3 upload validation.",
+            "example": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256"
+          },
+          "file_size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 104857600,
+            "description": "File size in bytes (max 100MB)",
+            "example": 1841305
+          },
+          "country_code": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "ISO 3166-1 alpha-3 country code",
+            "example": "ARG"
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^[a-z]{2}$",
+            "default": "en",
+            "description": "ISO 639-1 language code",
+            "example": "en"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "description": "Document tags for categorization",
+            "example": ["housing", "finance", "subsidies"]
+          },
+          "access_scope": {
+            "type": "string",
+            "enum": ["user_private", "org_shared", "base"],
+            "default": "user_private",
+            "description": "Document visibility scope. 'base' requires admin/service role.",
+            "example": "user_private"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Additional metadata key-value pairs",
+            "example": {}
+          },
+          "callback_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Optional webhook URL to call when ingestion completes"
+          }
+        }
+      },
+      "DocumentUploadResponse": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique document identifier",
+            "example": "ca59795a-04f2-4a5a-ab4b-e0a5616d5fe5"
+          },
+          "ingestion_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Ingestion workflow identifier (null if deduplicated)",
+            "example": "d562fd26-f7a3-41b8-968f-270a2d0beeed"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PENDING_UPLOAD", "DEDUPED"],
+            "description": "Document status after registration",
+            "example": "PENDING_UPLOAD"
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 hash echoed back",
+            "example": "568166f3e535e161f79d0734fed93dd5a83e289f9f698ac4bc1fb199cc563256"
+          },
+          "access_scope": {
+            "type": "string",
+            "description": "Document access scope",
+            "example": "user_private"
+          },
+          "deduped_from": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Original document ID if this was a duplicate",
+            "example": null
+          },
+          "upload": {
+            "type": "object",
+            "nullable": true,
+            "description": "S3 presigned POST details (null if deduplicated)",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "S3 bucket URL for POST upload"
+              },
+              "fields": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Form fields to include in POST request"
+              },
+              "expires_in_sec": {
+                "type": "integer",
+                "description": "Seconds until presigned URL expires",
+                "example": 900
+              }
+            }
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Request tracking ID"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Error code",
+                "example": "VALIDATION_ERROR"
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Additional error details"
+              },
+              "request_id": {
+                "type": "string",
+                "description": "Request tracking ID"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Documents",
+      "description": "Document upload and management operations"
+    }
+  ]
+}
+

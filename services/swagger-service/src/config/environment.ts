@@ -13,6 +13,7 @@ export const config = {
   // Service URLs
   accountServiceUrl: process.env.ACCOUNT_SERVICE_URL || 'http://localhost:5001',
   userServiceUrl: process.env.USER_SERVICE_URL || 'http://localhost:5002',
+  documentServiceUrl: process.env.DOCUMENT_SERVICE_URL || 'https://z1xfknvwo3.execute-api.us-east-1.amazonaws.com/dev',
 
   // Refresh intervals (in milliseconds)
   specRefreshInterval: parseInt(process.env.SPEC_REFRESH_INTERVAL || '300000', 10), // 5 minutes

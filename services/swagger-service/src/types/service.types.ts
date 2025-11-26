@@ -11,6 +11,10 @@ export interface ServiceConfig {
   version?: string;
   tags?: string[];
   enabled?: boolean;
+  /** Path to static OpenAPI spec file (for Lambda/serverless services) */
+  staticSpecPath?: string;
+  /** If true, skip health checks (for serverless services) */
+  skipHealthCheck?: boolean;
 }
 
 export interface ServiceHealth {
