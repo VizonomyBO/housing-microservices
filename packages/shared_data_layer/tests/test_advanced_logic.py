@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import text, select
 from uuid import uuid4
+from sqlalchemy_utils import Ltree
 
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import GraphEdgeFactory, GraphEvidenceFactory
@@ -86,20 +87,20 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         node_a = await WorkflowNodeFactory.create_async(
             session=db_session,
             version=version,
-            path="A"
+            path=Ltree("A")
         )
         # Child node B
         node_b = await WorkflowNodeFactory.create_async(
             session=db_session,
             version=version,
-            path="A.B"
+            path=Ltree("A.B")
         )
         
         # Target parent C
         node_c = await WorkflowNodeFactory.create_async(
             session=db_session,
             version=version,
-            path="C"
+            path=Ltree("C")
         )
 
         

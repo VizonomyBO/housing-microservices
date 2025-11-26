@@ -27,10 +27,31 @@ The package is organized as follows:
 This package is intended to be installed as a local dependency in other services.
 
 ### Prerequisites
-- Python 3.9+
-- PostgreSQL with `pgvector` extension
+- `uv` (Universal Python Package Installer)
+- PostgreSQL with `pgvector` extension (for local dev without containers)
 
-### Installation
+### Development Setup
+
+This project uses `uv` for dependency management.
+
+1.  **Install uv** (if not already installed):
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+2.  **Create Virtual Environment (Python 3.13)**:
+    ```bash
+    uv venv --python 3.13
+    ```
+
+3.  **Install Dependencies**:
+    ```bash
+    uv pip install -e .
+    # Or if using pyproject.toml directly
+    uv sync
+    ```
+
+### Installation (as dependency)
 In your service's `pyproject.toml`:
 
 ```toml
@@ -85,9 +106,11 @@ This package uses `pytest` and `testcontainers` for integration testing against 
 To run the tests for this package:
 
 ```bash
-# From the monorepo root or package root
-pytest packages/shared_data_layer/tests
+# From the package root
+.venv/bin/pytest -n auto
 ```
+
+For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
 ### Writing Tests for Other Services
 You can reuse the testing infrastructure provided by this package in other services.

@@ -9,21 +9,18 @@ from shared_data_layer.testing.factories.retrieval import ChunkFactory
 from shared_data_layer.testing.factories.knowledge_graph import GraphEntityFactory, GraphEdgeFactory
 from shared_data_layer.testing.factories.workflow import WorkflowGraphFactory, WorkflowVersionFactory
 
-from shared_data_layer.db.models.users import User
-
 @pytest.mark.asyncio
 async def test_pillar_answer_creation(db_session: AsyncSession):
-    # Create User
-    user = User(email="test@example.com", hashed_password="pw", is_active=True, is_superuser=False)
-    db_session.add(user)
-    await db_session.flush()
+    # Create User ID
+    import uuid
+    user_id = uuid.uuid4()
 
     # Create dependencies
     chunk = await ChunkFactory.create_async(session=db_session)
     
     # Create PillarAnswer
     answer = PillarAnswer(
-        owner_user_id=user.id, # Use created user
+        owner_user_id=user_id, # Use created user id
         country_code="US",
         pillar_name="finance",
         document_id=chunk.document_id,

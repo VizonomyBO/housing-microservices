@@ -1,5 +1,6 @@
 from uuid import UUID
 from typing import Optional, List, Dict, Any
+from pydantic import field_validator
 from datetime import datetime
 
 from .common import ORMBaseSchema
@@ -11,6 +12,13 @@ class WorkflowNodeRead(ORMBaseSchema):
     type: str
     config: Dict[str, Any]
     path: Optional[str] = None
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def convert_ltree(cls, v):
+        if v is not None:
+            return str(v)
+        return v
 
 
 class WorkflowEdgeRead(ORMBaseSchema):

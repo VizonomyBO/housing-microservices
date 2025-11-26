@@ -10,6 +10,7 @@ dependencies = [
   "pydantic>=2.7.0",
   "pgvector[psycopg2-binary]>=0.2.0",
   "pydantic-settings>=2.0.0",
+  "sqlalchemy-utils>=0.41.0",
 ]
 
 [project.optional-dependencies]
@@ -39,5 +40,6 @@ where = ["src"]
 shared-data-layer = "shared_data_layer.manage:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 python_files = ["test_*.py"]

@@ -1,8 +1,9 @@
 from typing import Optional
-from uuid import UUID
+from uuid import UUID as PyUUID
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, Float, JSON
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -18,10 +19,9 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     
     # Scope
     country_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True, index=True)
-    owner_user_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True) # No FK to users
 
     # Relationships
-    owner = relationship("User")
     # Edges where this entity is source or target
     edges_out = relationship("GraphEdge", foreign_keys="GraphEdge.source_id", back_populates="source")
     edges_in = relationship("GraphEdge", foreign_keys="GraphEdge.target_id", back_populates="target")
@@ -30,8 +30,8 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "graph_edges"
 
-    source_id: Mapped[UUID] = mapped_column(ForeignKey("graph_entities.id"), nullable=False)
-    target_id: Mapped[UUID] = mapped_column(ForeignKey("graph_entities.id"), nullable=False)
+    source_id: Mapped[PyUUID] = mapped_column(ForeignKey("graph_entities.id"), nullable=False)
+    target_id: Mapped[PyUUID] = mapped_column(ForeignKey("graph_entities.id"), nullable=False)
     relation: Mapped[str] = mapped_column(String, nullable=False) # e.g. "WORKS_FOR"
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     evidence_span: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -44,8 +44,8 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class GraphEvidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "graph_evidence"
 
-    edge_id: Mapped[UUID] = mapped_column(ForeignKey("graph_edges.id"), nullable=False)
-    chunk_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("chunks.id"), nullable=True)
+    edge_id: Mapped[PyUUID] = mapped_column(ForeignKey("graph_edges.id"), nullable=False)
+    chunk_id: Mapped[Optional[PyUUID]] = mapped_column(ForeignKey("chunks.id"), nullable=True)
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
     score: Mapped[float] = mapped_column(Float, default=1.0)
 
@@ -60,5 +60,7 @@ class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     level: Mapped[int] = mapped_column(Integer, default=0) # Hierarchical level
     
-    # We might want a many-to-many with entities, but for now let's keep it simple or follow specific design if detailed.
-    # The prompt didn't specify exact fields for community, so this is a reasonable start.
+    entity_ids: Mapped[list[PyUUID]] = mapped_column(ARRAY(PG_UUID), nullable=True)
+    metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    algo_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)

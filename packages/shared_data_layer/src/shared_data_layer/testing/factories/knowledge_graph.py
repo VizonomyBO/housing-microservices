@@ -7,12 +7,9 @@ from polyfactory import Use, Ignore
 
 class GraphEntityFactory(AsyncSQLAlchemyFactory[GraphEntity]):
     __model__ = GraphEntity
+    embedding = Use(lambda: [0.0] * 512)
     edges_out = Ignore()
     edges_in = Ignore()
-    
-    @classmethod
-    def embedding(cls) -> list[float]:
-        return [0.1] * 512
 
 from shared_data_layer.testing.factories.retrieval import ChunkFactory
 
@@ -22,6 +19,8 @@ class GraphEvidenceFactory(AsyncSQLAlchemyFactory[GraphEvidence]):
 
 class GraphEdgeFactory(AsyncSQLAlchemyFactory[GraphEdge]):
     __model__ = GraphEdge
+    source = Use(GraphEntityFactory.build)
+    target = Use(GraphEntityFactory.build)
     evidence = Use(GraphEvidenceFactory.batch, size=1)
 
 class GraphCommunityFactory(AsyncSQLAlchemyFactory[GraphCommunity]):

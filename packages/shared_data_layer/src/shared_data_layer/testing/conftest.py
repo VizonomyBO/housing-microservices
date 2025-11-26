@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from shared_data_layer.db.base import Base
 from shared_data_layer.testing.containers import PostgresContainerWithVector
 
-
 @pytest.fixture(scope="session")
 def event_loop():
     try:
@@ -17,6 +16,7 @@ def event_loop():
         loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
 
 
 @pytest.fixture(scope="session")
@@ -111,6 +111,6 @@ def session_factory(engine):
 @pytest.fixture(scope="function")
 async def db_session(session_factory) -> AsyncGenerator[AsyncSession, None]:
     async with session_factory() as session:
-        async with session.begin():
-            yield session
-            await session.rollback()
+        await session.begin()
+        yield session
+        await session.rollback()

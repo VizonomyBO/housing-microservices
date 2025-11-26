@@ -2,6 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import ForeignKey, Integer, String, Text, JSON, Boolean
+from sqlalchemy_utils import LtreeType
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -42,7 +43,7 @@ class WorkflowNode(Base, UUIDPrimaryKeyMixin):
     config: Mapped[dict] = mapped_column(JSON, default={})
     
     # Ltree path for hierarchical execution or organization if needed
-    path: Mapped[Optional[str]] = mapped_column(String, nullable=True) # Using String for ltree for now
+    path: Mapped[Optional[LtreeType]] = mapped_column(LtreeType, nullable=True)
 
     version = relationship("WorkflowVersion", back_populates="nodes")
 

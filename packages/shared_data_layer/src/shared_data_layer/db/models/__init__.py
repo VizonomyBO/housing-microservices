@@ -1,5 +1,5 @@
 from .documents import Document, IngestionJob, Artifact, ConversationDocument
-from .users import User
+
 from .retrieval import Chunk, ChunkMetrics, RetrievalRun, RetrievalRunItem
 from .knowledge_graph import GraphEntity, GraphEdge, GraphEvidence, GraphCommunity
 from .workflow import WorkflowGraph, WorkflowNode, WorkflowEdge, WorkflowVersion
@@ -9,7 +9,7 @@ __all__ = [
     "IngestionJob",
     "Artifact",
     "ConversationDocument",
-    "User",
+    "ConversationDocument",
     "Chunk",
     "ChunkMetrics",
     "RetrievalRun",

@@ -1,5 +1,5 @@
 from typing import Optional
-from uuid import UUID
+from uuid import UUID as PyUUID
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKey, Integer, String, Text, Float, JSON
@@ -11,7 +11,7 @@ from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class Chunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "chunks"
 
-    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    document_id: Mapped[PyUUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024))  # Voyage-3.5-lite dim per docs
@@ -45,7 +45,7 @@ class Chunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class ChunkMetrics(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "chunk_metrics"
 
-    chunk_id: Mapped[UUID] = mapped_column(ForeignKey("chunks.id"), unique=True, nullable=False)
+    chunk_id: Mapped[PyUUID] = mapped_column(ForeignKey("chunks.id"), unique=True, nullable=False)
     retrieval_count: Mapped[int] = mapped_column(Integer, default=0)
     last_retrieved_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True) # Timestamp
 
@@ -65,8 +65,8 @@ class RetrievalRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class RetrievalRunItem(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "retrieval_run_items"
 
-    run_id: Mapped[UUID] = mapped_column(ForeignKey("retrieval_runs.id"), nullable=False)
-    chunk_id: Mapped[UUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    run_id: Mapped[PyUUID] = mapped_column(ForeignKey("retrieval_runs.id"), nullable=False)
+    chunk_id: Mapped[PyUUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -77,10 +77,10 @@ class RetrievalRunItem(Base, UUIDPrimaryKeyMixin):
 class PillarAnswer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "pillar_answers"
 
-    owner_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    owner_user_id: Mapped[PyUUID] = mapped_column(nullable=False) # No FK to users
     country_code: Mapped[str] = mapped_column(String(3), nullable=False)
     pillar_name: Mapped[str] = mapped_column(String, nullable=False)
-    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    document_id: Mapped[PyUUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     summary_markdown: Mapped[str] = mapped_column(Text, nullable=False)
@@ -95,8 +95,8 @@ class PillarAnswer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class PillarAnswerSource(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "pillar_answer_sources"
 
-    pillar_answer_id: Mapped[UUID] = mapped_column(ForeignKey("pillar_answers.id"), nullable=False)
-    chunk_id: Mapped[UUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    pillar_answer_id: Mapped[PyUUID] = mapped_column(ForeignKey("pillar_answers.id"), nullable=False)
+    chunk_id: Mapped[PyUUID] = mapped_column(ForeignKey("chunks.id"), nullable=False)
     contribution_type: Mapped[str] = mapped_column(String, nullable=False)
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)

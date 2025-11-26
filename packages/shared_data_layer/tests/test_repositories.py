@@ -1,6 +1,7 @@
 import pytest
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy_utils import Ltree
 
 from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.repositories.knowledge_graph import KnowledgeGraphRepository
@@ -124,7 +125,7 @@ class TestRepositories:
         node = await WorkflowNodeFactory.create_async(
             session=db_session, 
             version=v2, # Use version object to ensure relationship
-            path="A"
+            path=Ltree("A")
         )
         
         graph_id = graph.id
