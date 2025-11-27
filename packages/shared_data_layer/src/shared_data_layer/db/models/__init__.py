@@ -12,6 +12,7 @@ from .documents import (
     Document,
     DocumentGCEvent,
     IngestionJob,
+    UploadedFile,
 )
 from .knowledge_graph import (
     GraphCommunity,
@@ -40,6 +41,7 @@ __all__ = [
     "AgentStateCheckpoint",
     "Document",
     "IngestionJob",
+    "UploadedFile",
     "Artifact",
     "ConversationDocument",
     "BaseDocumentByCountry",

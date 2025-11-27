@@ -8,7 +8,7 @@ The package is organized as follows:
 
 - **`src/shared_data_layer/db/models/`**: SQLAlchemy database models.
     - `users.py`: User management.
-    - `documents.py`: Documents, Chunks, Artifacts.
+    - `documents.py`: Documents, Uploaded Files, Chunks, Artifacts.
     - `retrieval.py`: Retrieval runs and metrics.
     - `knowledge_graph.py`: Graph entities and edges.
     - `workflow.py`: Workflow definitions and versions.
@@ -108,6 +108,24 @@ async def get_doc(session, doc_id):
     return document
 ```
 
+Uploaded file registrations can be tracked without duplicating document logic:
+
+```python
+from shared_data_layer.repositories.documents import UploadedFileRepository
+
+async def register_upload(session, document, storage_uri, content_hash):
+    repo = UploadedFileRepository(session)
+    return await repo.register_upload(
+        document_id=document.id,
+        owner_user_id=document.owner_user_id,
+        storage_uri=storage_uri,
+        byte_size=document.byte_size or 0,
+        content_hash=content_hash,
+        ingestion_metadata={"stage": "upload"},
+    )
+```
+
+The repository enforces the `(owner_user_id, content_hash)` deduplication rule while still allowing base (ownerless) uploads to be recorded independently.
 ### 3. Using Schemas
 Pydantic schemas are available for type-safe data handling.
 

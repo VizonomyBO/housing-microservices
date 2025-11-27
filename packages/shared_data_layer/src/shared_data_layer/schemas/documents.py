@@ -65,3 +65,16 @@ class DocumentRead(ORMBaseSchema):
 
 class DocumentWithChunksRead(DocumentRead):
     chunks: List[ChunkRead] = []
+
+
+class UploadedFileRead(ORMBaseSchema):
+    id: UUID
+    document_id: UUID
+    owner_user_id: Optional[UUID] = None
+    storage_uri: str
+    byte_size: int
+    content_hash: str
+    checksum: Optional[str] = None
+    ingestion_metadata: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime

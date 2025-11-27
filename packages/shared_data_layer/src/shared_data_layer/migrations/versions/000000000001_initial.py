@@ -446,6 +446,59 @@ def create_documents_domain() -> None:
     )
 
     op.create_table(
+        "uploaded_files",
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("document_id", sa.UUID(), nullable=False),
+        sa.Column("storage_uri", sa.String(), nullable=False),
+        sa.Column("byte_size", sa.BigInteger(), nullable=False),
+        sa.Column("content_hash", sa.String(), nullable=False),
+        sa.Column("checksum", sa.String(), nullable=True),
+        sa.Column(
+            "ingestion_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["document_id"],
+            ["documents.id"],
+            ondelete="CASCADE",
+            name="fk_uploaded_files_document",
+        ),
+        sa.CheckConstraint(
+            "byte_size >= 0", name="ck_uploaded_files_byte_size_non_negative"
+        ),
+    )
+    op.create_index(
+        "ix_uploaded_files_document_id",
+        "uploaded_files",
+        ["document_id"],
+    )
+    op.create_index(
+        "ix_uploaded_files_owner_user_id",
+        "uploaded_files",
+        ["owner_user_id"],
+    )
+    op.create_index(
+        "uq_uploaded_files_owner_content_hash",
+        "uploaded_files",
+        ["owner_user_id", "content_hash"],
+        unique=True,
+        postgresql_where=sa.text("owner_user_id IS NOT NULL"),
+    )
+
+    op.create_table(
         "document_gc_events",
         sa.Column("document_id", sa.UUID(), nullable=False),
         sa.Column("event_type", sa.String(), nullable=False),
@@ -2567,6 +2620,10 @@ def downgrade() -> None:
     op.drop_table("ingestion_jobs")
     op.drop_index("ix_document_gc_events_document", table_name="document_gc_events")
     op.drop_table("document_gc_events")
+    op.drop_index("uq_uploaded_files_owner_content_hash", table_name="uploaded_files")
+    op.drop_index("ix_uploaded_files_owner_user_id", table_name="uploaded_files")
+    op.drop_index("ix_uploaded_files_document_id", table_name="uploaded_files")
+    op.drop_table("uploaded_files")
     op.drop_index("uq_documents_owner_canonical_name_active", table_name="documents")
     op.drop_index("uq_documents_base_country_hash", table_name="documents")
     op.drop_index("uq_documents_owner_content_hash_active", table_name="documents")
