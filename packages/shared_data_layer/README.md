@@ -132,6 +132,16 @@ To run the tests for this package:
 
 For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
+### End-to-End Ingestion Smoke Suite
+
+The ingestion pipeline smoke tests live in `tests/test_end_to_end_ingestion.py`. They stitch together document ingestion, chunk activation, and knowledge-graph rollups, so they are **opt-in** and default to `skip`. Run them explicitly with the `--end-to-end` flag:
+
+```bash
+.venv/bin/pytest --end-to-end tests/test_end_to_end_ingestion.py -n 0
+```
+
+The flag can also be combined with a regular run (e.g., `.venv/bin/pytest --end-to-end -n auto`) when you want the suite included in CI.
+
 ## Identity & Ownership Contract
 
 - `owner_user_id` is **mandatory** for every document whose `access_scope` is not `base`. The database enforces this constraint and the `DocumentRead` schema validates it as well.
