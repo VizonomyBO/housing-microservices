@@ -6,8 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared_data_layer.db.ltree import Ltree
-from shared_data_layer.db.procedures import workflow_nodes_move_subtree
 from shared_data_layer.db.models.workflow import WorkflowNode
+from shared_data_layer.db.procedures import workflow_nodes_move_subtree
 from shared_data_layer.testing.factories.workflow import (
     WorkflowGraphFactory,
     WorkflowNodeFactory,

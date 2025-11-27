@@ -81,7 +81,9 @@ async def engine(database_url: str):
     from alembic.config import Config
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    alembic_ini_path = os.path.abspath(os.path.join(current_dir, "../migrations/alembic.ini"))
+    alembic_ini_path = os.path.abspath(
+        os.path.join(current_dir, "../migrations/alembic.ini")
+    )
 
     alembic_cfg = Config(alembic_ini_path)
 
