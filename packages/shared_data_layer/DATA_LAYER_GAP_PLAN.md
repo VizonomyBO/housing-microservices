@@ -131,7 +131,7 @@ The sections below focus **only on outstanding work**. Each includes context (�
 
 ### Remaining Work
 1. **Graph extension decision**
-   - Decide whether to enable `pg_graphql`/`apache_age` (as the design once suggested) or document why a pure SQL approach suffices.
+   - Document why a pure SQL with the current extensions approach suffices.
 
 2. **Operations guide**
    - Document GC workflows, MV refresh cadence, partition maintenance procedures, and pgvector tuning knobs (`ivfflat.probes`, `work_mem`, etc.) so SREs can operate the system confidently.
@@ -154,7 +154,7 @@ The sections below focus **only on outstanding work**. Each includes context (�
    - After completing the partition/index tasks, add tests that intentionally violate each new constraint and assert the expected errors.
 
 3. **End-to-end ingestion**
-   - Expand the suite with a smoke test that runs document ingestion → chunk creation → knowledge-graph enrichment to ensure ORM-driven refresh hooks keep caches/materialized views up-to-date.
+   - Expand the suite with a smoke test that runs document ingestion → chunk creation → knowledge-graph enrichment to ensure ORM-driven refresh hooks keep caches/materialized views up-to-date, don't perform real ingestion, mock the data in each stage with faker library or better with pydantic or orm factories, whathever matches best.
 
 ---
 
