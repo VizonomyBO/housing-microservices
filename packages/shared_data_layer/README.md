@@ -220,6 +220,48 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
 - `workflow_version_history` surfaces the approved version lineage for each workflow graph (graph metadata + change log + approver info).
 - `workflow_version_diffs` compares consecutive versions of a graph, exposing node/edge counts, deltas, and raw change logs so reviewers can audit structural changes quickly.
 
+## Operational Guardrails & Runbooks
+
+### Extension Rationale
+
+- We intentionally stick with vanilla PostgreSQL plus the core extensions that ship in every managed service (`pgcrypto`, `ltree`, `pg_trgm`, `vector`). They solve hashing, hierarchical paths, fuzzy search, and embedding search without introducing bespoke background daemons.
+- Avoiding heavier add-ons (Citus, Timescale, custom GC extensions) keeps backup/restore, failover, and IAM consistent across every environment: the same SQL snapshot runs locally, in CI’s Testcontainers, and in production.
+- Disaster recovery becomes a normal `pg_dump` + `pg_restore` flow because we never depend on external file systems or background workers owned by third-party extensions.
+
+### Document GC Workflow
+
+- Conversation attachment triggers keep `documents.active_chat_refs` accurate no matter how conversation rows are inserted or soft-deleted. When the count transitions to zero (or `deleted_at` toggles), a `document_gc_events` row with `event_type` of `active_refs_zero` or `deleted_state_changed` is inserted alongside before/after counters.
+- Operators should poll `document_gc_events` (ordered by `created_at`) to drive downstream cleanup jobs:
+  1. Query for the latest `active_refs_zero` per `document_id`.
+  2. Re-validate the document still has `active_chat_refs = 0` (race-safe guardrail).
+  3. Run the application-layer GC that purges orphaned chunks/artifacts.
+  4. Soft delete the document (or mark the GC event as processed via service metadata) so future attachments can rehydrate it cleanly.
+- Because the ledger lives entirely inside PostgreSQL you can replay GC decisions just by re-running the query or shipping the rows into observability—no external state machines required.
+
+### Refresh Cadence & CLI Hooks
+
+- **Base documents cache**: call `shared_data_layer.db.maintenance.refresh_base_documents_cache_for_country(session, "USA")` after ingesting new base corpus rows for a specific country or `refresh_all_base_documents_cache` for a global rebuild. Operators can run the same SQL directly: `SELECT refresh_base_documents_by_country(NULL);`.
+- **Active chunks snapshot**: whenever documents skip the standard ORM hooks (bulk COPY, data backfill), invoke `refresh_active_chunks_view(session, concurrently=True)` or run `REFRESH MATERIALIZED VIEW CONCURRENTLY active_chunks;` to keep retrieval workloads consistent.
+- **Graph materializations**: bulk KG imports should finish with `python -m shared_data_layer.manage refresh-graph-mviews [--concurrently]` followed by `python -m shared_data_layer.manage refresh-graph-communities` scoped to the affected country/algo. The helpers wire up the async session + transaction handling for you.
+- **Community rollups**: downstream analytics that only care about a single community can pass `--community-id <uuid>` to the CLI or call `refresh_graph_community_rollups(session, community_id=...)` for precise recomputations.
+
+### Partition & Index Maintenance
+
+- `base_documents_by_country` eagerly provisions a partition per ISO alpha-3 code. If ISO expands, run `SELECT ensure_base_documents_partition('<NEW>');` (already invoked inside the refresh helper) and re-run the catalog audit tests (`pytest -k catalog`) to prove the new partition exists.
+- Retrieval `chunks` and KG `graph_entities` tables require matching indexes on every new partition. Use the sample commands earlier in this README, then `ALTER INDEX ... ATTACH PARTITION ...` for each global index (`GIN`, `BRIN`, `IVFFLAT`, `HNSW`). Finish with `ANALYZE <partition>;`.
+- When in doubt, inspect the parent catalog: `SELECT partstrat FROM pg_partitioned_table ...` and `SELECT indexname FROM pg_indexes ...`. The new pytest utilities (see below) automate these checks so schema drift is caught during CI.
+
+### pgvector Tuning Cheat Sheet
+
+- Default index definitions target `vector_ip_ops` with `lists = 100` for `ivfflat` and `m = 16`, `ef_construction = 64` for `hnsw`. These work well for ~100k chunks. Increase `lists` or `m` before reindexing if recall drops at higher scale.
+- Query-side knobs: `SET ivfflat.probes = 10;` for low-latency approximate lookups, or bump toward 50–100 for higher recall. For HNSW searches, adjust `SET hnsw.ef_search = 64;` to trade CPU for accuracy.
+- Always run `VACUUM ANALYZE chunks_<country>;` after bulk embedding imports so the planner keeps using vector indexes instead of falling back to sequential scans. If maintenance windows are tight, increase `maintenance_work_mem` during refresh jobs to accelerate index builds.
+
+### Catalog Audits
+
+- The automated guardrails live in `tests/test_catalog_audits.py` and rely on reusable helpers from `tests/catalog_utils.py`. They verify partition strategies, required partitions, and index definitions for every critical table.
+- Run `./.venv/bin/pytest tests/test_catalog_audits.py -n auto` (or `pytest -k catalog`) whenever schema changes land. These checks run by default as part of the full suite, so migrations that drop/rename indexes will now fail fast.
+
 ## Workflow Guardrails
 
 - The `ck_workflow_nodes_path_depth` constraint (plus the matching trigger) ensures every node's LTREE path respects the owning graph's `max_depth`, even when ORM hooks are bypassed.
