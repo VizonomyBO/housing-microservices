@@ -9,12 +9,13 @@ The package is organized as follows:
 - **`src/shared_data_layer/db/models/`**: SQLAlchemy database models.
     - `users.py`: User management.
     - `documents.py`: Documents, Uploaded Files, Chunks, Artifacts.
+    - `agents.py`: Agent runs and telemetry events.
     - `retrieval.py`: Retrieval runs and metrics.
     - `knowledge_graph.py`: Graph entities and edges.
     - `workflow.py`: Workflow definitions and versions.
 - **`src/shared_data_layer/repositories/`**: Async repositories for data access.
     - `base.py`: Generic `BaseRepository` with common CRUD operations.
-    - `documents.py`, `knowledge_graph.py`, etc.: Specialized repositories.
+    - `documents.py`, `knowledge_graph.py`, `agents.py`, etc.: Specialized repositories.
 - **`src/shared_data_layer/schemas/`**: Pydantic models (DTOs) for API responses and internal data transfer.
 - **`src/shared_data_layer/migrations/`**: Alembic migration scripts.
 - **`src/shared_data_layer/testing/`**: Testing utilities and factories.
@@ -126,6 +127,28 @@ async def register_upload(session, document, storage_uri, content_hash):
 ```
 
 The repository enforces the `(owner_user_id, content_hash)` deduplication rule while still allowing base (ownerless) uploads to be recorded independently.
+
+Agent run/event telemetry can be logged for observability:
+
+```python
+from shared_data_layer.repositories.agents import AgentTelemetryRepository
+
+async def record_agent_activity(session, conversation_id, owner_id, payload):
+    repo = AgentTelemetryRepository(session)
+    run = await repo.create_run(
+        owner_user_id=owner_id,
+        conversation_id=conversation_id,
+        planner_name="planner.v2",
+        document_scope={"country_code": "USA"},
+        input_prompt="Summarize housing changes",
+    )
+    await repo.append_event(
+        run_id=run.id,
+        event_type="planner.step",
+        payload=payload,
+    )
+    return await repo.get_run_with_events(run.id)
+```
 ### 3. Using Schemas
 Pydantic schemas are available for type-safe data handling.
 

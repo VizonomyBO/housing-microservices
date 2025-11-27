@@ -884,6 +884,142 @@ def create_conversations_domain() -> None:
     )
 
 
+def create_agents_domain() -> None:
+    op.create_table(
+        "agent_runs",
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("conversation_id", sa.UUID(), nullable=True),
+        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column("planner_name", sa.String(), nullable=False),
+        sa.Column("planner_version", sa.String(), nullable=True),
+        sa.Column(
+            "status",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'running'"),
+        ),
+        sa.Column(
+            "document_scope", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("input_prompt", sa.Text(), nullable=True),
+        sa.Column("result_summary", sa.Text(), nullable=True),
+        sa.Column(
+            "result_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "started_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "completed_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["conversation_id"],
+            ["conversations.id"],
+            ondelete="SET NULL",
+            name="fk_agent_runs_conversation",
+        ),
+        sa.CheckConstraint(
+            "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
+            name="ck_agent_runs_country_code_format",
+        ),
+        sa.CheckConstraint(
+            "status IN ('pending','running','succeeded','failed','canceled')",
+            name="ck_agent_runs_status_enum",
+        ),
+    )
+    op.create_index(
+        "ix_agent_runs_owner_created_at",
+        "agent_runs",
+        ["owner_user_id", "created_at"],
+    )
+    op.create_index(
+        "ix_agent_runs_conversation_created_at",
+        "agent_runs",
+        ["conversation_id", "created_at"],
+    )
+    op.create_index(
+        "ix_agent_runs_country_code_created_at",
+        "agent_runs",
+        ["country_code", "created_at"],
+    )
+
+    op.create_table(
+        "agent_events",
+        sa.Column("run_id", sa.UUID(), nullable=False),
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column("event_type", sa.String(), nullable=False),
+        sa.Column(
+            "sequence_index",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "error_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["run_id"],
+            ["agent_runs.id"],
+            ondelete="CASCADE",
+            name="fk_agent_events_run",
+        ),
+        sa.CheckConstraint(
+            "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
+            name="ck_agent_events_country_code_format",
+        ),
+        sa.CheckConstraint(
+            "sequence_index >= 0",
+            name="ck_agent_events_sequence_non_negative",
+        ),
+    )
+    op.create_index(
+        "ix_agent_events_run_sequence",
+        "agent_events",
+        ["run_id", "sequence_index"],
+    )
+    op.create_index(
+        "ix_agent_events_owner_created_at",
+        "agent_events",
+        ["owner_user_id", "created_at"],
+    )
+
+
 def create_retrieval_domain() -> None:
     op.create_table(
         "chunks",
@@ -2476,6 +2612,7 @@ def upgrade() -> None:
     create_documents_domain()
     create_retrieval_domain()
     create_conversations_domain()
+    create_agents_domain()
     create_knowledge_graph_domain()
     create_workflow_domain()
     create_operational_views_and_triggers()
@@ -2570,6 +2707,15 @@ def downgrade() -> None:
     op.drop_index("ix_graph_entities_document_id", table_name="graph_entities")
     op.drop_index("ix_graph_entities_name", table_name="graph_entities")
     op.drop_table("graph_entities")
+
+    # Agent telemetry domain
+    op.drop_index("ix_agent_events_owner_created_at", table_name="agent_events")
+    op.drop_index("ix_agent_events_run_sequence", table_name="agent_events")
+    op.drop_table("agent_events")
+    op.drop_index("ix_agent_runs_country_code_created_at", table_name="agent_runs")
+    op.drop_index("ix_agent_runs_conversation_created_at", table_name="agent_runs")
+    op.drop_index("ix_agent_runs_owner_created_at", table_name="agent_runs")
+    op.drop_table("agent_runs")
 
     # Conversations domain
     op.drop_table("agent_state_checkpoints")

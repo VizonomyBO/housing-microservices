@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from shared_data_layer.db.models.agents import AgentRun
     from shared_data_layer.db.models.documents import ConversationDocument
     from shared_data_layer.db.models.retrieval import Chunk
 
@@ -44,6 +45,11 @@ class Conversation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     checkpoints: Mapped[list["AgentStateCheckpoint"]] = relationship(
         "AgentStateCheckpoint",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
+    agent_runs: Mapped[list["AgentRun"]] = relationship(
+        "AgentRun",
         back_populates="conversation",
         cascade="all, delete-orphan",
     )

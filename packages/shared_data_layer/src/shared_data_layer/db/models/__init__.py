@@ -1,3 +1,4 @@
+from .agents import AgentEvent, AgentRun
 from .conversations import (
     AgentStateCheckpoint,
     Conversation,
@@ -39,6 +40,8 @@ __all__ = [
     "MessageToolCall",
     "MessageCitation",
     "AgentStateCheckpoint",
+    "AgentRun",
+    "AgentEvent",
     "Document",
     "IngestionJob",
     "UploadedFile",
