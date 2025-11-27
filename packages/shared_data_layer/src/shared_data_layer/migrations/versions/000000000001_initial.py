@@ -5,9 +5,10 @@ Revises:
 Create Date: 2025-11-26 18:30:00.000000
 
 This migration establishes the full shared data layer schema as described
-in DATA_LAYER_GAP_PLAN.md. It creates all base tables, views, triggers,
-and stored procedures required by the documents, conversations,
-retrieval, knowledge graph, and workflow domains.
+in `docs/data/schema_and_persistence.md` and the supporting task plans
+(`packages/shared_data_layer/TASK_*_PLAN.md`). It creates all base tables,
+views, triggers, and stored procedures required by the documents,
+conversations, retrieval, knowledge graph, and workflow domains.
 """
 
 from __future__ import annotations

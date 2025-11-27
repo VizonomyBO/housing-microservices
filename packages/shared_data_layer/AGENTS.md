@@ -3,7 +3,7 @@
 This document is the **authoritative playbook** for agents touching `packages/shared_data_layer`. The system is still pre-production, but the schema and business rules are mature—treat every change as production-grade.
 
 - ✅ **Current architecture status**: The migration stack has been collapsed into a single `000000000001_initial.py`, LTREE support uses the in-repo shim, and refresh/maintenance logic is handled in ORM/event helpers (not triggers/RLS). Row-Level Security was intentionally removed; data integrity relies on constraints plus repository logic.
-- 📋 **Open work**: See `DATA_LAYER_GAP_PLAN.md` for the prioritized backlog (partitioning/indexes, workflow guardrails, pillar identity contract, ops docs). Every task should reference that plan.
+- 📋 **Open work**: Follow the per-scope task briefs in `packages/shared_data_layer/TASK_6_PLAN.md`, `TASK_9_PLAN.md`, and `TASK_11_PLAN.md`. Each file isolates a single unit of work so agents can deliver one task per session.
 - 🧭 **Working directory rule**: Always run commands from `packages/shared_data_layer`. Start each shell session with `cd packages/shared_data_layer` so dependencies, virtualenv paths, and tests resolve correctly.
 - 🧪 **Containers**: Never start Docker manually. Tests spin up pgvector via Testcontainers; let pytest manage lifecycle.
 
@@ -12,8 +12,8 @@ This document is the **authoritative playbook** for agents touching `packages/sh
 ## 1. Cognitive Workflow (Plan → Act → Verify)
 
 1. **Plan**
-   - Read the user request, then skim `DATA_LAYER_GAP_PLAN.md` and recent diffs to understand context.
-   - Write/update a lightweight task plan (e.g., in `AGENT_TASK_PLAN.md`) before editing code. Remove the file once the work is complete.
+   - Read the user request, then skim the relevant `packages/shared_data_layer/TASK_*_PLAN.md` file(s) and recent diffs to understand context.
+   - Write/update a lightweight task plan (e.g., a temporary `TASK_PLAN.md` in the repo root) before editing code. Remove the scratch file once the work is complete.
 2. **Research**
    - If you are unsure about `ltree`, `pgvector`, `polyfactory`, or any library, immediately consult Context7/serper. Do not guess.
    - Capture relevant docs/links in your plan.
@@ -97,8 +97,8 @@ Attach command output summaries in your final response; do not rely on CI.
 
 ## 5. Source Map / High-Value Files
 
-- `DATA_LAYER_GAP_PLAN.md` – living backlog describing remaining schema/infra gaps.
-- `AGENT_TASK_PLAN.md` – per-task plan you create/update (delete when done).
+- `packages/shared_data_layer/TASK_*_PLAN.md` – scoped backlog describing any remaining schema/infra work (one unit per file).
+- `TASK_PLAN.md` (temporary) – per-task scratch plan you create/update (delete when done).
 - `src/shared_data_layer/db/models/*` – SQLAlchemy models.
 - `src/shared_data_layer/db/events.py` & `maintenance.py` – ORM-based refresh hooks.
 - `src/shared_data_layer/migrations/versions/000000000001_initial.py` – single authoritative migration.
