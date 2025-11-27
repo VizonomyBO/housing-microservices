@@ -253,6 +253,27 @@ async def test_retrieval_runs_document_scope_indexes(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_pillar_answers_country_pillar_index(db_session: AsyncSession):
+    indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'pillar_answers'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in indexes}
+
+    assert "ix_pillar_answers_country_pillar" in index_map
+    index_def = index_map["ix_pillar_answers_country_pillar"].lower()
+    assert "country_code" in index_def
+    assert "pillar_name" in index_def
+    assert "status" in index_def
+    assert "published" in index_def
+
+
+@pytest.mark.asyncio
 async def test_graph_hot_entities(db_session: AsyncSession):
     # Create entities and edges
     entity_hot = await GraphEntityFactory.create_async(session=db_session, name="Hot")

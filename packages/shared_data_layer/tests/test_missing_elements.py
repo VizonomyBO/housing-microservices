@@ -13,6 +13,7 @@ from shared_data_layer.db.models.retrieval import (
 )
 from shared_data_layer.db.models.workflow import WorkflowEdge
 from shared_data_layer.repositories.documents import DocumentRepository
+from shared_data_layer.repositories.retrieval import PillarAnswerRepository
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import (
     GraphCommunityFactory,
@@ -73,6 +74,53 @@ async def test_pillar_answer_creation(db_session: AsyncSession):
     fetched_source = result_source.scalar_one()
     assert fetched_source.evidence_text == "Evidence"
     assert fetched_source.chunk_country_code == chunk.country_code
+
+
+@pytest.mark.asyncio
+async def test_pillar_answer_requires_owner_for_non_base_scope(
+    db_session: AsyncSession,
+):
+    document = await DocumentFactory.create_async(
+        session=db_session,
+        access_scope="user_private",
+    )
+    repo = PillarAnswerRepository(db_session)
+
+    with pytest.raises(ValueError, match="owner_user_id is required"):
+        await repo.create_pillar_answer(
+            owner_user_id=None,
+            document_id=document.id,
+            country_code=document.country_code or "USA",
+            pillar_name="finance",
+            content_hash="hash123",
+            summary_markdown="Summary",
+            answer_json={"key": "value"},
+            status="draft",
+        )
+
+
+@pytest.mark.asyncio
+async def test_pillar_answer_repository_enforces_owner_identity(
+    db_session: AsyncSession,
+):
+    document = await DocumentFactory.create_async(
+        session=db_session,
+        access_scope="user_private",
+    )
+    repo = PillarAnswerRepository(db_session)
+
+    answer = await repo.create_pillar_answer(
+        owner_user_id=document.owner_user_id,
+        document_id=document.id,
+        country_code=document.country_code or "USA",
+        pillar_name="finance",
+        content_hash="hash456",
+        summary_markdown="Summary",
+        answer_json={"key": "value"},
+        status="published",
+    )
+
+    assert answer.owner_user_id == document.owner_user_id
 
 
 @pytest.mark.asyncio
