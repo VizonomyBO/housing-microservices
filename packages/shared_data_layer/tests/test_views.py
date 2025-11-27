@@ -96,15 +96,9 @@ async def test_active_chunks_view_excludes_soft_deleted_docs(db_session: AsyncSe
 
 @pytest.mark.asyncio
 async def test_graph_edge_evidence_rollup(db_session: AsyncSession):
-    # Create edge and evidence
+    # Create edge and eagerly load the generated evidence collection
     edge = await GraphEdgeFactory.create_async(session=db_session)
-    # Factory creates 1 evidence by default? Let's check or add more.
-    # GraphEdgeFactory creates 1 evidence if not specified?
-    # Let's verify by refreshing
     await db_session.refresh(edge, attribute_names=["evidence"])
-    if not edge.evidence:
-        # Create evidence manually if factory didn't
-        pass  # Factory usually does, but let's assume it did based on previous tests
 
     # Refresh MV
     await db_session.execute(

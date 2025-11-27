@@ -123,9 +123,6 @@ class TestRepositories:
         await db_session.run_sync(lambda session: session.expire_all())
 
         # Test fetch_entity_with_neighbors
-        # We need to refresh/load relationships if factory didn't do it fully
-        # for the repo query to work?
-        # The repo uses selectinload, so it should fetch fresh.
 
         result_a = await repo.fetch_entity_with_neighbors(entity_a_id)
         assert result_a is not None

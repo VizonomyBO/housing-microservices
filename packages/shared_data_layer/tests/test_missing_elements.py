@@ -133,9 +133,7 @@ async def test_graph_entity_embedding(db_session: AsyncSession):
     stmt = select(GraphEntity).where(GraphEntity.id == entity.id)
     result = await db_session.execute(stmt)
     fetched_entity = result.scalar_one()
-    # pgvector returns numpy array or list? usually list or object that behaves
-    # like list
-    # But we just want to check it's not None and has correct dim
+    # Ensure the embedding round-trips from the database
     assert fetched_entity.embedding is not None
     # assert len(fetched_entity.embedding) == 512 # Might need to cast to list if Vector
 

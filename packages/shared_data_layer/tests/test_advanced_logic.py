@@ -109,11 +109,7 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         assert len(edge.evidence) == 1
         evidence = edge.evidence[0]
 
-        # Refresh MV (if it's a materialized view, we need to refresh it
-        # manually or wait?)
-        # The migration defined it as a VIEW or MATERIALIZED VIEW?
-        # Let's check migration a7f040967e5a. It says "CREATE MATERIALIZED VIEW".
-        # So we must refresh it.
+        # Refresh the materialized view to capture the new evidence row
         await db_session.execute(
             text("REFRESH MATERIALIZED VIEW graph_edge_evidence_rollup")
         )
