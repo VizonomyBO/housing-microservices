@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import field_validator
 
 from .common import ORMBaseSchema
+from .countries import CountryISOAlpha3
 
 
 class WorkflowNodeRead(ORMBaseSchema):
@@ -54,7 +55,7 @@ class WorkflowGraphRead(ORMBaseSchema):
     name: str
     description: Optional[str] = None
     domain: str
-    country_code: Optional[str] = None
+    country_code: Optional[CountryISOAlpha3] = None
     status: str
     version: str
     max_depth: int

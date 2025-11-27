@@ -149,6 +149,58 @@ async def test_base_documents_partition_creation(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_base_documents_partition_catalog(db_session: AsyncSession):
+    strategy = await db_session.execute(
+        text(
+            """
+            SELECT partstrat::text
+            FROM pg_partitioned_table pt
+            JOIN pg_class c ON pt.partrelid = c.oid
+            WHERE c.relname = 'base_documents_by_country'
+            """
+        )
+    )
+    assert strategy.scalar_one() == "l"
+
+    partition_rows = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_class c
+            JOIN pg_inherits i ON c.oid = i.inhrelid
+            JOIN pg_class p ON p.oid = i.inhparent
+            WHERE p.relname = 'base_documents_by_country'
+            """
+        )
+    )
+    partition_names = {row[0] for row in partition_rows}
+    assert len(partition_names) >= 249  # every ISO-3 code plus default
+
+    expected_samples = {
+        "base_documents_by_country_usa",
+        "base_documents_by_country_gbr",
+        "base_documents_by_country_can",
+        "base_documents_by_country_afg",
+        "base_documents_by_country_jpn",
+        "base_documents_by_country_bra",
+    }
+    assert expected_samples.issubset(partition_names)
+
+    default_partition = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_partitioned_table pt
+            JOIN pg_class parent ON parent.oid = pt.partrelid
+            JOIN pg_class c ON c.oid = pt.partdefid
+            WHERE parent.relname = 'base_documents_by_country'
+            """
+        )
+    )
+    assert default_partition.scalar_one() == "base_documents_by_country_default"
+
+
+@pytest.mark.asyncio
 async def test_graph_hot_entities(db_session: AsyncSession):
     # Create entities and edges
     entity_hot = await GraphEntityFactory.create_async(session=db_session, name="Hot")

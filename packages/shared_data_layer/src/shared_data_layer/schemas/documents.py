@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import model_validator
 
 from .common import ORMBaseSchema
+from .countries import CountryISOAlpha3
 from .retrieval import ChunkRead
 
 
@@ -35,7 +36,7 @@ class DocumentRead(ORMBaseSchema):
     owner_user_id: Optional[UUID] = None
     access_scope: str
     canonical_name: str
-    country_code: Optional[str] = None
+    country_code: Optional[CountryISOAlpha3] = None
     language: Optional[str] = None
     tags: Optional[List[str]] = None
     status: str

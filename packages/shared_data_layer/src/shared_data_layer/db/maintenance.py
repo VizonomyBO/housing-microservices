@@ -22,6 +22,34 @@ def refresh_base_documents_cache_sync(
     connection.execute(_REFRESH_BASE_SQL, {"country_code": country_code})
 
 
+async def refresh_all_base_documents_cache(session: AsyncSession) -> None:
+    """Rebuild the cache for every country partition."""
+
+    await refresh_base_documents_cache(session, None)
+
+
+async def refresh_base_documents_cache_for_country(
+    session: AsyncSession, country_code: str
+) -> None:
+    """Refresh a single country partition."""
+
+    await refresh_base_documents_cache(session, country_code)
+
+
+def refresh_all_base_documents_cache_sync(connection: Connection) -> None:
+    """Synchronous helper for refreshing every country partition."""
+
+    refresh_base_documents_cache_sync(connection, None)
+
+
+def refresh_base_documents_cache_for_country_sync(
+    connection: Connection, country_code: str
+) -> None:
+    """Synchronous helper for refreshing a specific country partition."""
+
+    refresh_base_documents_cache_sync(connection, country_code)
+
+
 async def refresh_graph_materializations(
     session: AsyncSession, concurrently: bool = False
 ) -> None:

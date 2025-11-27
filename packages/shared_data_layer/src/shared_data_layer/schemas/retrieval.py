@@ -3,6 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from .common import ORMBaseSchema
+from .countries import CountryISOAlpha3
 
 
 class ChunkRead(ORMBaseSchema):
@@ -21,7 +22,7 @@ class ChunkRead(ORMBaseSchema):
     artifact_uri: Optional[str] = None
     content_hash: str
     owner_user_id: Optional[UUID] = None
-    country_code: Optional[str] = None
+    country_code: Optional[CountryISOAlpha3] = None
     metadata_: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
@@ -29,7 +30,7 @@ class ChunkRead(ORMBaseSchema):
 
 class ChunkMetricsRead(ORMBaseSchema):
     chunk_id: UUID
-    chunk_country_code: str
+    chunk_country_code: CountryISOAlpha3
     quality_score: Optional[float] = None
     retrieval_count: int
     last_seen_at: Optional[datetime] = None
@@ -37,7 +38,7 @@ class ChunkMetricsRead(ORMBaseSchema):
 
 class RetrievalRunItemRead(ORMBaseSchema):
     chunk_id: UUID
-    chunk_country_code: str
+    chunk_country_code: CountryISOAlpha3
     score: float
     rank: int
 
@@ -54,7 +55,7 @@ class RetrievalRunRead(ORMBaseSchema):
 
 class PillarAnswerSourceRead(ORMBaseSchema):
     chunk_id: UUID
-    chunk_country_code: str
+    chunk_country_code: CountryISOAlpha3
     contribution_type: str
     weight: float
     evidence_text: str
@@ -64,7 +65,7 @@ class PillarAnswerSourceRead(ORMBaseSchema):
 class PillarAnswerRead(ORMBaseSchema):
     id: UUID
     owner_user_id: UUID
-    country_code: str
+    country_code: CountryISOAlpha3
     pillar_name: str
     document_id: UUID
     content_hash: str

@@ -136,6 +136,7 @@ For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
 - `owner_user_id` is **mandatory** for every document whose `access_scope` is not `base`. The database enforces this constraint and the `DocumentRead` schema validates it as well.
 - Base documents must omit `owner_user_id` and provide an ISO-3 `country_code`. This value is propagated automatically to child rows (chunks, artifacts) through triggers.
+- Pydantic schemas expose these ISO codes via the `CountryISOAlpha3` enum (`shared_data_layer.schemas.countries`), so application code gets type-safe hints instead of free-form strings.
 
 Keep this contract in mind when writing ingestion logic or creating fixtures—factories now default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` when building base corpus rows.
 
@@ -159,8 +160,8 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
 
 ## Partitioned Tables & Refresh Helpers
 
-- `chunks`, `graph_entities`, and `base_documents_by_country` are LIST-partitioned (USA/GBR/CAN + default) to keep hot regions isolated.
-- Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. The function ensures that missing partitions are created on demand via `ensure_base_documents_partition()`.
+- `chunks`, `graph_entities`, and `base_documents_by_country` are LIST-partitioned. The base-doc cache now pre-creates partitions for **every** ISO-3166-1 alpha-3 country plus the `base_documents_by_country_default` catch-all, and `ensure_base_documents_partition()` still provisions new partitions if ISO ever expands.
+- Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. Python callers can also use `shared_data_layer.db.maintenance.refresh_all_base_documents_cache()` (global) or `refresh_base_documents_cache_for_country(session, "USA")` for targeted rebuilds—both wrap the same SQL helper.
 - Knowledge-graph consumers can refresh both materialized views via:
 
   ```sql
