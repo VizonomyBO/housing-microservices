@@ -16,6 +16,14 @@ _REFRESH_ACTIVE_CHUNKS_SQL = {
     False: text("REFRESH MATERIALIZED VIEW active_chunks"),
     True: text("REFRESH MATERIALIZED VIEW CONCURRENTLY active_chunks"),
 }
+_REFRESH_GRAPH_EDGE_EVIDENCE_SQL = {
+    False: text("REFRESH MATERIALIZED VIEW graph_edge_evidence_rollup"),
+    True: text("REFRESH MATERIALIZED VIEW CONCURRENTLY graph_edge_evidence_rollup"),
+}
+_REFRESH_GRAPH_HOT_ENTITIES_SQL = {
+    False: text("REFRESH MATERIALIZED VIEW graph_hot_entities"),
+    True: text("REFRESH MATERIALIZED VIEW CONCURRENTLY graph_hot_entities"),
+}
 
 
 async def refresh_base_documents_cache(
@@ -123,4 +131,40 @@ def refresh_active_chunks_view_sync(
     """Synchronous helper for refreshing the `active_chunks` materialized view."""
 
     statement = _REFRESH_ACTIVE_CHUNKS_SQL[bool(concurrently)]
+    connection.execute(statement)
+
+
+async def refresh_graph_edge_evidence_rollup(
+    session: AsyncSession, concurrently: bool = False
+) -> None:
+    """Refresh the graph_edge_evidence_rollup materialized view."""
+
+    statement = _REFRESH_GRAPH_EDGE_EVIDENCE_SQL[bool(concurrently)]
+    await session.execute(statement)
+
+
+def refresh_graph_edge_evidence_rollup_sync(
+    connection: Connection, concurrently: bool = False
+) -> None:
+    """Synchronous helper for refreshing graph_edge_evidence_rollup."""
+
+    statement = _REFRESH_GRAPH_EDGE_EVIDENCE_SQL[bool(concurrently)]
+    connection.execute(statement)
+
+
+async def refresh_graph_hot_entities(
+    session: AsyncSession, concurrently: bool = False
+) -> None:
+    """Refresh the graph_hot_entities materialized view."""
+
+    statement = _REFRESH_GRAPH_HOT_ENTITIES_SQL[bool(concurrently)]
+    await session.execute(statement)
+
+
+def refresh_graph_hot_entities_sync(
+    connection: Connection, concurrently: bool = False
+) -> None:
+    """Synchronous helper for refreshing graph_hot_entities."""
+
+    statement = _REFRESH_GRAPH_HOT_ENTITIES_SQL[bool(concurrently)]
     connection.execute(statement)

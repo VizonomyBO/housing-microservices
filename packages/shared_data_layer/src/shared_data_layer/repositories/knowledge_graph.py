@@ -1,10 +1,16 @@
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
+from shared_data_layer.db.maintenance import (
+    refresh_graph_community_rollups,
+    refresh_graph_edge_evidence_rollup,
+    refresh_graph_hot_entities,
+    refresh_graph_materializations,
+)
 from shared_data_layer.db.models.knowledge_graph import (
     GraphEdge,
     GraphEntity,
@@ -209,29 +215,19 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         """
         Refresh the graph_edge_evidence_rollup materialized view.
         """
-        concurrently_clause = "CONCURRENTLY" if concurrently else ""
-        await self.session.execute(
-            text(
-                f"REFRESH MATERIALIZED VIEW {concurrently_clause} "
-                "graph_edge_evidence_rollup"
-            )
+        await refresh_graph_edge_evidence_rollup(
+            self.session, concurrently=concurrently
         )
 
     async def refresh_hot_entities(self, concurrently: bool = False) -> None:
         """
         Refresh the graph_hot_entities materialized view.
         """
-        concurrently_clause = "CONCURRENTLY" if concurrently else ""
-        await self.session.execute(
-            text(f"REFRESH MATERIALIZED VIEW {concurrently_clause} graph_hot_entities")
-        )
+        await refresh_graph_hot_entities(self.session, concurrently=concurrently)
 
     async def refresh_materializations(self, concurrently: bool = False) -> None:
         """Refresh both graph materialized views via the shared helper."""
-        await self.session.execute(
-            text("SELECT refresh_graph_materializations(:concurrently)"),
-            {"concurrently": concurrently},
-        )
+        await refresh_graph_materializations(self.session, concurrently=concurrently)
 
     async def refresh_community_rollups(
         self,
@@ -242,15 +238,9 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
     ) -> None:
         """Recompute `graph_communities` metrics for the requested slice."""
 
-        await self.session.execute(
-            text(
-                "SELECT refresh_graph_communities("
-                ":country_code, :algo_version, :community_id"
-                ")"
-            ),
-            {
-                "country_code": country_code,
-                "algo_version": algo_version,
-                "community_id": community_id,
-            },
+        await refresh_graph_community_rollups(
+            self.session,
+            country_code=country_code,
+            algo_version=algo_version,
+            community_id=community_id,
         )

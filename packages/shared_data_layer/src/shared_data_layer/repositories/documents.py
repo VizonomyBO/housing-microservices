@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from shared_data_layer.db.maintenance import refresh_base_documents_cache
 from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.documents import (
     ConversationDocument,
@@ -152,10 +153,7 @@ class DocumentRepository(BaseRepository[Document]):
         """
         Refresh the partitioned cache of base documents.
         """
-        await self.session.execute(
-            text("SELECT refresh_base_documents_by_country(:country_code)"),
-            {"country_code": country_code},
-        )
+        await refresh_base_documents_cache(self.session, country_code)
 
     @staticmethod
     def _validate_attachment_scope(

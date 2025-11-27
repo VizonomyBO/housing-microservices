@@ -9,11 +9,15 @@ from shared_data_layer.db.models.knowledge_graph import (
     GraphEvidence,
     GraphHotEntity,
 )
+from shared_data_layer.db.models.retrieval import ActiveChunk
 from shared_data_layer.db.models.workflow import WorkflowNode
 from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.repositories.knowledge_graph import KnowledgeGraphRepository
 from shared_data_layer.repositories.workflow import WorkflowGraphRepository
-from shared_data_layer.testing.factories.documents import ChunkFactory
+from shared_data_layer.testing.factories.documents import (
+    ChunkFactory,
+    DocumentFactory,
+)
 from shared_data_layer.testing.factories.knowledge_graph import (
     GraphEdgeFactory,
     GraphEntityFactory,
@@ -137,3 +141,39 @@ async def test_workflow_repo_move_subtree(db_session: AsyncSession):
     node_b_refreshed = result.scalar_one()
 
     assert str(node_b_refreshed.path) == "A.D.B"
+
+
+@pytest.mark.asyncio
+async def test_active_chunks_refreshes_on_chunk_change(db_session: AsyncSession):
+    document = await DocumentFactory.create_async(session=db_session, status="active")
+    chunk = document.chunks[0]
+    chunk.text_content = "updated text"
+    await db_session.flush()
+
+    stmt = select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    result = await db_session.execute(stmt)
+    active_chunk = result.scalar_one_or_none()
+
+    assert active_chunk is not None
+    assert active_chunk.text_content == "updated text"
+
+
+@pytest.mark.asyncio
+async def test_active_chunks_refreshes_on_document_status(db_session: AsyncSession):
+    document = await DocumentFactory.create_async(
+        session=db_session, status="registered"
+    )
+    chunk = document.chunks[0]
+
+    stmt = select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    result = await db_session.execute(stmt)
+    assert result.scalar_one_or_none() is None
+
+    document.status = "active"
+    await db_session.flush()
+
+    stmt = select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    result = await db_session.execute(stmt)
+    active_chunk = result.scalar_one_or_none()
+
+    assert active_chunk is not None

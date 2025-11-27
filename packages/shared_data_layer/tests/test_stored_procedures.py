@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared_data_layer.db.ltree import Ltree
+from shared_data_layer.db.procedures import workflow_nodes_move_subtree
 from shared_data_layer.db.models.workflow import WorkflowNode
 from shared_data_layer.testing.factories.workflow import (
     WorkflowGraphFactory,
@@ -55,9 +56,11 @@ async def test_workflow_nodes_move_subtree(db_session: AsyncSession):
     node_c_id = node_c.id
     node_d_id = node_d.id
 
-    await db_session.execute(
-        text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
-        {"graph_id": graph.id, "src": "A.B", "dst": "A.D"},
+    await workflow_nodes_move_subtree(
+        db_session,
+        graph_id=graph.id,
+        source_path="A.B",
+        target_parent_path="A.D",
     )
     await db_session.commit()
     db_session.expire_all()
@@ -90,9 +93,11 @@ async def test_workflow_nodes_move_subtree_cycle_detection(db_session: AsyncSess
 
     # Try to move A under B (Cycle!)
     with pytest.raises(Exception) as excinfo:
-        await db_session.execute(
-            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
-            {"graph_id": graph.id, "src": "A", "dst": "A.B"},
+        await workflow_nodes_move_subtree(
+            db_session,
+            graph_id=graph.id,
+            source_path="A",
+            target_parent_path="A.B",
         )
     assert "Cannot move subtree into its own descendant" in str(excinfo.value)
 
@@ -119,9 +124,11 @@ async def test_workflow_nodes_move_subtree_max_depth(db_session: AsyncSession):
 
     # Move A under C -> C.A.B (Depth 3, max 2)
     with pytest.raises(Exception) as excinfo:
-        await db_session.execute(
-            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
-            {"graph_id": graph.id, "src": "A", "dst": "C"},
+        await workflow_nodes_move_subtree(
+            db_session,
+            graph_id=graph.id,
+            source_path="A",
+            target_parent_path="C",
         )
     assert "Move violates max_depth constraint" in str(excinfo.value)
 
