@@ -209,7 +209,7 @@ resource "aws_lambda_function" "chunk_builder" {
   timeout     = 60
   memory_size = 512
   
-  layers = [aws_lambda_layer_version.common_dependencies.arn]
+  layers = [aws_lambda_layer_version.python_deps.arn]
   
   environment {
     variables = {
