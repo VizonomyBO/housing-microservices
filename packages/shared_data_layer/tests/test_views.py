@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared_data_layer.db.ltree import Ltree
 from shared_data_layer.db.maintenance import refresh_active_chunks_view
 from shared_data_layer.db.models.documents import BaseDocumentByCountry
 from shared_data_layer.db.models.knowledge_graph import (
@@ -15,6 +16,10 @@ from shared_data_layer.testing.factories.documents import ChunkFactory, Document
 from shared_data_layer.testing.factories.knowledge_graph import (
     GraphEdgeFactory,
     GraphEntityFactory,
+)
+from shared_data_layer.testing.factories.workflow import (
+    WorkflowGraphFactory,
+    WorkflowVersionFactory,
 )
 
 
@@ -250,6 +255,95 @@ async def test_retrieval_runs_document_scope_indexes(db_session: AsyncSession):
         "country_codes"
         in index_map["ix_retrieval_runs_document_scope_country_codes_gin"]
     )
+
+
+@pytest.mark.asyncio
+async def test_workflow_nodes_path_indexes(db_session: AsyncSession):
+    indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'workflow_nodes'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in indexes}
+    assert "ix_workflow_nodes_version_path" in index_map
+    assert "ix_workflow_nodes_path_gist" in index_map
+    assert "USING GIST" in index_map["ix_workflow_nodes_path_gist"].upper()
+
+
+@pytest.mark.asyncio
+async def test_workflow_nodes_depth_check_constraint_catalog(
+    db_session: AsyncSession,
+):
+    constraints = await db_session.execute(
+        text(
+            """
+            SELECT conname, pg_get_constraintdef(c.oid) AS definition
+            FROM pg_constraint c
+            WHERE c.conrelid = 'workflow_nodes'::regclass
+            """
+        )
+    )
+    constraint_map = {row.conname: row.definition for row in constraints}
+    assert "ck_workflow_nodes_path_depth" in constraint_map
+    assert "nlevel" in constraint_map["ck_workflow_nodes_path_depth"].lower()
+
+
+@pytest.mark.asyncio
+async def test_workflow_version_diffs_view(db_session: AsyncSession):
+    graph = await WorkflowGraphFactory.create_async(session=db_session, version_count=0)
+    older = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
+    version_a = await WorkflowVersionFactory.create_async(
+        session=db_session, graph=graph, created_at=older, updated_at=older
+    )
+    version_b = await WorkflowVersionFactory.create_async(
+        session=db_session,
+        graph=graph,
+        created_at=datetime.now(tz=timezone.utc),
+        updated_at=datetime.now(tz=timezone.utc),
+        node_specs=[
+            {"node_key": "root", "path": Ltree("root")},
+            {"node_key": "child1", "path": Ltree("root.child1")},
+            {"node_key": "child2", "path": Ltree("root.child2")},
+        ],
+        edge_specs=[],
+    )
+
+    rows = await db_session.execute(
+        text(
+            """
+            SELECT
+                workflow_version_id,
+                previous_version_id,
+                node_count,
+                node_delta,
+                edge_count,
+                edge_delta
+            FROM workflow_version_diffs
+            WHERE graph_id = :graph_id
+            ORDER BY created_at, workflow_version_id
+            """
+        ),
+        {"graph_id": graph.id},
+    )
+    results = rows.fetchall()
+    assert len(results) >= 2
+
+    first = results[0]
+    assert first.workflow_version_id == version_a.id
+    assert first.previous_version_id is None
+    assert first.node_delta == first.node_count
+    assert first.edge_delta == first.edge_count
+
+    second = results[1]
+    assert second.workflow_version_id == version_b.id
+    assert second.previous_version_id == version_a.id
+    assert second.node_count >= first.node_count
+    assert second.node_delta == second.node_count - first.node_count
+    assert second.edge_delta == second.edge_count - first.edge_count
 
 
 @pytest.mark.asyncio

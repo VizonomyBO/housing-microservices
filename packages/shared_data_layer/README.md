@@ -218,6 +218,12 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
 
 - `document_gc_events` stores trigger-generated audit rows whenever `active_chat_refs` falls to zero or `deleted_at` changes. Query this table to power GC dashboards or alerting.
 - `workflow_version_history` surfaces the approved version lineage for each workflow graph (graph metadata + change log + approver info).
+- `workflow_version_diffs` compares consecutive versions of a graph, exposing node/edge counts, deltas, and raw change logs so reviewers can audit structural changes quickly.
+
+## Workflow Guardrails
+
+- The `ck_workflow_nodes_path_depth` constraint (plus the matching trigger) ensures every node's LTREE path respects the owning graph's `max_depth`, even when ORM hooks are bypassed.
+- `trg_workflow_nodes_prevent_cycle` rejects ad-hoc updates that would move a node under its own descendants, preserving acyclic workflow trees outside of the `workflow_nodes_move_subtree` stored procedure.
 
 ## Linting & Formatting
 

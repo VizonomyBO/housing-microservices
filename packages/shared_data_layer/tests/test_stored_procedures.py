@@ -1,5 +1,8 @@
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared_data_layer.db.ltree import Ltree
@@ -136,3 +139,88 @@ async def test_workflow_nodes_depth_trigger(db_session: AsyncSession):
             version=version,
             path=Ltree("root.child.grandchild"),
         )
+
+
+@pytest.mark.asyncio
+async def test_workflow_nodes_depth_check_constraint(db_session: AsyncSession):
+    graph = await WorkflowGraphFactory.create_async(
+        session=db_session, max_depth=2, version_count=0
+    )
+    version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
+
+    await db_session.execute(
+        text(
+            "ALTER TABLE workflow_nodes DISABLE TRIGGER "
+            "trg_workflow_nodes_validate_depth"
+        )
+    )
+    try:
+        with pytest.raises(IntegrityError):
+            await db_session.execute(
+                text(
+                    """
+                    INSERT INTO workflow_nodes (
+                        id,
+                        version_id,
+                        node_key,
+                        level,
+                        path,
+                        type,
+                        config,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        :id,
+                        :version_id,
+                        :node_key,
+                        'coarse',
+                        (:path)::ltree,
+                        'task',
+                        '{}'::jsonb,
+                        now(),
+                        now()
+                    )
+                    """
+                ),
+                {
+                    "id": uuid4(),
+                    "version_id": version.id,
+                    "node_key": "too_deep",
+                    "path": "root.child.grandchild",
+                },
+            )
+    finally:
+        await db_session.rollback()
+        await db_session.execute(
+            text(
+                "ALTER TABLE workflow_nodes ENABLE TRIGGER "
+                "trg_workflow_nodes_validate_depth"
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_nodes_cycle_prevention_trigger(db_session: AsyncSession):
+    graph = await WorkflowGraphFactory.create_async(session=db_session, version_count=0)
+    version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
+
+    node_a = await WorkflowNodeFactory.create_async(
+        session=db_session, version=version, path=Ltree("root")
+    )
+    await WorkflowNodeFactory.create_async(
+        session=db_session, version=version, path=Ltree("root.child")
+    )
+
+    with pytest.raises(Exception) as excinfo:
+        await db_session.execute(
+            text(
+                """
+                UPDATE workflow_nodes
+                SET path = (:new_path)::ltree
+                WHERE id = :node_id
+                """
+            ),
+            {"new_path": "root.child.root", "node_id": node_a.id},
+        )
+    await db_session.rollback()
+    assert "descendant path" in str(excinfo.value)

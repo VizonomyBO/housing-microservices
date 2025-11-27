@@ -1579,6 +1579,37 @@ def create_workflow_domain() -> None:
         """
     )
 
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION workflow_version_max_depth(p_version_id uuid)
+        RETURNS integer AS $$
+        DECLARE
+            v_max_depth integer;
+        BEGIN
+            SELECT g.max_depth
+            INTO v_max_depth
+            FROM workflow_versions v
+            JOIN workflow_graphs g ON g.id = v.graph_id
+            WHERE v.id = p_version_id;
+
+            IF v_max_depth IS NULL THEN
+                RETURN 6;
+            END IF;
+
+            RETURN v_max_depth;
+        END;
+        $$ LANGUAGE plpgsql STABLE;
+        """
+    )
+
+    op.execute(
+        """
+        ALTER TABLE workflow_nodes
+        ADD CONSTRAINT ck_workflow_nodes_path_depth
+        CHECK (nlevel(path) <= workflow_version_max_depth(version_id))
+        """
+    )
+
     op.create_table(
         "workflow_edges",
         sa.Column("version_id", sa.UUID(), nullable=False),
@@ -1653,13 +1684,7 @@ def create_workflow_domain() -> None:
                 RAISE EXCEPTION 'Workflow version % has no parent graph', NEW.version_id;
             END IF;
 
-            SELECT max_depth INTO v_max_depth
-            FROM workflow_graphs
-            WHERE id = v_graph_id;
-
-            IF v_max_depth IS NULL THEN
-                v_max_depth := 6;
-            END IF;
+            v_max_depth := workflow_version_max_depth(NEW.version_id);
 
             IF NEW.path IS NULL THEN
                 RAISE EXCEPTION 'Path must be provided for workflow nodes';
@@ -1685,6 +1710,33 @@ def create_workflow_domain() -> None:
 
     op.execute(
         """
+        CREATE OR REPLACE FUNCTION workflow_nodes_prevent_cycle()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'UPDATE' THEN
+                IF NEW.path <@ OLD.path AND NEW.path <> OLD.path THEN
+                    RAISE EXCEPTION
+                        'Cannot move workflow node % into its own descendant path',
+                        NEW.id;
+                END IF;
+            END IF;
+
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_workflow_nodes_prevent_cycle
+        BEFORE UPDATE ON workflow_nodes
+        FOR EACH ROW EXECUTE FUNCTION workflow_nodes_prevent_cycle()
+        """
+    )
+
+    op.execute(
+        """
         CREATE VIEW workflow_version_history AS
         SELECT
             v.id AS workflow_version_id,
@@ -1700,6 +1752,44 @@ def create_workflow_domain() -> None:
             v.created_at
         FROM workflow_versions v
         JOIN workflow_graphs g ON g.id = v.graph_id;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE VIEW workflow_version_diffs AS
+        WITH stats AS (
+            SELECT
+                v.id AS workflow_version_id,
+                v.graph_id,
+                v.from_version,
+                v.to_version,
+                v.change_log,
+                v.created_at,
+                COUNT(DISTINCT n.id) AS node_count,
+                COUNT(DISTINCT e.id) AS edge_count
+            FROM workflow_versions v
+            LEFT JOIN workflow_nodes n ON n.version_id = v.id
+            LEFT JOIN workflow_edges e ON e.version_id = v.id
+            GROUP BY v.id
+        )
+        SELECT
+            workflow_version_id,
+            graph_id,
+            from_version,
+            to_version,
+            change_log,
+            created_at,
+            node_count,
+            edge_count,
+            LAG(workflow_version_id) OVER w AS previous_version_id,
+            node_count - COALESCE(LAG(node_count) OVER w, 0) AS node_delta,
+            edge_count - COALESCE(LAG(edge_count) OVER w, 0) AS edge_delta
+        FROM stats
+        WINDOW w AS (
+            PARTITION BY graph_id
+            ORDER BY created_at, workflow_version_id
+        );
         """
     )
 
@@ -2369,9 +2459,17 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_workflow_nodes_validate_depth ON workflow_nodes"
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_workflow_nodes_prevent_cycle ON workflow_nodes"
+    )
+    op.execute(
         "DROP FUNCTION IF EXISTS workflow_nodes_move_subtree(UUID, ltree, ltree)"
     )
+    op.execute("DROP FUNCTION IF EXISTS workflow_nodes_prevent_cycle")
     op.execute("DROP FUNCTION IF EXISTS workflow_nodes_validate_depth")
+    op.execute(
+        "ALTER TABLE IF EXISTS workflow_nodes DROP CONSTRAINT IF EXISTS ck_workflow_nodes_path_depth"
+    )
+    op.execute("DROP FUNCTION IF EXISTS workflow_version_max_depth(uuid)")
     op.execute("DROP FUNCTION IF EXISTS refresh_graph_materializations(boolean)")
     op.execute("DROP FUNCTION IF EXISTS ensure_base_documents_partition(text)")
     op.execute("DROP FUNCTION IF EXISTS fn_sync_chunk_reference_country")
@@ -2379,6 +2477,7 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS fn_track_document_gc_events")
     op.execute("DROP FUNCTION IF EXISTS fn_update_document_chat_refs")
     op.execute("DROP FUNCTION IF EXISTS refresh_base_documents_by_country(text)")
+    op.execute("DROP VIEW IF EXISTS workflow_version_diffs")
     op.execute("DROP VIEW IF EXISTS workflow_version_history")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_hot_entities")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_edge_evidence_rollup")
