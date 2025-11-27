@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared_data_layer.db.maintenance import refresh_active_chunks_view
 from shared_data_layer.db.models.documents import BaseDocumentByCountry
 from shared_data_layer.db.models.knowledge_graph import (
     GraphEdgeEvidenceRollup,
@@ -31,6 +34,8 @@ async def test_active_chunks_view(db_session: AsyncSession):
         session=db_session, document=doc_inactive
     )
 
+    await refresh_active_chunks_view(db_session)
+
     # Query view
     stmt = select(ActiveChunk)
     result = await db_session.execute(stmt)
@@ -46,6 +51,8 @@ async def test_active_chunks_view_updates_after_status_change(db_session: AsyncS
     doc = await DocumentFactory.create_async(session=db_session, chunk_count=1)
     chunk = doc.chunks[0]
 
+    await refresh_active_chunks_view(db_session)
+
     result = await db_session.execute(
         select(ActiveChunk).where(ActiveChunk.id == chunk.id)
     )
@@ -53,6 +60,28 @@ async def test_active_chunks_view_updates_after_status_change(db_session: AsyncS
 
     doc.status = "archived"
     await db_session.flush()
+    await refresh_active_chunks_view(db_session)
+
+    result = await db_session.execute(
+        select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    )
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_active_chunks_view_excludes_soft_deleted_docs(db_session: AsyncSession):
+    doc = await DocumentFactory.create_async(session=db_session, chunk_count=1)
+    chunk = doc.chunks[0]
+
+    await refresh_active_chunks_view(db_session)
+    result = await db_session.execute(
+        select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    )
+    assert result.scalar_one() is not None
+
+    doc.deleted_at = datetime.now(tz=timezone.utc)
+    await db_session.flush()
+    await refresh_active_chunks_view(db_session, concurrently=True)
 
     result = await db_session.execute(
         select(ActiveChunk).where(ActiveChunk.id == chunk.id)
@@ -198,6 +227,29 @@ async def test_base_documents_partition_catalog(db_session: AsyncSession):
         )
     )
     assert default_partition.scalar_one() == "base_documents_by_country_default"
+
+
+@pytest.mark.asyncio
+async def test_retrieval_runs_document_scope_indexes(db_session: AsyncSession):
+    indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND tablename = 'retrieval_runs'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in indexes}
+
+    assert "ix_retrieval_runs_document_scope_gin" in index_map
+    assert "jsonb_path_ops" in index_map["ix_retrieval_runs_document_scope_gin"]
+
+    assert "ix_retrieval_runs_document_scope_country_codes_gin" in index_map
+    assert (
+        "country_codes"
+        in index_map["ix_retrieval_runs_document_scope_country_codes_gin"]
+    )
 
 
 @pytest.mark.asyncio

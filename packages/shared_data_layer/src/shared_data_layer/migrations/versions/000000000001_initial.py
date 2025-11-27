@@ -991,6 +991,13 @@ def create_retrieval_domain() -> None:
         "retrieval_runs",
         ["document_scope"],
         postgresql_using="gin",
+        postgresql_ops={"document_scope": "jsonb_path_ops"},
+    )
+    op.create_index(
+        "ix_retrieval_runs_document_scope_country_codes_gin",
+        "retrieval_runs",
+        [sa.text("(document_scope -> 'country_codes')")],
+        postgresql_using="gin",
     )
 
     op.create_table(
@@ -1800,7 +1807,7 @@ def create_operational_views_and_triggers() -> None:
 
     op.execute(
         """
-        CREATE VIEW active_chunks AS
+        CREATE MATERIALIZED VIEW active_chunks AS
         SELECT
             c.id,
             c.document_id,
@@ -1817,6 +1824,12 @@ def create_operational_views_and_triggers() -> None:
         JOIN documents d ON c.document_id = d.id
         WHERE d.status = 'active' AND d.deleted_at IS NULL;
         """
+    )
+    op.create_index(
+        "uq_active_chunks_id",
+        "active_chunks",
+        ["id"],
+        unique=True,
     )
 
     op.execute(
@@ -2268,7 +2281,8 @@ def downgrade() -> None:
     op.execute("DROP VIEW IF EXISTS workflow_version_history")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_hot_entities")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_edge_evidence_rollup")
-    op.execute("DROP VIEW IF EXISTS active_chunks")
+    op.drop_index("uq_active_chunks_id", table_name="active_chunks")
+    op.execute("DROP MATERIALIZED VIEW IF EXISTS active_chunks")
     op.drop_table("base_documents_by_country")
 
     # Workflow domain
@@ -2324,6 +2338,10 @@ def downgrade() -> None:
     op.drop_index("ix_pillar_answers_country_pillar", table_name="pillar_answers")
     op.drop_index("uq_pillar_answers_owner_country_pillar", table_name="pillar_answers")
     op.drop_table("pillar_answers")
+    op.drop_index(
+        "ix_retrieval_runs_document_scope_country_codes_gin",
+        table_name="retrieval_runs",
+    )
     op.drop_index("ix_retrieval_runs_document_scope_gin", table_name="retrieval_runs")
     op.drop_index("ix_retrieval_runs_created_at", table_name="retrieval_runs")
     op.drop_table("retrieval_run_items")

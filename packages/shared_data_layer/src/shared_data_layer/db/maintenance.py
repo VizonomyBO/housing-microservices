@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 _REFRESH_BASE_SQL = text("SELECT refresh_base_documents_by_country(:country_code)")
 _REFRESH_GRAPH_SQL = text("SELECT refresh_graph_materializations(:concurrently)")
+_REFRESH_ACTIVE_CHUNKS_SQL = {
+    False: text("REFRESH MATERIALIZED VIEW active_chunks"),
+    True: text("REFRESH MATERIALIZED VIEW CONCURRENTLY active_chunks"),
+}
 
 
 async def refresh_base_documents_cache(
@@ -60,3 +64,21 @@ def refresh_graph_materializations_sync(
     connection: Connection, concurrently: bool = False
 ) -> None:
     connection.execute(_REFRESH_GRAPH_SQL, {"concurrently": concurrently})
+
+
+async def refresh_active_chunks_view(
+    session: AsyncSession, concurrently: bool = False
+) -> None:
+    """Refresh the materialized `active_chunks` snapshot after document updates."""
+
+    statement = _REFRESH_ACTIVE_CHUNKS_SQL[bool(concurrently)]
+    await session.execute(statement)
+
+
+def refresh_active_chunks_view_sync(
+    connection: Connection, concurrently: bool = False
+) -> None:
+    """Synchronous helper for refreshing the `active_chunks` materialized view."""
+
+    statement = _REFRESH_ACTIVE_CHUNKS_SQL[bool(concurrently)]
+    connection.execute(statement)

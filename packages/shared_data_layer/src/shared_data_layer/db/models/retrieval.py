@@ -289,4 +289,11 @@ Index(
     "ix_retrieval_runs_document_scope_gin",
     RetrievalRun.document_scope,
     postgresql_using="gin",
+    postgresql_ops={"document_scope": "jsonb_path_ops"},
+)
+
+Index(
+    "ix_retrieval_runs_document_scope_country_codes_gin",
+    RetrievalRun.document_scope["country_codes"],
+    postgresql_using="gin",
 )

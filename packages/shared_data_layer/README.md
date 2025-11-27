@@ -170,6 +170,7 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
   ```
 
   Repositories expose `KnowledgeGraphRepository.refresh_materializations()` for async workflows.
+- Retrieval queries use the `active_chunks` materialized view instead of joining `documents` repeatedly. Run `REFRESH MATERIALIZED VIEW active_chunks;` (or `... CONCURRENTLY` when the unique `id` index is available) after document status/deletion changes that bypass the standard ingestion pipeline, or call the async helper `shared_data_layer.db.maintenance.refresh_active_chunks_view(session, concurrently=False)` from Python.
 
 ### Retrieval Chunk Partition Maintenance
 
@@ -202,6 +203,11 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
   ```
 
 - After attaching indexes, run `ANALYZE chunks_mex;` so query plans understand the new partition's statistics. No ORM changes are necessary because SQLAlchemy targets the parent table.
+
+### Retrieval Telemetry Indexes
+
+- `retrieval_runs.document_scope` now has `GIN (document_scope jsonb_path_ops)` plus an expression index on `(document_scope -> 'country_codes')` to accelerate audits that filter by included countries. These indexes are created via the base migration and verified in `tests/test_views.py::test_retrieval_runs_document_scope_indexes`.
+- When writing custom queries, prefer `document_scope @> '{"country_codes":["USA"]}'::jsonb` so PostgreSQL can leverage the operator classes defined above.
 
 ## Observability Aids
 
