@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy_utils import Ltree
 
+from shared_data_layer.db.ltree import Ltree
 from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.repositories.knowledge_graph import KnowledgeGraphRepository
 from shared_data_layer.repositories.workflow import WorkflowGraphRepository
@@ -24,7 +24,7 @@ class TestRepositories:
 
         # Create a document with chunks
         doc = await DocumentFactory.create_async(
-            session=db_session, country_code="US", chunks=[]
+            session=db_session, country_code="USA", chunks=[]
         )
         chunk1 = await ChunkFactory.create_async(session=db_session, document=doc)
         chunk2 = await ChunkFactory.create_async(session=db_session, document=doc)
@@ -45,11 +45,11 @@ class TestRepositories:
 
         # Test list_documents_for_country
         doc_uk = await DocumentFactory.create_async(
-            session=db_session, country_code="UK", chunks=[]
+            session=db_session, country_code="GBR", chunks=[]
         )
         doc_uk_id = doc_uk.id
 
-        us_docs = await repo.list_documents_for_country("US")
+        us_docs = await repo.list_documents_for_country("USA")
         assert len(us_docs) >= 1
         assert any(d.id == doc_id for d in us_docs)
         assert not any(d.id == doc_uk_id for d in us_docs)
@@ -61,17 +61,17 @@ class TestRepositories:
         # Create entities and edges
         # Entity A -> Entity B
         entity_a = await GraphEntityFactory.create_async(
-            session=db_session, name="Entity A", country_code="US"
+            session=db_session, name="Entity A", country_code="USA"
         )
         entity_b = await GraphEntityFactory.create_async(
-            session=db_session, name="Entity B", country_code="US"
+            session=db_session, name="Entity B", country_code="USA"
         )
 
         edge = await GraphEdgeFactory.create_async(
             session=db_session,
             source=entity_a,
             target=entity_b,
-            relation="related_to",  # Fixed field name
+            edge_type="related_to",
         )
 
         entity_a_id = entity_a.id
@@ -91,27 +91,34 @@ class TestRepositories:
         assert result_a.id == entity_a_id
         # Check outgoing edges
         assert len(result_a.edges_out) == 1
-        assert result_a.edges_out[0].target_id == entity_b_id
+        assert result_a.edges_out[0].target_entity_id == entity_b_id
 
         # Test list_edges_for_scope
-        edges_us = await repo.list_edges_for_scope("US")
+        edges_us = await repo.list_edges_for_scope("USA")
         assert len(edges_us) >= 1
         assert any(e.id == edge_id for e in edges_us)
 
         # Test scope filtering
         entity_c = await GraphEntityFactory.create_async(
-            session=db_session, country_code="UK"
+            session=db_session, country_code="GBR"
         )
         entity_d = await GraphEntityFactory.create_async(
-            session=db_session, country_code="UK"
+            session=db_session, country_code="GBR"
         )
         edge_uk = await GraphEdgeFactory.create_async(
-            session=db_session, source=entity_c, target=entity_d, relation="related_to"
+            session=db_session, source=entity_c, target=entity_d, edge_type="related_to"
         )
         edge_uk_id = edge_uk.id
 
-        edges_us_filtered = await repo.list_edges_for_scope("US")
+        edges_us_filtered = await repo.list_edges_for_scope("USA")
         assert not any(e.id == edge_uk_id for e in edges_us_filtered)
+
+    async def test_knowledge_graph_materializations_refresh(
+        self, db_session: AsyncSession
+    ) -> None:
+        repo = KnowledgeGraphRepository(db_session)
+        # Should not raise even on empty graph
+        await repo.refresh_materializations()
 
     async def test_workflow_repository(self, db_session: AsyncSession):
         repo = WorkflowGraphRepository(db_session)
@@ -120,27 +127,14 @@ class TestRepositories:
         graph = await WorkflowGraphFactory.create_async(
             session=db_session,
             domain="policy",
-            country_code="US",
-            versions=[],  # Disable auto versions
+            country_code="USA",
+            status="published",
+            version_count=0,
         )
 
-        # Unpublished version
-        # Unpublished version
-        await WorkflowVersionFactory.create_async(
+        version = await WorkflowVersionFactory.create_async(
             session=db_session,
             graph=graph,
-            version_number=1,
-            is_published=False,
-            nodes=[],
-            edges=[],
-        )
-
-        # Published version
-        v2 = await WorkflowVersionFactory.create_async(
-            session=db_session,
-            graph=graph,
-            version_number=2,
-            is_published=True,
             nodes=[],
             edges=[],
         )
@@ -148,7 +142,7 @@ class TestRepositories:
         # Add nodes to published version
         node = await WorkflowNodeFactory.create_async(
             session=db_session,
-            version=v2,  # Use version object to ensure relationship
+            version=version,
             path=Ltree("A"),
         )
 
@@ -158,14 +152,13 @@ class TestRepositories:
         await db_session.run_sync(lambda session: session.expire_all())
 
         # Test get_published_workflow
-        result = await repo.get_published_workflow(domain="policy", country_code="US")
+        result = await repo.get_published_workflow(domain="policy", country_code="USA")
         assert result is not None
         assert result.id == graph_id
 
         assert len(result.versions) >= 1
         # Check if we can find the published version
-        published_v = next((v for v in result.versions if v.version_number == 2), None)
-        assert published_v is not None
-        assert published_v.is_published is True
-        assert len(published_v.nodes) >= 1
-        assert published_v.nodes[0].id == node.id
+        assert len(result.versions) >= 1
+        assert result.versions[0].nodes
+        node_ids = {n.id for n in result.versions[0].nodes}
+        assert node.id in node_ids

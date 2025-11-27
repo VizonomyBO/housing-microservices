@@ -10,6 +10,7 @@ from shared_data_layer.db.models.knowledge_graph import (
     GraphEntity,
     GraphEvidence,
 )
+from shared_data_layer.db.models.retrieval import Chunk
 from shared_data_layer.repositories.base import BaseRepository
 from shared_data_layer.schemas.knowledge_graph import GraphEdgeRead, GraphEntityRead
 
@@ -96,10 +97,10 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
 
         if entity_data.get("owner_user_id"):
             # User scope
-            index_elements = ["type", "name", "owner_user_id"]
+            index_elements = ["entity_type", "entity_key", "owner_user_id"]
         else:
             # Base scope
-            index_elements = ["type", "name", "country_code"]
+            index_elements = ["entity_type", "entity_key", "country_code"]
 
         stmt = stmt.on_conflict_do_update(
             index_elements=index_elements, set_=update_dict
@@ -121,8 +122,8 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
 
     async def upsert_edge(self, edge_data: dict) -> GraphEdge:
         """
-        Upsert a graph edge.
-        Unique constraint usually on (source_id, target_id, relation).
+        Upsert a graph edge using
+        (source_entity_id, target_entity_id, edge_type) as the unique key.
         """
         stmt = insert(GraphEdge).values(**edge_data)
 
@@ -133,7 +134,8 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         }
 
         stmt = stmt.on_conflict_do_update(
-            index_elements=["source_id", "target_id", "relation"], set_=update_dict
+            index_elements=["source_entity_id", "target_entity_id", "edge_type"],
+            set_=update_dict,
         ).returning(GraphEdge)
 
         result = await self.session.execute(stmt)
@@ -144,14 +146,38 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
 
         return edge
 
+    async def _resolve_chunk_country_code(self, chunk_id: UUID) -> str:
+        result = await self.session.execute(
+            select(Chunk.country_code).where(Chunk.id == chunk_id)
+        )
+        country_code = result.scalar_one_or_none()
+        if country_code is None:
+            raise ValueError(f"Chunk {chunk_id} not found when attaching evidence")
+        return country_code
+
     async def add_evidence(
-        self, edge_id: UUID, chunk_id: UUID, evidence_text: str = "evidence"
+        self,
+        edge_id: UUID,
+        chunk_id: UUID,
+        *,
+        chunk_country_code: Optional[str] = None,
+        offsets: Optional[tuple[int, int]] = None,
+        confidence: Optional[float] = None,
+        metadata: Optional[dict] = None,
     ) -> GraphEvidence:
         """
         Add evidence to an edge and refresh the rollup view.
         """
+        if chunk_country_code is None:
+            chunk_country_code = await self._resolve_chunk_country_code(chunk_id)
+
         evidence = GraphEvidence(
-            edge_id=edge_id, chunk_id=chunk_id, evidence_text=evidence_text
+            edge_id=edge_id,
+            chunk_id=chunk_id,
+            chunk_country_code=chunk_country_code,
+            offsets=offsets,
+            confidence=confidence,
+            metadata_=metadata,
         )
         self.session.add(evidence)
         await self.session.flush()
@@ -179,4 +205,11 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         concurrently_clause = "CONCURRENTLY" if concurrently else ""
         await self.session.execute(
             text(f"REFRESH MATERIALIZED VIEW {concurrently_clause} graph_hot_entities")
+        )
+
+    async def refresh_materializations(self, concurrently: bool = False) -> None:
+        """Refresh both graph materialized views via the shared helper."""
+        await self.session.execute(
+            text("SELECT refresh_graph_materializations(:concurrently)"),
+            {"concurrently": concurrently},
         )

@@ -18,9 +18,8 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
     ) -> Optional[WorkflowGraphRead]:
         stmt = (
             select(WorkflowGraph)
-            .join(WorkflowGraph.versions)
             .where(WorkflowGraph.domain == domain)
-            .where(WorkflowVersion.is_published.is_(True))
+            .where(WorkflowGraph.status == "published")
             .options(
                 selectinload(WorkflowGraph.versions).selectinload(
                     WorkflowVersion.nodes
@@ -33,7 +32,9 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
         if country_code:
             stmt = stmt.where(WorkflowGraph.country_code == country_code)
 
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(
+            stmt.order_by(WorkflowGraph.published_at.desc())
+        )
         # This might return multiple if multiple graphs match, logic should
         # handle preference. For now return first.
         workflow = result.scalars().first()
@@ -42,7 +43,7 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
         return None
 
     async def move_subtree(
-        self, version_id: UUID, source_path: str, target_parent_path: str
+        self, graph_id: UUID, source_path: str, target_parent_path: str
     ) -> None:
         """
         Move a subtree within a workflow version using the stored procedure.
@@ -53,8 +54,8 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
             target_parent_path: The ltree path of the new parent (e.g. "A.D").
         """
         await self.session.execute(
-            text("SELECT workflow_nodes_move_subtree(:v_id, :src, :dst)"),
-            {"v_id": version_id, "src": source_path, "dst": target_parent_path},
+            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
+            {"graph_id": graph_id, "src": source_path, "dst": target_parent_path},
         )
         # We don't commit here, letting the unit of work handle it,
         # but we should probably expire objects to ensure consistency if they are

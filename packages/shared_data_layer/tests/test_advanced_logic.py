@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy_utils import Ltree
+from sqlalchemy import select, text
 
+from shared_data_layer.db.ltree import Ltree
+from shared_data_layer.db.models.documents import DocumentGCEvent
 from shared_data_layer.testing.base import AsyncBaseTestCase
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import (
@@ -23,18 +25,22 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         assert doc.active_chat_refs == 0
 
         # 2. Attach to a conversation (insert into conversation_documents)
-        conv_id = "conv_123"
-        _ = uuid4()
+        conv_id = uuid4()
+
+        await db_session.execute(
+            text(
+                "INSERT INTO conversations (id, owner_user_id) VALUES (:id, :owner_id)"
+            ),
+            {"id": conv_id, "owner_id": uuid4()},
+        )
 
         await db_session.execute(
             text("""
             INSERT INTO conversation_documents 
-            (id, conversation_id, document_id, attach_source, role, created_at,
-             updated_at) 
-            VALUES (:id, :conv_id, :doc_id, 'user_upload', 'primary', NOW(),
-                    NOW())
+            (conversation_id, document_id, attach_source, role) 
+            VALUES (:conv_id, :doc_id, 'user_upload', 'primary')
             """),
-            {"id": uuid4(), "conv_id": conv_id, "doc_id": doc.id},
+            {"conv_id": conv_id, "doc_id": doc.id},
         )
 
         # 3. Trigger should have created a ref in active_chat_refs
@@ -52,6 +58,39 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         )
 
         # 5. Trigger should have removed the ref
+        await db_session.refresh(doc)
+        assert doc.active_chat_refs == 0
+
+        # Soft delete should also decrement
+        await db_session.execute(
+            text(
+                "UPDATE conversation_documents SET deleted_at = now()"
+                " WHERE conversation_id = :conv_id AND document_id = :doc_id"
+            ),
+            {"conv_id": conv_id, "doc_id": doc.id},
+        )
+        await db_session.refresh(doc)
+        assert doc.active_chat_refs == 0
+
+        # Restore should increment
+        await db_session.execute(
+            text(
+                "UPDATE conversation_documents SET deleted_at = NULL"
+                " WHERE conversation_id = :conv_id AND document_id = :doc_id"
+            ),
+            {"conv_id": conv_id, "doc_id": doc.id},
+        )
+        await db_session.refresh(doc)
+        assert doc.active_chat_refs == 1
+
+        # Clean up by hard delete
+        await db_session.execute(
+            text(
+                "DELETE FROM conversation_documents "
+                "WHERE conversation_id = :conv_id AND document_id = :doc_id"
+            ),
+            {"conv_id": conv_id, "doc_id": doc.id},
+        )
         await db_session.refresh(doc)
         assert doc.active_chat_refs == 0
 
@@ -118,9 +157,9 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         await db_session.execute(
             text(
                 "SELECT workflow_nodes_move_subtree("
-                ":version_id, CAST(:source AS ltree), CAST(:target AS ltree))"
+                ":graph_id, CAST(:source AS ltree), CAST(:target AS ltree))"
             ),
-            {"version_id": version.id, "source": "A", "target": "C"},
+            {"graph_id": graph.id, "source": "A", "target": "C"},
         )
         await db_session.flush()
 
@@ -130,3 +169,42 @@ class TestAdvancedLogic(AsyncBaseTestCase):
 
         assert str(node_a.path) == "C.A"
         assert str(node_b.path) == "C.A.B"
+
+
+@pytest.mark.asyncio
+async def test_document_gc_events_logged(db_session):
+    doc = await DocumentFactory.create_async(session=db_session, active_chat_refs=0)
+    conv_id = uuid4()
+
+    await db_session.execute(
+        text("INSERT INTO conversations (id) VALUES (:id)"),
+        {"id": conv_id},
+    )
+
+    await db_session.execute(
+        text(
+            "INSERT INTO conversation_documents "
+            "(conversation_id, document_id, attach_source, role) "
+            "VALUES (:conv_id, :doc_id, 'user_upload', 'primary')"
+        ),
+        {"conv_id": conv_id, "doc_id": doc.id},
+    )
+
+    await db_session.execute(
+        text(
+            "DELETE FROM conversation_documents "
+            "WHERE conversation_id = :conv_id AND document_id = :doc_id"
+        ),
+        {"conv_id": conv_id, "doc_id": doc.id},
+    )
+
+    stmt = select(DocumentGCEvent).where(DocumentGCEvent.document_id == doc.id)
+    events = (await db_session.execute(stmt)).scalars().all()
+    assert any(event.event_type == "active_refs_zero" for event in events)
+
+    doc.deleted_at = datetime.now(timezone.utc)
+    await db_session.flush()
+
+    stmt = select(DocumentGCEvent).where(DocumentGCEvent.document_id == doc.id)
+    events = (await db_session.execute(stmt)).scalars().all()
+    assert any(event.event_type == "deleted_state_changed" for event in events)

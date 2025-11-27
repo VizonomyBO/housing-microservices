@@ -2,6 +2,7 @@ import asyncio
 from typing import AsyncGenerator, Generator
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from shared_data_layer.testing.containers import PostgresContainerWithVector
@@ -31,6 +32,24 @@ def database_url(postgres_container: PostgresContainerWithVector) -> str:
 @pytest.fixture(scope="session")
 async def engine(database_url: str):
     engine = create_async_engine(database_url, echo=False)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _register_char_codec(dbapi_connection, connection_record):
+        await_ = getattr(dbapi_connection, "await_", None)
+        if await_ is None:
+            return
+
+        async def _setup():
+            try:
+                await dbapi_connection._connection.set_builtin_type_codec(  # type: ignore[attr-defined]
+                    "char",
+                    codec_name="text",
+                    format="text",
+                )
+            except Exception:
+                return
+
+        await_(_setup())
 
     # Run Alembic Migrations
     # We need to run this synchronously

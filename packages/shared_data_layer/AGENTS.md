@@ -2,12 +2,18 @@
 
 This document is the **authoritative source of truth** for AI agents working on the `shared_data_layer` package. Follow these protocols strictly to ensure high-quality, bug-free code.
 
+> This system is not deployed yet, you can rewrite and restructure all migrations if necessary even condense into one big or divide by coherent migration files, you are not restricted to solve it with the system as is
+
+> DON'T start containers yourself, use testcontainers only via the tests, as using docker yourself will hang indefinetly.
+
 ## 🧠 Cognitive Workflow (Plan -> Act -> Verify)
 Before writing any code, you **MUST** follow this process:
 1.  **Plan**: Analyze the request. Identify which files need changes. Check `AGENTS.md` for known patterns.
 2.  **Research**: If you are unsure about a library (e.g., `polyfactory`, `ltree`, `pgvector`), use `context7` or `serper-search` **IMMEDIATELY**. Do not guess.
 3.  **Act**: Make atomic changes. Focus on one file/module at a time.
 4.  **Verify**: Run tests immediately after changes. Do not accumulate technical debt.
+
+For each task, create a file with all the detailed steps you will follow, and update your progress as you go. When you finish working, remove the file.
 
 ## 🛑 Stuck State Protocol (CRITICAL)
 **Trigger**: If you fail to fix an error or implement a feature **3 times in a row**.
@@ -56,6 +62,7 @@ You are NOT done until you have run these commands and they pass with **zero err
     - **Manual**: `alembic upgrade head`.
 - **Stored Procedures**: `workflow_nodes_move_subtree` handles ltree moves.
     - **Quirk**: The SP requires explicit casting to `ltree` for updates: `SET path = (...)::ltree`.
+- DON'T Care about security apart from user and password auth, roles, etc are not necessary to be handled, nor tested.
 
 ### Pydantic & ORM (Asyncio Rules)
 - **Problem**: SQLAlchemy Async models cannot lazy-load relationships outside an active session/loop. Pydantic validation triggers attribute access.

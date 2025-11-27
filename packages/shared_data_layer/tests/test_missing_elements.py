@@ -1,5 +1,8 @@
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared_data_layer.db.models.knowledge_graph import GraphEdge, GraphEntity
@@ -7,16 +10,17 @@ from shared_data_layer.db.models.retrieval import (
     PillarAnswer,
     PillarAnswerSource,
 )
-from shared_data_layer.db.models.workflow import (
-    WorkflowEdge,
-)
+from shared_data_layer.db.models.workflow import WorkflowEdge
+from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import (
+    GraphCommunityFactory,
     GraphEdgeFactory,
     GraphEntityFactory,
 )
 from shared_data_layer.testing.factories.retrieval import ChunkFactory
 from shared_data_layer.testing.factories.workflow import (
     WorkflowGraphFactory,
+    WorkflowNodeFactory,
     WorkflowVersionFactory,
 )
 
@@ -34,7 +38,7 @@ async def test_pillar_answer_creation(db_session: AsyncSession):
     # Create PillarAnswer
     answer = PillarAnswer(
         owner_user_id=user_id,  # Use created user id
-        country_code="US",
+        country_code="USA",
         pillar_name="finance",
         document_id=chunk.document_id,
         content_hash="hash123",
@@ -66,6 +70,7 @@ async def test_pillar_answer_creation(db_session: AsyncSession):
     result_source = await db_session.execute(stmt_source)
     fetched_source = result_source.scalar_one()
     assert fetched_source.evidence_text == "Evidence"
+    assert fetched_source.chunk_country_code == chunk.country_code
 
 
 @pytest.mark.asyncio
@@ -94,7 +99,7 @@ async def test_graph_edge_evidence_span(db_session: AsyncSession):
         session=db_session,
         source=entity_a,
         target=entity_b,
-        relation="rel",
+        edge_type="rel",
         evidence_span="Span of text",
     )
 
@@ -108,11 +113,17 @@ async def test_graph_edge_evidence_span(db_session: AsyncSession):
 async def test_workflow_edge_transition_type(db_session: AsyncSession):
     graph = await WorkflowGraphFactory.create_async(session=db_session)
     version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
+    source_node = await WorkflowNodeFactory.create_async(
+        session=db_session, version=version
+    )
+    target_node = await WorkflowNodeFactory.create_async(
+        session=db_session, version=version
+    )
 
     edge = WorkflowEdge(
         version_id=version.id,
-        source_node_id="node1",
-        target_node_id="node2",
+        source_node_id=source_node.id,
+        target_node_id=target_node.id,
         transition_type="failure",
     )
     db_session.add(edge)
@@ -122,3 +133,36 @@ async def test_workflow_edge_transition_type(db_session: AsyncSession):
     result = await db_session.execute(stmt)
     fetched_edge = result.scalar_one()
     assert fetched_edge.transition_type == "failure"
+
+
+@pytest.mark.asyncio
+async def test_document_canonical_name_uniqueness(db_session: AsyncSession):
+    owner_id = uuid4()
+    await DocumentFactory.create_async(
+        session=db_session,
+        owner_user_id=owner_id,
+        canonical_name="Duplicate",
+        chunks=[],
+    )
+
+    with pytest.raises(IntegrityError):
+        await DocumentFactory.create_async(
+            session=db_session,
+            owner_user_id=owner_id,
+            canonical_name="Duplicate",
+            chunks=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_graph_communities_normalize(db_session: AsyncSession):
+    member_a = uuid4()
+    member_b = uuid4()
+    community = await GraphCommunityFactory.create_async(
+        session=db_session,
+        entity_ids=[member_b, member_a, member_b],
+        metrics={},
+    )
+    await db_session.refresh(community)
+    assert community.entity_ids == sorted({member_a, member_b})
+    assert community.metrics["member_count"] == 2

@@ -1,42 +1,59 @@
+from __future__ import annotations
+
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID as PyUUID
 
-from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    PrimaryKeyConstraint,
+    String,
+    UniqueConstraint,
+    and_,
+    func,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, INT4RANGE, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
+    from shared_data_layer.db.models.conversations import Conversation
     from shared_data_layer.db.models.retrieval import Chunk
 
 
 class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "documents"
 
-    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(
-        nullable=True
-    )  # No FK to users (external)
-    access_scope: Mapped[str] = mapped_column(
-        String, nullable=False
-    )  # Enum: base, user_private, user_shared
+    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
+    access_scope: Mapped[str] = mapped_column(String, nullable=False)
     canonical_name: Mapped[str] = mapped_column(String, nullable=False)
     country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     language: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
-    status: Mapped[str] = mapped_column(
-        String, nullable=False
-    )  # Enum: registered, ingesting, active, failed, archived
+    status: Mapped[str] = mapped_column(String, nullable=False)
     ingestion_stage: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ingestion_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ingestion_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     source_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     byte_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     visibility: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     managed_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    active_chat_refs: Mapped[int] = mapped_column(default=0)
+    active_chat_refs: Mapped[int] = mapped_column(default=0, nullable=False)
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    # Relationships
     artifacts: Mapped[list["Artifact"]] = relationship(
         "Artifact", back_populates="document", cascade="all, delete-orphan"
     )
@@ -46,10 +63,43 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunks: Mapped[list["Chunk"]] = relationship(
         "Chunk", back_populates="document", cascade="all, delete-orphan"
     )
+    gc_events: Mapped[list["DocumentGCEvent"]] = relationship(
+        "DocumentGCEvent", back_populates="document", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
-        UniqueConstraint(
-            "owner_user_id", "content_hash", name="uq_documents_owner_content_hash"
+        CheckConstraint(
+            "access_scope <> 'base' OR owner_user_id IS NULL",
+            name="ck_documents_base_owner_null",
+        ),
+        CheckConstraint(
+            "access_scope <> 'base' OR country_code IS NOT NULL",
+            name="ck_documents_base_country_required",
+        ),
+        CheckConstraint(
+            "(access_scope = 'base' AND owner_user_id IS NULL)"
+            " OR (access_scope <> 'base' AND owner_user_id IS NOT NULL)",
+            name="ck_documents_owner_required_for_non_base",
+        ),
+        CheckConstraint(
+            "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
+            name="ck_documents_country_code_format",
+        ),
+        CheckConstraint(
+            "status IN ('registered','ingesting','active','failed','archived')",
+            name="ck_documents_status_enum",
+        ),
+        CheckConstraint(
+            "access_scope IN ('base','user_private','user_shared')",
+            name="ck_documents_access_scope_enum",
+        ),
+        CheckConstraint(
+            "ingestion_stage IS NULL OR ingestion_stage IN "
+            "('preflight','convert','chunk','embed','index','activate')",
+            name="ck_documents_ingestion_stage_enum",
+        ),
+        CheckConstraint(
+            "active_chat_refs >= 0", name="ck_documents_active_refs_non_negative"
         ),
     )
 
@@ -66,9 +116,26 @@ class IngestionJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     worker: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_error: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     trace_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     document: Mapped["Document"] = relationship(
         "Document", back_populates="ingestion_jobs"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "stage IN ('preflight','convert','chunk','embed','index','activate')",
+            name="ck_ingestion_jobs_stage_enum",
+        ),
+        CheckConstraint(
+            "status IN ('pending','running','succeeded','failed','canceled')",
+            name="ck_ingestion_jobs_status_enum",
+        ),
     )
 
 
@@ -81,44 +148,167 @@ class Artifact(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     artifact_type: Mapped[str] = mapped_column(String, nullable=False)
     s3_uri: Mapped[str] = mapped_column(String, nullable=False)
     byte_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    content_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    page_range: Mapped[Optional[tuple[int, int]]] = mapped_column(
+        INT4RANGE, nullable=True
+    )
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
     document: Mapped["Document"] = relationship("Document", back_populates="artifacts")
 
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "artifact_type",
+            name="uq_artifacts_document_type",
+        ),
+    )
 
-class ConversationDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+
+class ConversationDocument(Base, TimestampMixin):
     __tablename__ = "conversation_documents"
 
-    conversation_id: Mapped[str] = mapped_column(
-        String, nullable=False
-    )  # FK to conversations table (in another module)
-    document_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("documents.id"), nullable=False
+    conversation_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
-    attached_by_user_id: Mapped[Optional[PyUUID]] = mapped_column(
-        nullable=True
-    )  # No FK to users
+    document_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    attached_by_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
     attach_source: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)
     visibility_override: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    conversation: Mapped["Conversation"] = relationship(
+        "Conversation", back_populates="documents"
+    )
+    document: Mapped["Document"] = relationship("Document")
 
     __table_args__ = (
-        UniqueConstraint(
-            "conversation_id", "document_id", name="uq_conversation_documents_conv_doc"
+        PrimaryKeyConstraint(
+            "conversation_id", "document_id", name="pk_conversation_documents"
         ),
     )
 
 
 class BaseDocumentByCountry(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
-    Materialized view for base documents partitioned by country.
+    Logical representation of the partitioned cache for base documents.
     """
 
     __tablename__ = "base_documents_by_country"
-    __table_args__ = {"info": {"is_view": True}}
 
-    access_scope: Mapped[str] = mapped_column(String)
-    country_code: Mapped[Optional[str]] = mapped_column(String(3))
-    status: Mapped[str] = mapped_column(String)
-    content_hash: Mapped[str] = mapped_column(String)
+    document_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    country_code: Mapped[str] = mapped_column(
+        String(3), nullable=False, primary_key=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+
+    document: Mapped["Document"] = relationship("Document")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "country_code",
+            name="uq_base_documents_by_country_document_id",
+        ),
+    )
+
+
+class DocumentGCEvent(Base, UUIDPrimaryKeyMixin):
+    __tablename__ = "document_gc_events"
+
+    document_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    prev_active_chat_refs: Mapped[Optional[int]] = mapped_column(nullable=True)
+    new_active_chat_refs: Mapped[Optional[int]] = mapped_column(nullable=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    document: Mapped["Document"] = relationship("Document", back_populates="gc_events")
+
+
+Index(
+    "ix_documents_status_updated_at",
+    Document.status,
+    Document.updated_at,
+)
+
+Index(
+    "ix_documents_scope_country",
+    Document.access_scope,
+    Document.country_code,
+)
+
+Index(
+    "uq_documents_owner_content_hash_active",
+    Document.owner_user_id,
+    Document.content_hash,
+    unique=True,
+    postgresql_where=and_(
+        Document.owner_user_id.isnot(None),
+        Document.deleted_at.is_(None),
+    ),
+)
+
+Index(
+    "uq_documents_base_country_hash",
+    Document.country_code,
+    Document.content_hash,
+    unique=True,
+    postgresql_where=and_(
+        Document.owner_user_id.is_(None),
+        Document.access_scope == "base",
+        Document.deleted_at.is_(None),
+    ),
+)
+
+Index(
+    "uq_documents_owner_canonical_name_active",
+    Document.owner_user_id,
+    func.lower(Document.canonical_name),
+    unique=True,
+    postgresql_where=and_(
+        Document.owner_user_id.isnot(None),
+        Document.deleted_at.is_(None),
+        Document.access_scope != "base",
+    ),
+)
+
+Index(
+    "ix_ingestion_jobs_document_stage",
+    IngestionJob.document_id,
+    IngestionJob.stage,
+)
+
+Index(
+    "ix_ingestion_jobs_status_filter",
+    IngestionJob.status,
+    postgresql_where=IngestionJob.status.in_(["pending", "failed"]),
+)
+
+Index(
+    "ix_artifacts_metadata_gin",
+    Artifact.metadata_,
+    postgresql_using="gin",
+)
+
+Index(
+    "ix_conversation_documents_document_id",
+    ConversationDocument.document_id,
+)
+
+Index(
+    "ix_conversation_documents_attach_source",
+    ConversationDocument.attach_source,
+)

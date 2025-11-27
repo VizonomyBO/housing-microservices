@@ -132,6 +132,48 @@ To run the tests for this package:
 
 For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
+## Identity & Ownership Contract
+
+- `owner_user_id` is **mandatory** for every document whose `access_scope` is not `base`. The database enforces this constraint and the `DocumentRead` schema validates it as well.
+- Base documents must omit `owner_user_id` and provide an ISO-3 `country_code`. This value is propagated automatically to child rows (chunks, artifacts) through triggers.
+
+Keep this contract in mind when writing ingestion logic or creating fixtures—factories now default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` when building base corpus rows.
+
+## Row-Level Security & Session Settings
+
+RLS is enabled for documents, chunks, knowledge-graph entities/edges, workflow graphs, and GC events. Access is controlled via custom PostgreSQL settings:
+
+- `SET app.bypass_rls = 'on'|'off'`: defaults to `on`. Turn it `off` to enforce policies.
+- `SET app.current_owner_id = '<uuid>'`: grants access to tenant-scoped rows for the matching owner.
+- `SET app.current_country_code = 'USA'`: grants access to base rows for the given country (upper-case ISO-3).
+
+Example (tenant scoped):
+
+```sql
+SET app.bypass_rls = 'off';
+SET app.current_owner_id = '4f1c59b6-3e2e-4d41-b883-4bd9a48a6e18';
+SELECT * FROM documents;
+```
+
+Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running scoped queries in tests.
+
+## Partitioned Tables & Refresh Helpers
+
+- `chunks`, `graph_entities`, and `base_documents_by_country` are LIST-partitioned (USA/GBR/CAN + default) to keep hot regions isolated.
+- Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. The function ensures that missing partitions are created on demand via `ensure_base_documents_partition()`.
+- Knowledge-graph consumers can refresh both materialized views via:
+
+  ```sql
+  SELECT refresh_graph_materializations(false);
+  ```
+
+  Repositories expose `KnowledgeGraphRepository.refresh_materializations()` for async workflows.
+
+## Observability Aids
+
+- `document_gc_events` stores trigger-generated audit rows whenever `active_chat_refs` falls to zero or `deleted_at` changes. Query this table to power GC dashboards or alerting.
+- `workflow_version_history` surfaces the approved version lineage for each workflow graph (graph metadata + change log + approver info).
+
 ## Linting & Formatting
 
 This project uses `ruff` for linting and formatting, configured to match `flake8`, `isort`, and `black` (line length 88).

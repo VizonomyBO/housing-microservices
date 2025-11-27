@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
 from shared_data_layer.db.models.documents import ConversationDocument, Document
@@ -63,13 +64,13 @@ class DocumentRepository(BaseRepository[Document]):
         await self.session.refresh(new_doc)
 
         if new_doc.access_scope == "base":
-            await self.refresh_base_documents()
+            await self.refresh_base_documents(country_code=new_doc.country_code)
 
         return new_doc
 
     async def attach_to_conversation(
         self,
-        conversation_id: str,
+        conversation_id: UUID,
         document_id: UUID,
         attach_source: str,
         role: str = "primary",
@@ -88,9 +89,14 @@ class DocumentRepository(BaseRepository[Document]):
         existing_attachment = result.scalar_one_or_none()
 
         if existing_attachment:
+            if existing_attachment.deleted_at:
+                existing_attachment.deleted_at = None
+                existing_attachment.attach_source = attach_source
+                existing_attachment.role = role
+                existing_attachment.visibility_override = visibility_override
+                existing_attachment.attached_by_user_id = attached_by_user_id
             return existing_attachment
 
-        # Create attachment
         attachment = ConversationDocument(
             conversation_id=conversation_id,
             document_id=document_id,
@@ -100,20 +106,11 @@ class DocumentRepository(BaseRepository[Document]):
             visibility_override=visibility_override,
         )
         self.session.add(attachment)
-
-        # Increment ref count
-        await self.session.execute(
-            update(Document)
-            .where(Document.id == document_id)
-            .values(active_chat_refs=Document.active_chat_refs + 1)
-        )
-
         await self.session.flush()
-        await self.session.refresh(attachment)
         return attachment
 
     async def detach_from_conversation(
-        self, conversation_id: str, document_id: UUID
+        self, conversation_id: UUID, document_id: UUID
     ) -> bool:
         """
         Detach a document from a conversation and decrement the reference count.
@@ -125,28 +122,17 @@ class DocumentRepository(BaseRepository[Document]):
         result = await self.session.execute(stmt)
         attachment = result.scalar_one_or_none()
 
-        if not attachment:
+        if not attachment or attachment.deleted_at:
             return False
 
-        await self.session.delete(attachment)
-
-        # Decrement ref count
-        await self.session.execute(
-            update(Document)
-            .where(Document.id == document_id)
-            .values(active_chat_refs=Document.active_chat_refs - 1)
-        )
-
+        attachment.deleted_at = datetime.now(timezone.utc)
         return True
 
-    async def refresh_base_documents(self, concurrently: bool = False) -> None:
+    async def refresh_base_documents(self, country_code: Optional[str] = None) -> None:
         """
-        Refresh the base_documents_by_country materialized view.
+        Refresh the partitioned cache of base documents.
         """
-        concurrently_clause = "CONCURRENTLY" if concurrently else ""
         await self.session.execute(
-            text(
-                f"REFRESH MATERIALIZED VIEW {concurrently_clause} "
-                "base_documents_by_country"
-            )
+            text("SELECT refresh_base_documents_by_country(:country_code)"),
+            {"country_code": country_code},
         )

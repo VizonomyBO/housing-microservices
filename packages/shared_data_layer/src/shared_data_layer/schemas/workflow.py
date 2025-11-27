@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -8,31 +9,42 @@ from .common import ORMBaseSchema
 
 class WorkflowNodeRead(ORMBaseSchema):
     id: UUID
-    node_id: str
+    node_key: str
     type: str
+    level: str
+    path: str
     config: Dict[str, Any]
-    path: Optional[str] = None
+    description: Optional[str] = None
+    preconditions: Optional[Dict[str, Any]] = None
+    tool_hints: Optional[List[str]] = None
+    artifacts: Optional[Dict[str, Any]] = None
 
     @field_validator("path", mode="before")
     @classmethod
-    def convert_ltree(cls, v):
-        if v is not None:
-            return str(v)
-        return v
+    def convert_ltree(cls, value):
+        if value is not None:
+            return str(value)
+        return value
 
 
 class WorkflowEdgeRead(ORMBaseSchema):
     id: UUID
-    source_node_id: str
-    target_node_id: str
+    source_node_id: UUID
+    target_node_id: UUID
+    transition_type: str
     condition: Optional[str] = None
+    confidence: Optional[float] = None
+    metadata_: Optional[dict] = None
 
 
 class WorkflowVersionRead(ORMBaseSchema):
     id: UUID
-    version_number: int
+    from_version: Optional[str] = None
+    to_version: Optional[str] = None
     definition: Dict[str, Any]
-    is_published: bool
+    change_log: Optional[Dict[str, Any]] = None
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
     nodes: List[WorkflowNodeRead] = []
     edges: List[WorkflowEdgeRead] = []
 
@@ -43,5 +55,9 @@ class WorkflowGraphRead(ORMBaseSchema):
     description: Optional[str] = None
     domain: str
     country_code: Optional[str] = None
-    is_active: bool
+    status: str
+    version: str
+    max_depth: int
+    metadata_: Optional[dict] = None
+    published_at: Optional[datetime] = None
     versions: List[WorkflowVersionRead] = []

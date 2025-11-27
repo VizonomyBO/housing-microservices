@@ -42,6 +42,25 @@ async def test_active_chunks_view(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_active_chunks_view_updates_after_status_change(db_session: AsyncSession):
+    doc = await DocumentFactory.create_async(session=db_session, chunk_count=1)
+    chunk = doc.chunks[0]
+
+    result = await db_session.execute(
+        select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    )
+    assert result.scalar_one() is not None
+
+    doc.status = "archived"
+    await db_session.flush()
+
+    result = await db_session.execute(
+        select(ActiveChunk).where(ActiveChunk.id == chunk.id)
+    )
+    assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
 async def test_graph_edge_evidence_rollup(db_session: AsyncSession):
     # Create edge and evidence
     edge = await GraphEdgeFactory.create_async(session=db_session)
@@ -75,17 +94,18 @@ async def test_graph_edge_evidence_rollup(db_session: AsyncSession):
 async def test_base_documents_by_country(db_session: AsyncSession):
     # Create base doc
     doc_base = await DocumentFactory.create_async(
-        session=db_session, access_scope="base", country_code="US"
+        session=db_session, access_scope="base", country_code="USA"
     )
 
     # Create user doc
     _doc_user = await DocumentFactory.create_async(
-        session=db_session, access_scope="user_private", country_code="US"
+        session=db_session, access_scope="user_private", country_code="USA"
     )
 
-    # Refresh MV
+    # Refresh cache
     await db_session.execute(
-        text("REFRESH MATERIALIZED VIEW base_documents_by_country")
+        text("SELECT refresh_base_documents_by_country(:country_code)"),
+        {"country_code": None},
     )
 
     # Query MV
@@ -94,7 +114,38 @@ async def test_base_documents_by_country(db_session: AsyncSession):
     docs = result.scalars().all()
 
     assert len(docs) == 1
-    assert docs[0].id == doc_base.id
+    assert docs[0].document_id == doc_base.id
+
+
+@pytest.mark.asyncio
+async def test_base_documents_partition_creation(db_session: AsyncSession):
+    doc_base = await DocumentFactory.create_async(
+        session=db_session, access_scope="base", owner_user_id=None, country_code="BRA"
+    )
+
+    await db_session.execute(
+        text("SELECT refresh_base_documents_by_country(:country_code)"),
+        {"country_code": "BRA"},
+    )
+
+    stmt = select(BaseDocumentByCountry).where(
+        BaseDocumentByCountry.document_id == doc_base.id
+    )
+    result = await db_session.execute(stmt)
+    assert result.scalar_one() is not None
+
+    partition_check = await db_session.execute(
+        text(
+            """
+            SELECT 1 FROM pg_class c
+            JOIN pg_inherits i ON c.oid = i.inhrelid
+            JOIN pg_class p ON p.oid = i.inhparent
+            WHERE p.relname = 'base_documents_by_country'
+              AND c.relname = 'base_documents_by_country_bra'
+            """
+        )
+    )
+    assert partition_check.scalar_one() == 1
 
 
 @pytest.mark.asyncio
@@ -120,3 +171,23 @@ async def test_graph_hot_entities(db_session: AsyncSession):
     assert len(entities) >= 1
     assert entities[0].id == entity_hot.id
     assert entities[0].edge_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_chunks_partition_catalog(db_session: AsyncSession):
+    partitioned = await db_session.execute(
+        text(
+            """
+            SELECT partstrat::text AS partstrat
+            FROM pg_partitioned_table pt
+            JOIN pg_class c ON pt.partrelid = c.oid
+            WHERE c.relname = 'chunks'
+            """
+        )
+    )
+    assert partitioned.scalar_one() == "l"
+
+    usa_partition = await db_session.execute(
+        text("SELECT 1 FROM pg_class WHERE relname = 'chunks_usa'")
+    )
+    assert usa_partition.scalar_one() == 1

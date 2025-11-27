@@ -1,8 +1,8 @@
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy_utils import Ltree
 
+from shared_data_layer.db.ltree import Ltree
 from shared_data_layer.db.models.workflow import WorkflowNode
 from shared_data_layer.testing.factories.workflow import (
     WorkflowGraphFactory,
@@ -14,7 +14,9 @@ from shared_data_layer.testing.factories.workflow import (
 @pytest.mark.asyncio
 async def test_workflow_nodes_move_subtree(db_session: AsyncSession):
     # Setup graph and version
-    graph = await WorkflowGraphFactory.create_async(session=db_session, max_depth=5)
+    graph = await WorkflowGraphFactory.create_async(
+        session=db_session, max_depth=5, version_count=0
+    )
     version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
 
     # Create nodes hierarchy:
@@ -51,8 +53,8 @@ async def test_workflow_nodes_move_subtree(db_session: AsyncSession):
     node_d_id = node_d.id
 
     await db_session.execute(
-        text("SELECT workflow_nodes_move_subtree(:v_id, :src, :dst)"),
-        {"v_id": v_id, "src": "A.B", "dst": "A.D"},
+        text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
+        {"graph_id": graph.id, "src": "A.B", "dst": "A.D"},
     )
     await db_session.commit()
     db_session.expire_all()
@@ -72,7 +74,7 @@ async def test_workflow_nodes_move_subtree(db_session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_workflow_nodes_move_subtree_cycle_detection(db_session: AsyncSession):
-    graph = await WorkflowGraphFactory.create_async(session=db_session)
+    graph = await WorkflowGraphFactory.create_async(session=db_session, version_count=0)
     version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
 
     # A -> B
@@ -86,15 +88,17 @@ async def test_workflow_nodes_move_subtree_cycle_detection(db_session: AsyncSess
     # Try to move A under B (Cycle!)
     with pytest.raises(Exception) as excinfo:
         await db_session.execute(
-            text("SELECT workflow_nodes_move_subtree(:v_id, :src, :dst)"),
-            {"v_id": version.id, "src": "A", "dst": "A.B"},
+            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
+            {"graph_id": graph.id, "src": "A", "dst": "A.B"},
         )
     assert "Cannot move subtree into its own descendant" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
 async def test_workflow_nodes_move_subtree_max_depth(db_session: AsyncSession):
-    graph = await WorkflowGraphFactory.create_async(session=db_session, max_depth=2)
+    graph = await WorkflowGraphFactory.create_async(
+        session=db_session, max_depth=2, version_count=0
+    )
     version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
 
     # A -> B
@@ -113,7 +117,22 @@ async def test_workflow_nodes_move_subtree_max_depth(db_session: AsyncSession):
     # Move A under C -> C.A.B (Depth 3, max 2)
     with pytest.raises(Exception) as excinfo:
         await db_session.execute(
-            text("SELECT workflow_nodes_move_subtree(:v_id, :src, :dst)"),
-            {"v_id": version.id, "src": "A", "dst": "C"},
+            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
+            {"graph_id": graph.id, "src": "A", "dst": "C"},
         )
     assert "Move violates max_depth constraint" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_workflow_nodes_depth_trigger(db_session: AsyncSession):
+    graph = await WorkflowGraphFactory.create_async(
+        session=db_session, max_depth=2, version_count=0
+    )
+    version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
+
+    with pytest.raises(Exception):
+        await WorkflowNodeFactory.create_async(
+            session=db_session,
+            version=version,
+            path=Ltree("root.child.grandchild"),
+        )

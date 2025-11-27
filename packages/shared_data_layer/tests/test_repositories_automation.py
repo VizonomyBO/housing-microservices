@@ -1,11 +1,12 @@
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy_utils import Ltree
 
+from shared_data_layer.db.ltree import Ltree
 from shared_data_layer.db.models.documents import BaseDocumentByCountry
 from shared_data_layer.db.models.knowledge_graph import (
     GraphEdgeEvidenceRollup,
+    GraphEvidence,
     GraphHotEntity,
 )
 from shared_data_layer.db.models.workflow import WorkflowNode
@@ -33,7 +34,7 @@ async def test_document_repo_refresh_base_documents(db_session: AsyncSession):
         owner_user_id=None,
         content_hash="hash1",
         access_scope="base",
-        country_code="US",
+        country_code="USA",
         status="active",
         canonical_name="doc1",
     )
@@ -44,7 +45,7 @@ async def test_document_repo_refresh_base_documents(db_session: AsyncSession):
     docs = result.scalars().all()
 
     assert len(docs) == 1
-    assert docs[0].country_code == "US"
+    assert docs[0].country_code == "USA"
 
 
 @pytest.mark.asyncio
@@ -57,9 +58,9 @@ async def test_kg_repo_refresh_hot_entities(db_session: AsyncSession):
     # Upsert edge via repo (should trigger refresh)
     await repo.upsert_edge(
         {
-            "source_id": entity.id,
-            "target_id": entity.id,  # Self loop
-            "relation": "self",
+            "source_entity_id": entity.id,
+            "target_entity_id": entity.id,  # Self loop
+            "edge_type": "self",
             "weight": 1.0,
         }
     )
@@ -78,11 +79,17 @@ async def test_kg_repo_add_evidence_refresh_rollup(db_session: AsyncSession):
     repo = KnowledgeGraphRepository(db_session)
 
     # Create edge
-    edge = await GraphEdgeFactory.create_async(session=db_session)
+    edge = await GraphEdgeFactory.create_async(session=db_session, evidence=[])
     chunk = await ChunkFactory.create_async(session=db_session)
 
     # Add evidence via repo
-    await repo.add_evidence(edge.id, chunk.id, evidence_text="found it")
+    await repo.add_evidence(
+        edge.id,
+        chunk.id,
+        chunk_country_code=chunk.country_code,
+        offsets=(0, 10),
+        confidence=0.9,
+    )
 
     # Check MV
     stmt = select(GraphEdgeEvidenceRollup).where(
@@ -94,13 +101,19 @@ async def test_kg_repo_add_evidence_refresh_rollup(db_session: AsyncSession):
     assert rollup is not None
     assert chunk.id in rollup.evidence_chunk_ids
 
+    evidence_stmt = select(GraphEvidence).where(GraphEvidence.edge_id == edge.id)
+    evidence = (await db_session.execute(evidence_stmt)).scalar_one()
+    assert evidence.chunk_country_code == chunk.country_code
+
 
 @pytest.mark.asyncio
 async def test_workflow_repo_move_subtree(db_session: AsyncSession):
     repo = WorkflowGraphRepository(db_session)
 
     # Setup graph
-    graph = await WorkflowGraphFactory.create_async(session=db_session, max_depth=5)
+    graph = await WorkflowGraphFactory.create_async(
+        session=db_session, max_depth=5, version_count=0
+    )
     version = await WorkflowVersionFactory.create_async(session=db_session, graph=graph)
 
     # A -> B
@@ -116,7 +129,7 @@ async def test_workflow_repo_move_subtree(db_session: AsyncSession):
 
     # Move B under D
     node_b_id = node_b.id
-    await repo.move_subtree(version.id, "A.B", "A.D")
+    await repo.move_subtree(graph.id, "A.B", "A.D")
 
     # Verify
     stmt = select(WorkflowNode).where(WorkflowNode.id == node_b_id)
