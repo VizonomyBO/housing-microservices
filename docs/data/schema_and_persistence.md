@@ -98,6 +98,28 @@ Constraints & indexes:
 - `CHECK (access_scope <> 'base' OR owner_user_id IS NULL)`.
 - B-tree indexes on `(access_scope, country_code)` and `(status, updated_at)`; partial `(status) WHERE status IN ('ingesting','failed')`.
 
+#### Base Document Catalog & Partition Helpers
+
+- **Materialized view `base_documents_by_country`** partitions base documents by ISO-3 code (LIST with `base_documents_by_country_default` fallback) and exposes `document_id`, `canonical_name`, `country_code`, `language`, `tags`, `auto_attach_enabled`, and `active_chat_refs`. Admin tooling refreshes it via `shared-data-layer manage refresh-base-documents --country USA` (or `--all`) before presenting base-doc pickers, while the chat gateway consults it to auto-attach base docs when conversations start.
+- **Country validators**: Repository helpers call `validate_country_code(country_code)` before inserting/updating base docs to ensure ISO-3 compliance and to keep the materialized view deterministic. Attempts to persist an unknown code raise `CountryCodeValidationError` client-side, preventing inconsistent ingestion.
+- **Attachment guardrails**: `conversation_documents` helpers enforce that `base` scope attachments cannot be deleted, only hidden per conversation. API handlers must call the helper so base docs remain immutable even when end users attempt to detach them.
+
+#### Table: document_gc_events
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key. |
+| `document_id` | `uuid` | FK → `documents`. |
+| `event_type` | `text` | Enum (`scheduled`, `skipped_refs`, `skipped_base`, `completed`, `failed`). |
+| `source` | `text` | Enum (`conversation_delete`, `admin_delete`, `retention_job`). |
+| `scheduled_by` | `uuid` | Operator, worker, or automation ID. |
+| `attempt` | `smallint` | Retry counter. |
+| `payload` | `jsonb` | Snapshot with `active_chat_refs`, `artifacts`, `chunks` counts for auditing. |
+| `created_at` / `updated_at` | `timestamptz` | Audit columns. |
+
+- GC helpers enqueue `scheduled` events anytime a document meets deletion criteria (user-owned, zero refs, retention satisfied) and update the row to `completed` when cascading deletions across `chunks`, `artifacts`, `chunk_metrics`, `graph_evidence`, and S3 assets finish. Attempts against base docs are recorded as `skipped_base`.
+- CLI commands (`shared-data-layer manage enqueue-gc --stale-only`, `... run-gc --document-id <uuid>`) operate on this table so operators can replay failures or pre-schedule cleanups for audits.
+
 **Table: ingestion_jobs**
 
 | Column | Type | Notes |
@@ -319,6 +341,20 @@ Indexes: `(source_entity_id, edge_type)`, `(target_entity_id, edge_type)`, parti
 - Bulk ingestion/ops workflows outside the ORM can run `python -m shared_data_layer.manage refresh-graph-mviews` (pass `--concurrently` when the unique indexes are in place) to refresh both `graph_edge_evidence_rollup` and `graph_hot_entities` in one shot.
 - Consumers that only need chunk IDs should join against this view instead of storing arrays on `graph_edges`, which keeps `graph_evidence` as the only writable evidence surface.
 
+**Materialized view: graph_hot_entities**
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `country_code` | `char(3)` | Partition key. |
+| `entity_id` | `uuid` | FK → `graph_entities`. |
+| `entity_type` | `text` | Copied from `graph_entities`. |
+| `mentions_last_7d` | `bigint` | Count of retrieval mentions (joined from `retrieval_run_items`). |
+| `community_key` | `text` | Optional reference into `graph_communities`. |
+| `last_refreshed_at` | `timestamptz` | For auditing dashboards. |
+
+- Refresh triggers: ingestion and pillar-answer workers call `refresh-graph-mviews` when entity/edge/evidence writes change a country partition; nightly jobs refresh all partitions.
+- GraphRetriever queries this view first to seed prompts with high-signal entities before fanning out to `graph_entities` proper.
+
 **Table: graph_communities**
 
 | Column | Type | Notes |
@@ -403,6 +439,21 @@ Indexes: `(workflow_version_id, source_node_id)` and `(workflow_version_id, targ
 | `approved_by` | `uuid` | UUID referencing the approving operator in the upstream identity system. |
 | `approved_at` | `timestamptz` | Audit. |
 
+**Materialized view: workflow_version_diffs**
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `workflow_graph_id` | `uuid` | FK → `workflow_graphs`. |
+| `from_version` | `text` | Older semantic version. |
+| `to_version` | `text` | Newer version under review/deployment. |
+| `added_nodes` / `removed_nodes` | `jsonb` | Collections of node metadata differences. |
+| `edge_changes` | `jsonb` | Transition additions/removals with confidence deltas. |
+| `approver` | `uuid` | Mirrors `workflow_versions.approved_by`. |
+| `last_refreshed_at` | `timestamptz` | Exposed for WorkflowPlanner cache invalidation. |
+
+- The view powers review tooling and WorkflowPlanner cache invalidation: when `workflow_version_diffs` shows an update touching a graph referenced by cached plans, ingestion/worker jobs clear Valkey keys scoped to those `(workflow_graph_id, to_version)` pairs.
+- Refresh command: `shared-data-layer manage refresh-workflow-diffs --graph <id>` (or `--all`) recalculates diffs whenever a new version is approved.
+
 ## 4. Persistence Rules & Flow
 
 ### 4.1 Global Invariants
@@ -444,6 +495,8 @@ Unchanged sequence (preflight → convert → chunk → embed → index → acti
 2. **Base-doc UI**: Admin selects doc filtered on `active_chat_refs=0`. API verifies again within transaction, sets `deleted_at`, and schedules GC.
 3. **Scheduled cleanup**: Nightly job scans for docs with `active_chat_refs=0` and `deleted_at IS NOT NULL` to perform hard deletes (remove chunks, artifacts, metrics, citations) and reclaim storage.
 
+Each flow inserts/updates a `document_gc_events` row so operators can audit who scheduled the deletion, why it succeeded/failed, and replay the job if necessary.
+
 ### 4.7 Knowledge Graph Persistence Flow
 1. During ingestion, entity extraction Lambda emits normalized entities and relationships referencing the originating `document_id`/`chunk_id`.
 2. Upserts into `graph_entities` using scope-aware conflict targets:
@@ -460,6 +513,22 @@ Unchanged sequence (preflight → convert → chunk → embed → index → acti
 2. Proposed changes land in `workflow_graphs` as `status='draft'`. Reviewers edit nodes/edges, attach metadata/tool hints, and once approved set `status='published'` and insert a `workflow_versions` row (captures diff + approver).
 3. WorkflowPlanner always loads the latest `workflow_graphs` per `domain/country_code` where `status='published'`. Version string is returned to the agent state to maintain determinism & caching.
 4. Deprecation: set `status='deprecated'` and keep history in `workflow_versions`. Nodes/edges remain for auditing until retention window expires.
+
+### 4.9 Maintenance CLI & Cache Refresh Routines
+
+The `shared_data_layer.manage` CLI exposes operational commands invoked by workers, CI/CD, or on-call engineers:
+
+| Command | Purpose |
+| --- | --- |
+| `shared-data-layer manage refresh-active-chunks [--document-id ...]` | Refreshes the `active_chunks` materialized view after ingestion or GC. |
+| `shared-data-layer manage refresh-graph-mviews [--country-code USA]` | Refreshes `graph_edge_evidence_rollup` and `graph_hot_entities` partitions. |
+| `shared-data-layer manage refresh-base-documents [--country USA | --all]` | Rebuilds `base_documents_by_country` view used by auto-attach logic. |
+| `shared-data-layer manage refresh-workflow-diffs [--graph <uuid>]` | Recomputes `workflow_version_diffs` so caches/key invalidations stay accurate. |
+| `shared-data-layer manage enqueue-gc --stale-only` / `run-gc --document-id ...` | Schedules or replays `document_gc_events`. |
+| `shared-data-layer manage clear-cache --scope conversations/<id>` | Deletes Valkey keys when GC/workflow diffs or ingestion jobs invalidate cached answers. |
+
+- CI/CD runs the refresh commands after migrations and before promoting new builds so caches reflect the latest schema.
+- Async workers call the cache-clearing helpers whenever ingestion or workflow updates change the inputs for cached LangGraph plans; the helpers compute the Valkey keys using the same hash function described in Epic 3.
 ## 5. Indexing, Partitioning, and Storage Classes
 - Existing pgvector + GIN indexes remain; new indexes on `(owner_user_id, content_hash)` and `(access_scope, country_code)` enable dedup + base UI.
 - `conversation_documents` gets `(document_id)` and `(attach_source)` indexes.
@@ -601,9 +670,19 @@ The logical entities defined earlier (Documents, Conversations, Chunks, Uploaded
   - `agents.agent_events`
 - **Relationships**:
   - `AgentRun` records execution metadata (prompt, planner, document scope) keyed by `owner_user_id` and optional conversation IDs—no FK to a local `users` table is required.
-  - `AgentEvent` references `AgentRun` and optionally stores additional `owner_user_id` context.
+- `AgentEvent` references `AgentRun` and optionally stores additional `owner_user_id` context.
 - **Payloads**:
   - JSON fields capture agent state transitions, tool inputs/outputs, and telemetry required for observability.
+
+### Repository Responsibilities & Validation Hooks
+
+Shared repositories enforce business rules that are not purely relational constraints:
+
+- **Country-code validation**: `DocumentsRepository.upsert_base_document` and ingestion helpers call `validate_country_code` to ensure ISO-3 codes exist in `base_documents_by_country`. Failure raises a custom exception before attempting SQL writes.
+- **Attachment guardrails**: `ConversationDocumentsRepository.attach_documents` ensures base docs cannot be deleted, only hidden, and that user uploads respect ownership + `access_scope` rules. It also applies visibility overrides atomically with LangGraph cache invalidation so stale scopes are not reused.
+- **Cache maintenance**: `CacheRepository.invalidate_scope(conversation_id, document_hashes, workflow_version)` computes Valkey keys (mirroring Epic 3) whenever documents attach/detach, GC completes, or workflow diffs refresh.
+- **GC + retention enforcement**: `DocumentsRepository.schedule_gc_if_needed` inserts into `document_gc_events` and coordinates with the CLI commands listed in §4.9. Repository callers need not reason about GC tables directly—they invoke the helper whenever attachments drop to zero or retention windows expire.
+- **Pillar answers + telemetry writes**: `InsightsRepository` ensures `pillar_answers` writes always include `country_code`, `pillar_name`, and references to the contributing chunk IDs, aligning with the constraints for `/v1/pillars/{country_code}` responses.
 
 ---
 
