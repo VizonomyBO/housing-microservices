@@ -1,6 +1,10 @@
 -- Migration: 001_create_documents_table
 -- Description: Complete database schema for document upload, deduplication, and ingestion
 -- Based on: database_schema_persistence_rules.md
+--
+-- IMPORTANT: Users are managed in a separate database (auth_db) by auth-service.
+-- owner_user_id columns store UUIDs that reference users in auth_db WITHOUT FK constraints
+-- (cross-database references). Application-level validation must ensure user existence.
 
 BEGIN;
 
@@ -94,17 +98,6 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
--- User status
-DO $$ BEGIN
-    CREATE TYPE user_status AS ENUM (
-        'active',
-        'suspended',
-        'deleted'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
 -- Conversation status
 DO $$ BEGIN
     CREATE TYPE conversation_status AS ENUM (
@@ -162,27 +155,19 @@ EXCEPTION
 END $$;
 
 -- =============================================================================
--- TABLE: users (Identity)
+-- NOTE: Users table is NOT created here.
+-- Users are managed in a separate database (auth_db) by auth-service.
+-- All owner_user_id columns store UUIDs without FK constraints.
+-- Application layer must validate user existence via auth-service API.
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    external_ref TEXT UNIQUE NOT NULL,
-    status user_status NOT NULL DEFAULT 'active',
-    roles TEXT[] DEFAULT '{}',
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_users_external_ref ON users(external_ref);
-CREATE INDEX IF NOT EXISTS idx_users_active ON users(status) WHERE status = 'active';
 
 -- =============================================================================
 -- TABLE: documents (Document Registry)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Cross-database reference: validated by application, not FK constraint
+    owner_user_id UUID,
     access_scope access_scope NOT NULL DEFAULT 'user_private',
     canonical_name TEXT NOT NULL,
     country_code CHAR(3),
@@ -284,7 +269,8 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_metadata ON artifacts USING GIN(metadat
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Cross-database reference: validated by application, not FK constraint
+    user_id UUID,
     country_code CHAR(3),
     status conversation_status NOT NULL DEFAULT 'active',
     document_scope JSONB DEFAULT '{}',
@@ -303,7 +289,8 @@ CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE TABLE IF NOT EXISTS conversation_documents (
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    attached_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Cross-database reference: validated by application, not FK constraint
+    attached_by_user_id UUID,
     attach_source attach_source NOT NULL DEFAULT 'user_upload',
     role document_role DEFAULT 'primary',
     visibility_override visibility_override DEFAULT 'visible',
@@ -323,7 +310,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     content_hash TEXT,
-    owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Cross-database reference: validated by application, not FK constraint
+    owner_user_id UUID,
     country_code CHAR(3),
     chunk_type chunk_type NOT NULL DEFAULT 'text',
     page_number INTEGER,
@@ -431,7 +419,8 @@ CREATE INDEX IF NOT EXISTS idx_checkpoints_conversation ON agent_state_checkpoin
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS pillar_answers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    -- Cross-database reference: validated by application, not FK constraint
+    owner_user_id UUID,
     country_code CHAR(3) NOT NULL,
     pillar_name TEXT NOT NULL,
     document_id UUID REFERENCES documents(id) ON DELETE SET NULL,
@@ -518,13 +507,6 @@ CREATE TRIGGER trigger_documents_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Apply to users
-DROP TRIGGER IF EXISTS trigger_users_updated_at ON users;
-CREATE TRIGGER trigger_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
 -- Apply to conversations
 DROP TRIGGER IF EXISTS trigger_conversations_updated_at ON conversations;
 CREATE TRIGGER trigger_conversations_updated_at
@@ -597,12 +579,19 @@ ORDER BY country_code, canonical_name;
 -- =============================================================================
 COMMENT ON TABLE documents IS 'Document registry for uploads (base + user), tracking ingestion stages and dedup metadata';
 COMMENT ON COLUMN documents.content_hash IS 'SHA-256 hash of normalized bytes; stored exactly as provided by client for S3 validation matching';
-COMMENT ON COLUMN documents.owner_user_id IS 'FK to users.id, nullable for base documents';
+COMMENT ON COLUMN documents.owner_user_id IS 'UUID reference to user in auth_db (cross-database, no FK). NULL for base documents.';
 COMMENT ON COLUMN documents.active_chat_refs IS 'Cached count of conversation attachments, maintained via trigger';
 
+COMMENT ON TABLE conversations IS 'Chat sessions with optional user association';
+COMMENT ON COLUMN conversations.user_id IS 'UUID reference to user in auth_db (cross-database, no FK). NULL for anonymous sessions.';
+
 COMMENT ON TABLE conversation_documents IS 'Chat to document mapping with visibility overrides and ref counting';
+COMMENT ON COLUMN conversation_documents.attached_by_user_id IS 'UUID reference to user in auth_db (cross-database, no FK). NULL for system-attached documents.';
+
 COMMENT ON TABLE chunks IS 'Embeddable units for retrieval, partitioned by country_code';
+COMMENT ON COLUMN chunks.owner_user_id IS 'UUID reference to user in auth_db (cross-database, no FK). Inherited from parent document.';
+
 COMMENT ON TABLE pillar_answers IS 'Pre-computed answers for pillars by country';
+COMMENT ON COLUMN pillar_answers.owner_user_id IS 'UUID reference to user in auth_db (cross-database, no FK). NULL for base corpus answers.';
 
 COMMIT;
-

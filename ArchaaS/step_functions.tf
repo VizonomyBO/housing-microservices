@@ -6,7 +6,7 @@ resource "aws_sfn_state_machine" "document_ingestion" {
   role_arn = aws_iam_role.step_function.arn
 
   definition = templatefile("${path.module}/step_functions/document_ingestion_workflow.asl.json", {
-    PreflightValidatorLambdaArn  = aws_lambda_function.preflight_validator.arn
+    # NOTE: Preflight validation now runs via S3 trigger BEFORE this Step Function starts
     MarkerConverterLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-marker-converter-${var.environment}"
     ChunkBuilderLambdaArn        = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chunk-builder-${var.environment}"
     TableNormalizerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-table-normalizer-${var.environment}"
@@ -91,7 +91,7 @@ resource "aws_iam_role_policy" "step_function_lambda" {
           "lambda:InvokeFunction"
         ]
         Resource = [
-          aws_lambda_function.preflight_validator.arn,
+          # Preflight Lambda is now triggered by S3, not Step Functions
           "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-*-${var.environment}"
         ]
       }

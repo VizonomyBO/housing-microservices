@@ -110,7 +110,7 @@ class UploadInfo(BaseModel):
 class DocumentUploadResponse(BaseModel):
     """Response model for document upload endpoint."""
     document_id: str
-    status: str
+    status: str  # PENDING_UPLOAD initially
     upload: UploadInfo
     message: str
     request_id: Optional[str] = None
@@ -327,7 +327,7 @@ async def handler(event: dict, context: Any) -> dict:
         "country_code": request_data.country_code,
         "language": request_data.language,
         "tags": request_data.tags,
-        "status": "UPLOADING",  # Will change to PENDING_VALIDATION after S3 upload
+        "status": "PENDING_UPLOAD",  # Will change to PENDING_VALIDATION after S3 upload
         "content_hash": None,  # Will be calculated by preflight Lambda
         "source_uri": f"s3://{S3_BUCKET}/{s3_key}",
         "byte_size": request_data.file_size_bytes,
@@ -382,7 +382,7 @@ async def handler(event: dict, context: Any) -> dict:
     
     response = DocumentUploadResponse(
         document_id=document_id,
-        status="UPLOADING",
+        status="PENDING_UPLOAD",
         upload=upload_info,
         message="Upload your file to the presigned URL. After upload, the system will automatically validate and process your document.",
         request_id=request_id,

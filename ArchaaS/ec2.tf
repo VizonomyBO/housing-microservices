@@ -36,6 +36,7 @@ resource "aws_instance" "microservices" {
 
   user_data = base64encode(templatefile("${path.module}/scripts/ec2_user_data.sh", {
     postgres_db       = var.database_name
+    auth_db           = var.auth_database_name
     postgres_user     = var.database_username
     postgres_password = var.database_password
     project_name      = var.project_name
@@ -284,8 +285,14 @@ output "database_host" {
 }
 
 output "database_connection_string" {
-  description = "PostgreSQL connection string for services"
+  description = "PostgreSQL connection string for shared_data_layer (documents, chunks)"
   value       = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.private_ip}:5432/${var.database_name}"
+  sensitive   = true
+}
+
+output "auth_database_connection_string" {
+  description = "PostgreSQL connection string for auth-service (users, tokens)"
+  value       = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.private_ip}:5432/${var.auth_database_name}"
   sensitive   = true
 }
 

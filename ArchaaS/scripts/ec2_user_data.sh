@@ -16,6 +16,7 @@ echo "========================================="
 
 # Variables from Terraform
 POSTGRES_DB="${postgres_db}"
+AUTH_DB="${auth_db}"
 POSTGRES_USER="${postgres_user}"
 POSTGRES_PASSWORD="${postgres_password}"
 AWS_REGION="${aws_region}"
@@ -105,13 +106,19 @@ cd $WORK_DIR
 # =============================================================================
 echo "[3/6] Creating environment file..."
 cat > $WORK_DIR/.env << EOF
+# Database Configuration (two databases on same postgres instance)
+# - housing: shared_data_layer (documents, chunks, knowledge graph)
+# - auth_db: auth-service (users, refresh tokens)
 POSTGRES_DB=$POSTGRES_DB
+AUTH_DB=$AUTH_DB
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+# JWT
 JWT_SECRET_KEY=$(openssl rand -hex 32)
 JWT_ACCESS_TOKEN_EXPIRES=900
 JWT_REFRESH_TOKEN_EXPIRES=2592000
 JWT_ACCESS_TOKEN_EXPIRES_MINUTES=15
+# Environment
 FLASK_ENV=production
 NODE_ENV=production
 LOG_LEVEL=info

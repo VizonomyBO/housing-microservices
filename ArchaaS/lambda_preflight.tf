@@ -27,11 +27,11 @@ resource "aws_lambda_function" "preflight_validator" {
   # Use shared Lambda layer for Python dependencies
   layers = [aws_lambda_layer_version.python_deps.arn]
 
-  # VPC configuration for database access
-  vpc_config {
-    subnet_ids         = var.private_subnet_ids
-    security_group_ids = [aws_security_group.lambda.id]
-  }
+  # NOTE: Not using VPC to allow S3 access. Database accessed via public IP.
+  # vpc_config {
+  #   subnet_ids         = var.private_subnet_ids
+  #   security_group_ids = [aws_security_group.lambda.id]
+  # }
 
   environment {
     variables = {
@@ -42,9 +42,9 @@ resource "aws_lambda_function" "preflight_validator" {
       MAX_FILE_SIZE_BYTES        = var.max_file_size_bytes
       # Step Function for document processing
       STEP_FUNCTION_ARN          = aws_sfn_state_machine.document_ingestion.arn
-      # Database connection
-      DATABASE_URL               = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.private_ip}:${var.database_port}/${var.database_name}"
-      DATABASE_HOST              = aws_instance.microservices.private_ip
+      # Database connection (using public IP since Lambda not in VPC)
+      DATABASE_URL               = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.public_ip}:${var.database_port}/${var.database_name}"
+      DATABASE_HOST              = aws_instance.microservices.public_ip
       DATABASE_PORT              = var.database_port
       DATABASE_NAME              = var.database_name
       DATABASE_USER              = var.database_username

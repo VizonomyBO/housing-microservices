@@ -44,24 +44,19 @@ def async_handler(f):
 
 async def calculate_s3_hash(bucket: str, key: str) -> tuple[str, int]:
     """
-    Stream file from S3 and calculate SHA-256 hash.
+    Download file from S3 and calculate SHA-256 hash.
     Returns (hash_hex, file_size_bytes)
     """
     session = aioboto3.Session()
     hasher = hashlib.sha256()
-    total_size = 0
     
     async with session.client("s3") as s3:
         response = await s3.get_object(Bucket=bucket, Key=key)
         
-        # Stream the body in chunks
-        async with response["Body"] as stream:
-            while True:
-                chunk = await stream.read(CHUNK_SIZE)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-                total_size += len(chunk)
+        # Read the entire body (aioboto3 doesn't support chunked streaming)
+        body = await response["Body"].read()
+        hasher.update(body)
+        total_size = len(body)
     
     return hasher.hexdigest(), total_size
 
@@ -181,13 +176,23 @@ async def handler(event: dict, context: Any) -> dict:
                     )
                     
                     # Update current document as DEDUPED
+                    # Parse existing metadata (could be dict or JSON string)
+                    existing_metadata = document.get("metadata", {})
+                    if isinstance(existing_metadata, str):
+                        try:
+                            existing_metadata = json.loads(existing_metadata) if existing_metadata else {}
+                        except:
+                            existing_metadata = {}
+                    elif existing_metadata is None:
+                        existing_metadata = {}
+                    
                     await repository.update_document_status(
                         document_id,
                         status="DEDUPED",
                         content_hash=content_hash,
                         extra_fields={
                             "metadata": json.dumps({
-                                **(json.loads(document.get("metadata") or "{}") if isinstance(document.get("metadata"), str) else document.get("metadata", {})),
+                                **existing_metadata,
                                 "deduped_from": str(existing["id"]),
                                 "dedup_detected_at": datetime.now(timezone.utc).isoformat(),
                             })

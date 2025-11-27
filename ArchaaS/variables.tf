@@ -114,9 +114,15 @@ variable "database_port" {
 }
 
 variable "database_name" {
-  description = "Database name (shared database for all services)"
+  description = "Database name for shared_data_layer (documents, chunks, knowledge graph)"
   type        = string
   default     = "housing"
+}
+
+variable "auth_database_name" {
+  description = "Database name for auth-service (users, tokens) - separate from shared_data_layer"
+  type        = string
+  default     = "auth_db"
 }
 
 # API Gateway Configuration
@@ -228,6 +234,24 @@ variable "git_branch" {
 
 variable "git_token" {
   description = "GitHub Personal Access Token for private repos (stored in Secrets Manager)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# =============================================================================
+# AI/LLM API Keys
+# =============================================================================
+
+variable "openai_api_key" {
+  description = "OpenAI API key for AI-powered footnote generation in document conversion"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "voyage_api_key" {
+  description = "Voyage AI API key for embeddings (Task 2.3)"
   type        = string
   default     = ""
   sensitive   = true

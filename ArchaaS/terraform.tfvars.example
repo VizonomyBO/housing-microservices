@@ -52,11 +52,19 @@ vpc_cidr_blocks = ["10.0.0.0/8"]
 # =============================================================================
 # Database Configuration (runs on EC2)
 # =============================================================================
-# "housing" is the shared database for all services (auth, user, documents, etc.)
-database_name     = "housing"
-database_username = "vizonomy_user"
-database_password = "your-secure-password-here"  # Change this!
-database_port     = 5432
+# Two logical databases on same postgres instance:
+# - housing: shared_data_layer (documents, chunks, knowledge graph)
+# - auth_db: auth-service (users, refresh_tokens)
+#
+# This separation allows:
+# - Independent scaling and backup strategies
+# - Clear ownership boundaries between services
+# - Cross-database references use UUIDs (no FK constraints)
+database_name      = "housing"
+auth_database_name = "auth_db"
+database_username  = "vizonomy_user"
+database_password  = "your-secure-password-here"  # Change this!
+database_port      = 5432
 
 # Store credentials in AWS Secrets Manager (recommended)
 create_database_secret = true
@@ -97,3 +105,4 @@ git_token  = ""  # Leave empty for public repos
 # =============================================================================
 custom_domain_name = ""
 certificate_arn    = ""
+openai_api_key

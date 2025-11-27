@@ -5,13 +5,17 @@ services:
     image: postgres:15
     container_name: vizonomy-postgres
     environment:
+      # Primary database for shared_data_layer (documents, chunks, etc.)
       POSTGRES_DB: ${POSTGRES_DB:-housing}
       POSTGRES_USER: ${POSTGRES_USER:-vizonomy_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Additional database for auth-service (users, tokens)
+      AUTH_DB: ${AUTH_DB:-auth_db}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vizonomy_user} -d ${POSTGRES_DB:-housing}"]
       interval: 30s
@@ -31,7 +35,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-housing}
+      # auth-service uses its own database (auth_db) for users and tokens
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${AUTH_DB:-auth_db}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       - JWT_ACCESS_TOKEN_EXPIRES=${JWT_ACCESS_TOKEN_EXPIRES:-900}
       - JWT_REFRESH_TOKEN_EXPIRES=${JWT_REFRESH_TOKEN_EXPIRES:-2592000}
@@ -59,7 +64,8 @@ services:
       auth-service:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-housing}
+      # user-service uses auth_db for user management
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${AUTH_DB:-auth_db}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - JWT_ACCESS_TOKEN_EXPIRES_MINUTES=${JWT_ACCESS_TOKEN_EXPIRES_MINUTES:-15}
       - AUTH_SERVICE_URL=http://auth-service:5000

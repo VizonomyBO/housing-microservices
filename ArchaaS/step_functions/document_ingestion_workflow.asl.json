@@ -1,67 +1,7 @@
 {
-  "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts",
-  "StartAt": "Preflight",
+  "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts. NOTE: Preflight validation happens via S3 trigger BEFORE this Step Function starts.",
+  "StartAt": "Convert",
   "States": {
-    "Preflight": {
-      "Type": "Task",
-      "Comment": "Validate MIME type, check deduplication, create artifact placeholders",
-      "Resource": "${PreflightValidatorLambdaArn}",
-      "Parameters": {
-        "ingestion_id.$": "$.ingestion_id",
-        "document_id.$": "$.document_id",
-        "access_scope.$": "$.access_scope",
-        "s3_key.$": "$.s3_key",
-        "s3_bucket.$": "$.s3_bucket",
-        "country_code.$": "$.country_code",
-        "language.$": "$.language",
-        "content_hash.$": "$.content_hash",
-        "trace_id.$": "$.trace_id",
-        "callback_url.$": "$.callback_url",
-        "retries.$": "$.retries"
-      },
-      "ResultPath": "$.preflight_result",
-      "Retry": [
-        {
-          "ErrorEquals": ["ValidationTransientError", "ServiceException"],
-          "IntervalSeconds": 5,
-          "MaxAttempts": 2,
-          "BackoffRate": 2.0
-        }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": ["DuplicateDocumentError"],
-          "ResultPath": "$.error",
-          "Next": "HandleDuplicate"
-        },
-        {
-          "ErrorEquals": ["ValidationPermanentError"],
-          "ResultPath": "$.error",
-          "Next": "DeadLetter"
-        },
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.error",
-          "Next": "DeadLetter"
-        }
-      ],
-      "Next": "Convert"
-    },
-    "HandleDuplicate": {
-      "Type": "Task",
-      "Comment": "Handle deduplicated documents - skip to finalize with reference to existing doc",
-      "Resource": "${IngestionFinalizerLambdaArn}",
-      "Parameters": {
-        "ingestion_id.$": "$.ingestion_id",
-        "document_id.$": "$.document_id",
-        "status": "DEDUPED",
-        "deduped_from.$": "$.error.existing_document_id",
-        "trace_id.$": "$.trace_id",
-        "callback_url.$": "$.callback_url"
-      },
-      "ResultPath": "$.finalize_result",
-      "End": true
-    },
     "Convert": {
       "Type": "Task",
       "Comment": "Convert PDF/DOCX to Markdown and structured JSON using Marker",
@@ -69,10 +9,10 @@
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
-        "s3_key.$": "$.preflight_result.validated_s3_key",
-        "s3_bucket.$": "$.s3_bucket",
-        "converted_key_prefix.$": "$.preflight_result.converted_key_prefix",
-        "source_type.$": "$.preflight_result.source_type",
+        "s3_key.$": "$.key",
+        "s3_bucket.$": "$.bucket",
+        "converted_key_prefix.$": "States.Format('processed/{}/converted', $.document_id)",
+        "source_type.$": "$.source_type",
         "trace_id.$": "$.trace_id"
       },
       "ResultPath": "$.convert_result",
@@ -102,8 +42,8 @@
         "document_id.$": "$.document_id",
         "country_code.$": "$.country_code",
         "language.$": "$.language",
-        "block_inventory.$": "$.convert_result.block_inventory",
-        "converted_key_prefix.$": "$.preflight_result.converted_key_prefix",
+        "markdown_key.$": "$.convert_result.markdown_key",
+        "structured_json_key.$": "$.convert_result.structured_json_key",
         "trace_id.$": "$.trace_id"
       },
       "ResultPath": "$.chunk_result",
@@ -239,7 +179,7 @@
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
         "access_scope.$": "$.access_scope",
-        "content_hash.$": "$.preflight_result.content_hash",
+        "content_hash.$": "$.content_hash",
         "status": "READY",
         "chunk_count.$": "$.chunk_result.chunk_count",
         "embed_count.$": "$.embed_result.vectors_written",
@@ -279,7 +219,7 @@
             "Detail": {
               "ingestion_id.$": "$.ingestion_id",
               "document_id.$": "$.document_id",
-              "content_hash.$": "$.preflight_result.content_hash",
+              "content_hash.$": "$.content_hash",
               "access_scope.$": "$.access_scope",
               "chunk_count.$": "$.chunk_result.chunk_count",
               "execution_arn.$": "$$.Execution.Id"
