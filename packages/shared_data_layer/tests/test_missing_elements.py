@@ -5,12 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.knowledge_graph import GraphEdge, GraphEntity
 from shared_data_layer.db.models.retrieval import (
     PillarAnswer,
     PillarAnswerSource,
 )
 from shared_data_layer.db.models.workflow import WorkflowEdge
+from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import (
     GraphCommunityFactory,
@@ -152,6 +154,116 @@ async def test_document_canonical_name_uniqueness(db_session: AsyncSession):
             canonical_name="Duplicate",
             chunks=[],
         )
+
+
+@pytest.mark.asyncio
+async def test_document_canonical_name_case_insensitive_collision(
+    db_session: AsyncSession,
+):
+    owner_id = uuid4()
+    await DocumentFactory.create_async(
+        session=db_session,
+        owner_user_id=owner_id,
+        canonical_name="ProjectAtlas",
+        chunk_count=0,
+    )
+
+    with pytest.raises(IntegrityError):
+        await DocumentFactory.create_async(
+            session=db_session,
+            owner_user_id=owner_id,
+            canonical_name="projectatlas",
+            chunk_count=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_base_document_attachment_requires_matching_country(
+    db_session: AsyncSession,
+):
+    repo = DocumentRepository(db_session)
+    base_doc = await DocumentFactory.create_async(
+        session=db_session,
+        access_scope="base",
+        owner_user_id=None,
+        country_code="USA",
+        active_chat_refs=0,
+        chunk_count=0,
+    )
+    allowed_conversation = Conversation(owner_user_id=uuid4(), country_code="USA")
+    blocked_conversation = Conversation(owner_user_id=uuid4(), country_code="CAN")
+    db_session.add_all([allowed_conversation, blocked_conversation])
+    await db_session.flush()
+
+    attachment = await repo.attach_to_conversation(
+        conversation_id=allowed_conversation.id,
+        document_id=base_doc.id,
+        attach_source="unit-test",
+    )
+    assert attachment.deleted_at is None
+
+    with pytest.raises(ValueError):
+        await repo.attach_to_conversation(
+            conversation_id=blocked_conversation.id,
+            document_id=base_doc.id,
+            attach_source="unit-test",
+        )
+
+
+@pytest.mark.asyncio
+async def test_conversation_attachment_soft_delete_toggles_chat_refs(
+    db_session: AsyncSession,
+):
+    repo = DocumentRepository(db_session)
+    document = await DocumentFactory.create_async(
+        session=db_session,
+        chunk_count=0,
+        active_chat_refs=0,
+    )
+    conversation = Conversation(
+        owner_user_id=document.owner_user_id,
+        country_code=document.country_code,
+    )
+    db_session.add(conversation)
+    await db_session.flush()
+
+    await repo.attach_to_conversation(
+        conversation_id=conversation.id,
+        document_id=document.id,
+        attach_source="unit-test",
+    )
+    await db_session.refresh(document)
+    assert document.active_chat_refs == 1
+
+    await repo.detach_from_conversation(conversation.id, document.id)
+    await db_session.flush()
+    await db_session.refresh(document)
+    assert document.active_chat_refs == 0
+
+    await repo.attach_to_conversation(
+        conversation_id=conversation.id,
+        document_id=document.id,
+        attach_source="unit-test",
+    )
+    await db_session.flush()
+    await db_session.refresh(document)
+    assert document.active_chat_refs == 1
+
+    await repo.detach_from_conversation(conversation.id, document.id)
+    await db_session.flush()
+    await db_session.refresh(document)
+    assert document.active_chat_refs == 0
+
+
+@pytest.mark.asyncio
+async def test_document_active_chat_refs_non_negative_constraint(
+    db_session: AsyncSession,
+):
+    document = await DocumentFactory.create_async(session=db_session, chunk_count=0)
+    document.active_chat_refs = -1
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
+from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.documents import ConversationDocument, Document
 from shared_data_layer.repositories.base import BaseRepository
 from shared_data_layer.schemas.documents import DocumentRead, DocumentWithChunksRead
@@ -80,6 +81,16 @@ class DocumentRepository(BaseRepository[Document]):
         """
         Attach a document to a conversation and increment the reference count.
         """
+        document = await self.session.get(Document, document_id)
+        if document is None:
+            raise ValueError(f"Document {document_id} not found")
+
+        conversation = await self.session.get(Conversation, conversation_id)
+        if conversation is None:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        self._validate_attachment_scope(document, conversation)
+
         # Check if already attached
         stmt = select(ConversationDocument).where(
             ConversationDocument.conversation_id == conversation_id,
@@ -95,6 +106,7 @@ class DocumentRepository(BaseRepository[Document]):
                 existing_attachment.role = role
                 existing_attachment.visibility_override = visibility_override
                 existing_attachment.attached_by_user_id = attached_by_user_id
+                await self.session.flush()
             return existing_attachment
 
         attachment = ConversationDocument(
@@ -136,3 +148,25 @@ class DocumentRepository(BaseRepository[Document]):
             text("SELECT refresh_base_documents_by_country(:country_code)"),
             {"country_code": country_code},
         )
+
+    @staticmethod
+    def _validate_attachment_scope(
+        document: Document,
+        conversation: Conversation,
+    ) -> None:
+        if document.access_scope != "base":
+            return
+        if document.country_code is None:
+            raise ValueError(
+                "Base documents must define a country_code before attachment."
+            )
+        if conversation.country_code is None:
+            raise ValueError(
+                "Conversations must define a country_code "
+                "before attaching base documents."
+            )
+        if conversation.country_code != document.country_code:
+            raise ValueError(
+                "Base documents can only be attached to conversations "
+                "in the same country."
+            )
