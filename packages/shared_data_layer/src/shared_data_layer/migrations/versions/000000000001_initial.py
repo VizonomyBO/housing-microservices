@@ -894,12 +894,26 @@ def create_retrieval_domain() -> None:
         ["created_at"],
         postgresql_using="brin",
     )
+    op.create_index(
+        "ix_chunks_updated_at_brin",
+        "chunks",
+        ["updated_at"],
+        postgresql_using="brin",
+    )
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS ix_chunks_embedding_ivfflat
         ON chunks
         USING ivfflat (embedding vector_ip_ops)
         WITH (lists = 100)
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
+        ON chunks
+        USING hnsw (embedding vector_ip_ops)
+        WITH (m = 16, ef_construction = 64)
         """
     )
     op.create_table(
@@ -2316,7 +2330,10 @@ def downgrade() -> None:
     op.drop_table("retrieval_runs")
     op.drop_index("ix_chunk_metrics_chunk_id", table_name="chunk_metrics")
     op.drop_table("chunk_metrics")
+    op.execute("DROP INDEX IF EXISTS ix_chunks_embedding_hnsw")
+    op.execute("DROP INDEX IF EXISTS ix_chunks_embedding_ivfflat")
     op.drop_index("ix_chunks_created_at_brin", table_name="chunks")
+    op.drop_index("ix_chunks_updated_at_brin", table_name="chunks")
     op.drop_index("ix_chunks_country_chunk_type", table_name="chunks")
     op.drop_index("ix_chunks_text_tsv_gin", table_name="chunks")
     op.drop_index("ix_chunks_document_position", table_name="chunks")

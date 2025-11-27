@@ -171,6 +171,38 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
 
   Repositories expose `KnowledgeGraphRepository.refresh_materializations()` for async workflows.
 
+### Retrieval Chunk Partition Maintenance
+
+- `chunks` is LIST-partitioned on `country_code` with dedicated tables for `chunks_usa`, `chunks_gbr`, and `chunks_can`, plus a `chunks_default` partition for everything else. These hot partitions keep country-specific workloads off the default heap.
+- Retrieval workloads rely on multiple parent indexes—`GIN (text_tsv)`, `BRIN (created_at)`, `BRIN (updated_at)`, and both `IVFFLAT` + `HNSW` vector indexes on `embedding`. PostgreSQL automatically builds these indexes for the partitions that exist when the parent index is created.
+- When you provision a new partition (for example, a `chunks_mex` table), you must create and attach the matching indexes so the partition participates in search plans:
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS chunks_mex PARTITION OF chunks FOR VALUES IN ('MEX');
+  CREATE INDEX chunks_mex_document_position_idx
+    ON chunks_mex (document_id, chunk_type, position);
+  ALTER INDEX ix_chunks_document_position ATTACH PARTITION chunks_mex_document_position_idx;
+
+  CREATE INDEX chunks_mex_text_tsv_gin ON chunks_mex USING gin (text_tsv);
+  ALTER INDEX ix_chunks_text_tsv_gin ATTACH PARTITION chunks_mex_text_tsv_gin;
+
+  CREATE INDEX chunks_mex_created_at_brin ON chunks_mex USING brin (created_at);
+  ALTER INDEX ix_chunks_created_at_brin ATTACH PARTITION chunks_mex_created_at_brin;
+
+  CREATE INDEX chunks_mex_updated_at_brin ON chunks_mex USING brin (updated_at);
+  ALTER INDEX ix_chunks_updated_at_brin ATTACH PARTITION chunks_mex_updated_at_brin;
+
+  CREATE INDEX chunks_mex_embedding_ivfflat
+    ON chunks_mex USING ivfflat (embedding vector_ip_ops) WITH (lists = 100);
+  ALTER INDEX ix_chunks_embedding_ivfflat ATTACH PARTITION chunks_mex_embedding_ivfflat;
+
+  CREATE INDEX chunks_mex_embedding_hnsw
+    ON chunks_mex USING hnsw (embedding vector_ip_ops) WITH (m = 16, ef_construction = 64);
+  ALTER INDEX ix_chunks_embedding_hnsw ATTACH PARTITION chunks_mex_embedding_hnsw;
+  ```
+
+- After attaching indexes, run `ANALYZE chunks_mex;` so query plans understand the new partition's statistics. No ORM changes are necessary because SQLAlchemy targets the parent table.
+
 ## Observability Aids
 
 - `document_gc_events` stores trigger-generated audit rows whenever `active_chat_refs` falls to zero or `deleted_at` changes. Query this table to power GC dashboards or alerting.

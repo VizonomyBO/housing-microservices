@@ -253,6 +253,12 @@ Index(
 )
 
 Index(
+    "ix_chunks_updated_at_brin",
+    Chunk.updated_at,
+    postgresql_using="brin",
+)
+
+Index(
     "ix_chunk_metrics_chunk_id",
     ChunkMetrics.chunk_id,
     ChunkMetrics.chunk_country_code,

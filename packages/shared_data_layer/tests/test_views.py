@@ -239,7 +239,62 @@ async def test_chunks_partition_catalog(db_session: AsyncSession):
     )
     assert partitioned.scalar_one() == "l"
 
-    usa_partition = await db_session.execute(
-        text("SELECT 1 FROM pg_class WHERE relname = 'chunks_usa'")
+    partition_rows = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_class c
+            JOIN pg_inherits i ON c.oid = i.inhrelid
+            JOIN pg_class p ON p.oid = i.inhparent
+            WHERE p.relname = 'chunks'
+            """
+        )
     )
-    assert usa_partition.scalar_one() == 1
+    partition_names = {row[0] for row in partition_rows}
+    expected_partitions = {
+        "chunks_usa",
+        "chunks_gbr",
+        "chunks_can",
+        "chunks_default",
+    }
+    assert expected_partitions.issubset(partition_names)
+
+    default_partition = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_partitioned_table pt
+            JOIN pg_class parent ON parent.oid = pt.partrelid
+            JOIN pg_class c ON c.oid = pt.partdefid
+            WHERE parent.relname = 'chunks'
+            """
+        )
+    )
+    assert default_partition.scalar_one() == "chunks_default"
+
+    index_rows = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'chunks'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in index_rows}
+    required_indexes = {
+        "ix_chunks_document_position",
+        "ix_chunks_text_tsv_gin",
+        "ix_chunks_country_chunk_type",
+        "ix_chunks_created_at_brin",
+        "ix_chunks_updated_at_brin",
+        "ix_chunks_embedding_ivfflat",
+        "ix_chunks_embedding_hnsw",
+    }
+    assert required_indexes.issubset(index_map.keys())
+    assert "USING BRIN" in index_map["ix_chunks_created_at_brin"].upper()
+    assert "USING BRIN" in index_map["ix_chunks_updated_at_brin"].upper()
+    assert "USING GIN" in index_map["ix_chunks_text_tsv_gin"].upper()
+    assert "USING IVFFLAT" in index_map["ix_chunks_embedding_ivfflat"].upper()
+    assert "USING HNSW" in index_map["ix_chunks_embedding_hnsw"].upper()
