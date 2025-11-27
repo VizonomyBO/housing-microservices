@@ -232,3 +232,25 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
             text("SELECT refresh_graph_materializations(:concurrently)"),
             {"concurrently": concurrently},
         )
+
+    async def refresh_community_rollups(
+        self,
+        *,
+        country_code: Optional[str] = None,
+        algo_version: Optional[str] = None,
+        community_id: Optional[UUID] = None,
+    ) -> None:
+        """Recompute `graph_communities` metrics for the requested slice."""
+
+        await self.session.execute(
+            text(
+                "SELECT refresh_graph_communities("
+                ":country_code, :algo_version, :community_id"
+                ")"
+            ),
+            {
+                "country_code": country_code,
+                "algo_version": algo_version,
+                "community_id": community_id,
+            },
+        )

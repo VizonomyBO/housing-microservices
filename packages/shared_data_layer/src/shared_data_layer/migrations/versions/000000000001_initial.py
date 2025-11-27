@@ -1935,6 +1935,75 @@ def create_operational_views_and_triggers() -> None:
 
     op.execute(
         """
+        CREATE OR REPLACE FUNCTION refresh_graph_communities(
+            p_country_code char(3) DEFAULT NULL,
+            p_algo_version text DEFAULT NULL,
+            p_community_id uuid DEFAULT NULL
+        )
+        RETURNS void AS $$
+        BEGIN
+            WITH target AS (
+                SELECT id
+                FROM graph_communities
+                WHERE (p_country_code IS NULL OR country_code = p_country_code)
+                  AND (p_algo_version IS NULL OR algo_version = p_algo_version)
+                  AND (p_community_id IS NULL OR id = p_community_id)
+                FOR UPDATE
+            ),
+            normalized AS (
+                SELECT
+                    gc.id,
+                    COALESCE(
+                        ARRAY(
+                            SELECT DISTINCT ge.id
+                            FROM unnest(COALESCE(gc.entity_ids, ARRAY[]::uuid[])) AS member(id)
+                            JOIN graph_entities ge ON ge.id = member.id
+                            ORDER BY ge.id
+                        ),
+                        ARRAY[]::uuid[]
+                    ) AS entity_ids
+                FROM graph_communities gc
+                JOIN target t ON gc.id = t.id
+            ),
+            metrics AS (
+                SELECT
+                    n.id,
+                    cardinality(n.entity_ids) AS member_count,
+                    COALESCE(edge_metrics.edge_count, 0) AS edge_count,
+                    COALESCE(edge_metrics.evidence_count, 0) AS evidence_count
+                FROM normalized n
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COUNT(DISTINCT e.id) AS edge_count,
+                        COALESCE(SUM(r.evidence_count), 0) AS evidence_count
+                    FROM graph_edges e
+                    LEFT JOIN graph_edge_evidence_rollup r ON r.edge_id = e.id
+                    WHERE cardinality(n.entity_ids) > 0
+                      AND e.source_entity_id = ANY(n.entity_ids)
+                      AND e.target_entity_id = ANY(n.entity_ids)
+                ) AS edge_metrics ON TRUE
+            )
+            UPDATE graph_communities gc
+            SET
+                entity_ids = COALESCE(n.entity_ids, ARRAY[]::uuid[]),
+                metrics = COALESCE(gc.metrics, '{}'::jsonb)
+                    || jsonb_build_object(
+                        'member_count', COALESCE(m.member_count, 0),
+                        'edge_count', COALESCE(m.edge_count, 0),
+                        'evidence_count', COALESCE(m.evidence_count, 0),
+                        'last_rollup_at', NOW()
+                    ),
+                updated_at = NOW()
+            FROM normalized n
+            JOIN metrics m ON m.id = n.id
+            WHERE gc.id = n.id;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+
+    op.execute(
+        """
         CREATE OR REPLACE FUNCTION fn_update_document_chat_refs() RETURNS TRIGGER AS $$
         BEGIN
             IF TG_OP = 'INSERT' THEN
@@ -2332,6 +2401,7 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_graph_communities_normalize ON graph_communities"
     )
     op.execute("DROP FUNCTION IF EXISTS graph_communities_normalize")
+    op.execute("DROP FUNCTION IF EXISTS refresh_graph_communities(char(3), text, uuid)")
     op.drop_index("ix_graph_communities_entity_ids_gin", table_name="graph_communities")
     op.drop_index("ix_graph_communities_country_level", table_name="graph_communities")
     op.drop_table("graph_communities")

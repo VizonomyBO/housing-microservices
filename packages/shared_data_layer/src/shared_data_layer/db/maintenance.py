@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -8,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 _REFRESH_BASE_SQL = text("SELECT refresh_base_documents_by_country(:country_code)")
 _REFRESH_GRAPH_SQL = text("SELECT refresh_graph_materializations(:concurrently)")
+_REFRESH_GRAPH_COMMUNITIES_SQL = text(
+    "SELECT refresh_graph_communities(:country_code, :algo_version, :community_id)"
+)
 _REFRESH_ACTIVE_CHUNKS_SQL = {
     False: text("REFRESH MATERIALIZED VIEW active_chunks"),
     True: text("REFRESH MATERIALIZED VIEW CONCURRENTLY active_chunks"),
@@ -64,6 +68,44 @@ def refresh_graph_materializations_sync(
     connection: Connection, concurrently: bool = False
 ) -> None:
     connection.execute(_REFRESH_GRAPH_SQL, {"concurrently": concurrently})
+
+
+async def refresh_graph_community_rollups(
+    session: AsyncSession,
+    *,
+    country_code: Optional[str] = None,
+    algo_version: Optional[str] = None,
+    community_id: Optional[UUID] = None,
+) -> None:
+    """Recompute community metrics/rosters for the requested scope."""
+
+    await session.execute(
+        _REFRESH_GRAPH_COMMUNITIES_SQL,
+        {
+            "country_code": country_code,
+            "algo_version": algo_version,
+            "community_id": community_id,
+        },
+    )
+
+
+def refresh_graph_community_rollups_sync(
+    connection: Connection,
+    *,
+    country_code: Optional[str] = None,
+    algo_version: Optional[str] = None,
+    community_id: Optional[UUID] = None,
+) -> None:
+    """Synchronous helper for recomputing community rollups."""
+
+    connection.execute(
+        _REFRESH_GRAPH_COMMUNITIES_SQL,
+        {
+            "country_code": country_code,
+            "algo_version": algo_version,
+            "community_id": community_id,
+        },
+    )
 
 
 async def refresh_active_chunks_view(

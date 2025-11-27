@@ -5,11 +5,18 @@ import pytest
 from sqlalchemy import select, text
 
 from shared_data_layer.db.ltree import Ltree
+from shared_data_layer.db.maintenance import (
+    refresh_graph_community_rollups,
+    refresh_graph_materializations,
+)
 from shared_data_layer.db.models.documents import DocumentGCEvent
 from shared_data_layer.testing.base import AsyncBaseTestCase
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from shared_data_layer.testing.factories.knowledge_graph import (
+    GraphCommunityFactory,
     GraphEdgeFactory,
+    GraphEntityFactory,
+    GraphEvidenceFactory,
 )
 from shared_data_layer.testing.factories.workflow import (
     WorkflowGraphFactory,
@@ -125,6 +132,50 @@ class TestAdvancedLogic(AsyncBaseTestCase):
         assert row.evidence_count == 1
         # Postgres arrays come back as lists in SQLAlchemy
         assert row.evidence_chunk_ids == [evidence.chunk_id]
+
+    async def test_refresh_graph_community_rollups(self, db_session):
+        entity_a = await GraphEntityFactory.create_async(session=db_session)
+        entity_b = await GraphEntityFactory.create_async(
+            session=db_session, country_code=entity_a.country_code
+        )
+
+        community = await GraphCommunityFactory.create_async(
+            session=db_session,
+            entity_ids=[entity_a.id, entity_b.id, uuid4()],
+            country_code=entity_a.country_code,
+            metrics={},
+        )
+
+        edge = await GraphEdgeFactory.create_async(
+            session=db_session,
+            source=entity_a,
+            target=entity_b,
+            source_entity_country_code=entity_a.country_code,
+            target_entity_country_code=entity_b.country_code,
+        )
+
+        await refresh_graph_materializations(db_session)
+        await refresh_graph_community_rollups(
+            db_session,
+            community_id=community.id,
+            algo_version=community.algo_version,
+        )
+        await db_session.refresh(community)
+
+        assert community.entity_ids == sorted([entity_a.id, entity_b.id])
+        metrics = community.metrics or {}
+        assert metrics["member_count"] == 2
+        assert metrics["edge_count"] == 1
+        assert metrics["evidence_count"] == 1
+        assert "last_rollup_at" in metrics
+
+        await GraphEvidenceFactory.create_async(session=db_session, edge=edge)
+        await refresh_graph_materializations(db_session)
+        await refresh_graph_community_rollups(
+            db_session, country_code=community.country_code
+        )
+        await db_session.refresh(community)
+        assert community.metrics["evidence_count"] == 2
 
     async def test_workflow_nodes_move_subtree_sp(self, db_session):
         # 1. Create a Graph and Nodes
