@@ -1,8 +1,10 @@
 import asyncio
 from typing import AsyncGenerator, Generator
 
+import asyncpg
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from shared_data_layer.testing.containers import PostgresContainerWithVector
@@ -32,6 +34,27 @@ def database_url(postgres_container: PostgresContainerWithVector) -> str:
 @pytest.fixture(scope="session")
 async def engine(database_url: str):
     engine = create_async_engine(database_url, echo=False)
+
+    async def _wait_for_database_ready(
+        retries: int = 30,
+        delay_seconds: float = 0.5,
+    ) -> None:
+        last_exc: Exception | None = None
+        for _ in range(retries):
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+                return
+            except (
+                OperationalError,
+                asyncpg.exceptions.CannotConnectNowError,
+                ConnectionError,
+                OSError,
+            ) as exc:
+                last_exc = exc
+                await asyncio.sleep(delay_seconds)
+        if last_exc is not None:
+            raise last_exc
 
     @event.listens_for(engine.sync_engine, "connect")
     def _register_char_codec(dbapi_connection, connection_record):
@@ -116,6 +139,8 @@ async def engine(database_url: str):
     def run_upgrade(connection, cfg):
         cfg.attributes["connection"] = connection
         command.upgrade(cfg, "head")
+
+    await _wait_for_database_ready()
 
     async with engine.begin() as conn:
         await conn.run_sync(run_upgrade, alembic_cfg)
