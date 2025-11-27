@@ -173,6 +173,7 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
   ```
 
   Repositories expose `KnowledgeGraphRepository.refresh_materializations()` for async workflows.
+  Operators can now run `python -m shared_data_layer.manage refresh-graph-mviews [--concurrently]` to execute the same helper outside the app tier after bulk ingestion jobs complete. Use `--concurrently` only when the unique indexes backing the materialized views already exist so the refresh can keep them readable.
 - Retrieval queries use the `active_chunks` materialized view instead of joining `documents` repeatedly. Run `REFRESH MATERIALIZED VIEW active_chunks;` (or `... CONCURRENTLY` when the unique `id` index is available) after document status/deletion changes that bypass the standard ingestion pipeline, or call the async helper `shared_data_layer.db.maintenance.refresh_active_chunks_view(session, concurrently=False)` from Python.
 
 ### Retrieval Chunk Partition Maintenance

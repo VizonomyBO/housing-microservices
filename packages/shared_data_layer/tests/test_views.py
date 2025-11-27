@@ -441,4 +441,47 @@ async def test_graph_entities_partition_catalog(db_session: AsyncSession):
     }
     assert required_indexes.issubset(index_map.keys())
     assert "USING GIN" in index_map["ix_graph_entities_labels_gin"].upper()
-    assert "USING HNSW" in index_map["ix_graph_entities_embedding_hnsw"].upper()
+    hnsw_def = index_map["ix_graph_entities_embedding_hnsw"].upper()
+    assert "USING HNSW" in hnsw_def
+    assert "VECTOR_COSINE_OPS" in hnsw_def
+
+
+@pytest.mark.asyncio
+async def test_graph_edges_seen_brin_index(db_session: AsyncSession):
+    indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'graph_edges'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in indexes}
+
+    assert "ix_graph_edges_seen_brin" in index_map
+    index_def = index_map["ix_graph_edges_seen_brin"].upper()
+    assert "USING BRIN" in index_def
+    assert "FIRST_SEEN_AT" in index_def
+    assert "LAST_SEEN_AT" in index_def
+
+
+@pytest.mark.asyncio
+async def test_graph_communities_entity_ids_gin_index(db_session: AsyncSession):
+    indexes = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'graph_communities'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in indexes}
+
+    assert "ix_graph_communities_entity_ids_gin" in index_map
+    index_def = index_map["ix_graph_communities_entity_ids_gin"].upper()
+    assert "USING GIN" in index_def
+    assert "ENTITY_IDS" in index_def
