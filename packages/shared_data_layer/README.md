@@ -152,23 +152,15 @@ The flag can also be combined with a regular run (e.g., `.venv/bin/pytest --end-
 
 Keep this contract in mind when writing ingestion logic or creating fixtures—factories now default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` when building base corpus rows.
 
-## Row-Level Security & Session Settings
+## Access Control & Session Expectations
 
-RLS is enabled for documents, chunks, knowledge-graph entities/edges, workflow graphs, and GC events. Access is controlled via custom PostgreSQL settings:
+PostgreSQL no longer enforces Row-Level Security or custom `POLICY` objects for the shared data layer. Instead:
 
-- `SET app.bypass_rls = 'on'|'off'`: defaults to `on`. Turn it `off` to enforce policies.
-- `SET app.current_owner_id = '<uuid>'`: grants access to tenant-scoped rows for the matching owner.
-- `SET app.current_country_code = 'USA'`: grants access to base rows for the given country (upper-case ISO-3).
+- Each environment provisions a dedicated database user/password; services authenticate using that credential and enforce per-tenant/base visibility in their own logic.
+- Repository helpers (e.g., `DocumentRepository.attach_to_conversation`, `PillarAnswerRepository.create_pillar_answer`) validate owner identity, country scope, and dedup rules before issuing writes.
+- Database constraints (unique indexes, check constraints, FK pairs, partitions) guarantee structural integrity, but they do **not** replace service-layer authorization.
 
-Example (tenant scoped):
-
-```sql
-SET app.bypass_rls = 'off';
-SET app.current_owner_id = '4f1c59b6-3e2e-4d41-b883-4bd9a48a6e18';
-SELECT * FROM documents;
-```
-
-Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running scoped queries in tests.
+When running manual SQL, keep in mind that all rows are visible to the connected role—scope queries explicitly by `owner_user_id`, `country_code`, or other filters if you need to mimic tenant-visible data.
 
 ## Partitioned Tables & Refresh Helpers
 

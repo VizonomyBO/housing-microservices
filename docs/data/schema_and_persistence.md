@@ -14,6 +14,12 @@
 8. **Minimal PII**: Store only `user_id` references; upstream tokens remain transient.
 9. **Migration safety + observability**: Schema evolves additively with reversible migrations, tracked ref counts, and metrics for ingestion/deletion pipelines.
 
+### Security & Enforcement
+
+- **Authentication**: The data layer connects to PostgreSQL with standard user/password credentials provisioned per environment. No Row-Level Security (RLS) policies or PostgreSQL `POLICY` objects are enabled.
+- **Authorization**: Application services enforce access control before issuing queries. Repository helpers and service-layer guards validate country scope, owner identity, and attachment contracts.
+- **Integrity**: Database-level unique/check/foreign-key constraints ensure structural consistency (e.g., ref counts, ISO codes, partition keys). When business rules go beyond declarative constraints, they live in ORM hooks, repositories, or background jobs rather than RLS/policies.
+
 ## 2. Logical Model Overview
 
 | Domain | Core Tables | Purpose |
@@ -150,7 +156,7 @@ Primary key `(conversation_id, document_id)`. Triggers increment/decrement `docu
 | `id` | `uuid` | Primary key (ULID from document + offset). |
 | `document_id` | `uuid` | FK → `documents`; `ON DELETE CASCADE` when document garbage collected. |
 | `content_hash` | `text` | Copy of parent doc hash. |
-| `owner_user_id` | `uuid` | Denormalized for RLS. Null for base docs. |
+| `owner_user_id` | `uuid` | Denormalized so application filters can scope tenant data efficiently. Null for base docs. |
 | `country_code` | `char(3)` | Partition key. |
 | `chunk_type` | `text` | Enum (`text`, `table`, `image`). |
 | `page_number` | `integer` | Optional. |
@@ -165,7 +171,7 @@ Primary key `(conversation_id, document_id)`. Triggers increment/decrement `docu
 | `bbox` | `jsonb` | `[x1,y1,x2,y2]`. |
 | `embedding` | `vector(1024)` | Voyage 3.5-lite vector (normalized). |
 | `metadata` | `jsonb` | Pillar tags, languages. |
-| `owner_user_id` | `uuid` | Denormalized for RLS. Null for base docs. |
+| `owner_user_id` | `uuid` | Denormalized so application filters can scope tenant data efficiently. Null for base docs. |
 | `country_code` | `char(3)` | Partition key. |
 | `section_path` | `text[]` | Hierarchical headings. |
 | `bbox` | `jsonb` | `[x1,y1,x2,y2]`. |
@@ -252,7 +258,7 @@ Configuration updates:
 | `document_id` | `uuid` | FK → `documents`; nullable for cross-document aggregates. |
 | `chunk_id` | `uuid` | FK → `chunks`; nullable if aggregated. |
 | `owner_user_id` | `uuid` | Denormalized scope for user-specific knowledge; null for base corpus entities. |
-| `country_code` | `char(3)` | ISO 3166-1 alpha-3; required for base docs, defaults to `MULT` when spanning multiple countries. |
+| `country_code` | `char(3)` | ISO 3166-1 alpha-3; required for **all** entities so the composite primary key `(id, country_code)` can anchor LIST partitioning. Multi-country aggregates should explicitly set `MULT` (or similar) instead of leaving the field empty. |
 | `entity_type` | `text` | Enum (`organization`, `metric`, `policy`, `event`, etc.). |
 | `entity_key` | `text` | Canonical key (lowercased). |
 | `labels` | `text[]` | Alternate names / tags. |
@@ -266,7 +272,8 @@ Configuration updates:
 Indexes & constraints:
 - Unique `(entity_type, entity_key, country_code)` where `owner_user_id IS NULL` to keep base corpus entities per country (enforced via `CHECK (country_code IS NOT NULL)`).
 - Unique `(entity_type, entity_key, owner_user_id)` where `owner_user_id IS NOT NULL` so private knowledge stays tenant-scoped.
-- Optional LIST partitioning by `country_code` aligns with ingestion sharding and allows future `ATTACH PARTITION` by region.
+- `CHECK (owner_user_id IS NULL -> country_code IS NOT NULL)` keeps base-scope rows tied to a geography.
+- LIST partitioning on `country_code` ships dedicated partitions for `USA`, `GBR`, and `CAN`, plus a `graph_entities_default` partition for every other geography. Because `(id, country_code)` is now the primary key, tenant-scoped rows still park in the default partition but must provide an explicit ISO-3 (e.g., `MULT`).
 - GIN on `labels` w/ `pg_trgm`; vector index on `embedding`; b-tree `(document_id)` to chase provenance.
 
 **Table: graph_edges**
@@ -275,7 +282,9 @@ Indexes & constraints:
 | --- | --- | --- |
 | `id` | `uuid` | Primary key. |
 | `source_entity_id` | `uuid` | FK → `graph_entities`. |
+| `source_entity_country_code` | `char(3)` | Mirrors the source entity’s ISO code so the FK can target the composite primary key. |
 | `target_entity_id` | `uuid` | FK → `graph_entities`. |
+| `target_entity_country_code` | `char(3)` | Mirrors the target entity’s ISO code for the FK. |
 | `edge_type` | `text` | Enum (`impacts`, `depends_on`, `reported_in`, `located_in`, etc.). |
 | `weight` | `numeric(4,3)` | Strength/confidence. |
 | `directional` | `boolean` | Defaults true. |
@@ -307,6 +316,7 @@ Indexes: `(source_entity_id, edge_type)`, `(target_entity_id, edge_type)`, parti
 | `last_refreshed_at` | `timestamptz` | Populated by the refresh job to simplify auditing. |
 
 - Refresh cadence: ingestion workers call `REFRESH MATERIALIZED VIEW CONCURRENTLY graph_edge_evidence_rollup` after each batch, and nightly maintenance performs a full refresh to guarantee determinism.
+- Bulk ingestion/ops workflows outside the ORM can run `python -m shared_data_layer.manage refresh-graph-mviews` (pass `--concurrently` when the unique indexes are in place) to refresh both `graph_edge_evidence_rollup` and `graph_hot_entities` in one shot.
 - Consumers that only need chunk IDs should join against this view instead of storing arrays on `graph_edges`, which keeps `graph_evidence` as the only writable evidence surface.
 
 **Table: graph_communities**
@@ -400,7 +410,7 @@ Indexes: `(workflow_version_id, source_node_id)` and `(workflow_version_id, targ
 | Rule | Enforcement | Rationale |
 | --- | --- | --- |
 | Dedup per user | Unique `(owner_user_id, content_hash)`; upload service queries before ingestion; conversation attachment reuses existing doc + increments `active_chat_refs`. | Avoids reprocessing repeated uploads. |
-| Base docs immutable + shared | `access_scope='base'`, `owner_user_id IS NULL`, `managed_by='system'`, `visibility='base_admin'`. RLS grants read-only access to all users scoped by `country_code`. | Ensures consistent shared corpus. |
+| Base docs immutable + shared | `access_scope='base'`, `owner_user_id IS NULL`, `managed_by='system'`, `visibility='base_admin'`. Service/API layer enforces read-only semantics per `country_code`; database constraints keep metadata consistent. | Ensures consistent shared corpus. |
 | Reference counting | Trigger on `conversation_documents` adjusts `documents.active_chat_refs`. Soft deletes prohibited when count > 0. | Prevents chats from deleting shared docs. |
 | Base doc deletion UI filter | Admin UI lists `documents` where `access_scope='base' AND active_chat_refs=0`. Deletion path bypasses regular chat cleanup. | Avoids removing documents that chats still use. |
 | Chunks visible only for active docs | Retrieval uses `active_chunks` view joining `documents.status='active'`. | Avoids partial ingestion leakage. |
@@ -471,7 +481,7 @@ Unchanged sequence (preflight → convert → chunk → embed → index → acti
 ## 8. Operational Guardrails
 - **Monitoring**: Track `documents.active_chat_refs`, dedup hit rate (`uploads_deduped / uploads_total`), number of base docs per country, GC job duration, and base-doc deletion attempts blocked due to refs.
 - **Admin UI Safety**: API refuses to delete `base` docs when `active_chat_refs > 0`. UI hides such docs entirely; audit log records deletion attempts.
-- **RLS**: Base docs readable by all authenticated users filtered by `country_code`; updates allowed only for admin role. User docs remain owner-scoped.
+- **Access control**: The application authenticates to Postgres with a dedicated account and enforces per-tenant/base visibility in service logic (repositories, request middleware). The database focuses on integrity and partitioning; no RLS policies are defined.
 
 ## Implementation Specifications
 

@@ -54,9 +54,11 @@
 
 ## 6. Operating Guidelines
 - **Versioning**: Always bump `algo_version` (graph extraction) or `workflow_graph.version` when prompts/pipelines change. Agents include these versions in cache keys.
+- **Geography guardrail**: LIST partitioning on `graph_entities.country_code` plus the composite primary key `(id, country_code)` means *every* upsert needs an ISO-3 code. Use real country codes for base scope and `MULT`/`UNK`-style sentinels for tenant rows that span multiple geos. `graph_edges` mirror those codes on `source_entity_country_code` / `target_entity_country_code` so FK enforcement stays partition aware.
 - **Testing**: Graph-aware tests should validate that a query returns the expected entity set, edge types, and workflow plan (snapshot tests + SQL queries).
 - **Monitoring**: Track counts of entities/edges per ingestion run, community build success, workflow graph publish events, and GraphRetriever latency.
-- **Security**: Graph tables inherit document RLS via `document_id`; cross-document aggregates must only expose aggregated data allowable per user scope.
+- **Security**: Application services enforce access control before querying the graph tables (owner/country scoping comes from repositories and request context). PostgreSQL itself only applies standard authentication plus schema constraints—no RLS or policies are defined—so never rely on the database alone for tenant separation.
+- **Community refresh automation**: When the batch/stream job finishes recomputing communities, immediately call `SELECT refresh_graph_communities(NULL, NULL, NULL);` (or the scoped variant) so `entity_ids`, `member_count`, `edge_count`, and `evidence_count` stay in sync with the latest edges. The same helper is exposed via `python -m shared_data_layer.manage refresh-graph-communities [...]`, so wiring it into that job means operators never need to trigger the refresh manually after community detection completes.
 
 ## 7. Further Reading
 - `agent_design.md` – See sections on GraphRAG + WorkflowPlanner nodes.
