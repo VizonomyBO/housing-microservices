@@ -36,7 +36,9 @@ class GraphEvidenceRead(ORMBaseSchema):
 class GraphEdgeRead(ORMBaseSchema):
     id: UUID
     source_entity_id: UUID
+    source_entity_country_code: Optional[CountryISOAlpha3] = None
     target_entity_id: UUID
+    target_entity_country_code: Optional[CountryISOAlpha3] = None
     edge_type: str
     weight: Optional[float] = None
     directional: bool

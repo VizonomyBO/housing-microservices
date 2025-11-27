@@ -31,8 +31,9 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "graph_entities"
     __table_args__ = (
         CheckConstraint(
-            "(owner_user_id IS NOT NULL) OR country_code IS NOT NULL",
-            name="ck_graph_entities_country_or_owner",
+            "(owner_user_id IS NOT NULL) OR "
+            "(owner_user_id IS NULL AND country_code IS NOT NULL)",
+            name="ck_graph_entities_base_country",
         ),
         CheckConstraint(
             "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
@@ -75,14 +76,26 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     labels: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String), nullable=True)
     properties: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     score: Mapped[Optional[float]] = mapped_column(Numeric(4, 3), nullable=True)
-    country_code: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    country_code: Mapped[str] = mapped_column(
+        String(3), nullable=False, primary_key=True
+    )
     owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
 
     edges_out: Mapped[list["GraphEdge"]] = relationship(
-        "GraphEdge", foreign_keys="GraphEdge.source_entity_id", back_populates="source"
+        "GraphEdge",
+        primaryjoin=(
+            "and_(GraphEntity.id == GraphEdge.source_entity_id, "
+            "GraphEntity.country_code == GraphEdge.source_entity_country_code)"
+        ),
+        back_populates="source",
     )
     edges_in: Mapped[list["GraphEdge"]] = relationship(
-        "GraphEdge", foreign_keys="GraphEdge.target_entity_id", back_populates="target"
+        "GraphEdge",
+        primaryjoin=(
+            "and_(GraphEntity.id == GraphEdge.target_entity_id, "
+            "GraphEntity.country_code == GraphEdge.target_entity_country_code)"
+        ),
+        back_populates="target",
     )
 
 
@@ -95,14 +108,28 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "edge_type",
             name="uq_graph_edges_source_target_type",
         ),
+        ForeignKeyConstraint(
+            ["source_entity_id", "source_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
+            ondelete="CASCADE",
+            name="fk_graph_edges_source",
+        ),
+        ForeignKeyConstraint(
+            ["target_entity_id", "target_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
+            ondelete="CASCADE",
+            name="fk_graph_edges_target",
+        ),
     )
 
     source_entity_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True), nullable=False
     )
+    source_entity_country_code: Mapped[str] = mapped_column(String(3), nullable=False)
     target_entity_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True), nullable=False
     )
+    target_entity_country_code: Mapped[str] = mapped_column(String(3), nullable=False)
     edge_type: Mapped[str] = mapped_column(String, nullable=False)
     weight: Mapped[Optional[float]] = mapped_column(Numeric(4, 3), default=1.0)
     directional: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -121,10 +148,20 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     algo_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     source: Mapped["GraphEntity"] = relationship(
-        "GraphEntity", foreign_keys=[source_entity_id], back_populates="edges_out"
+        "GraphEntity",
+        primaryjoin=(
+            "and_(GraphEdge.source_entity_id == GraphEntity.id, "
+            "GraphEdge.source_entity_country_code == GraphEntity.country_code)"
+        ),
+        back_populates="edges_out",
     )
     target: Mapped["GraphEntity"] = relationship(
-        "GraphEntity", foreign_keys=[target_entity_id], back_populates="edges_in"
+        "GraphEntity",
+        primaryjoin=(
+            "and_(GraphEdge.target_entity_id == GraphEntity.id, "
+            "GraphEdge.target_entity_country_code == GraphEntity.country_code)"
+        ),
+        back_populates="edges_in",
     )
     evidence: Mapped[list["GraphEvidence"]] = relationship(
         "GraphEvidence", back_populates="edge", cascade="all, delete-orphan"
@@ -244,6 +281,7 @@ Index(
     GraphEntity.entity_type,
     GraphEntity.entity_key,
     GraphEntity.owner_user_id,
+    GraphEntity.country_code,
     unique=True,
     postgresql_where=GraphEntity.owner_user_id.isnot(None),
 )

@@ -371,3 +371,74 @@ async def test_chunks_partition_catalog(db_session: AsyncSession):
     assert "USING GIN" in index_map["ix_chunks_text_tsv_gin"].upper()
     assert "USING IVFFLAT" in index_map["ix_chunks_embedding_ivfflat"].upper()
     assert "USING HNSW" in index_map["ix_chunks_embedding_hnsw"].upper()
+
+
+@pytest.mark.asyncio
+async def test_graph_entities_partition_catalog(db_session: AsyncSession):
+    partitioned = await db_session.execute(
+        text(
+            """
+            SELECT partstrat::text AS partstrat
+            FROM pg_partitioned_table pt
+            JOIN pg_class c ON pt.partrelid = c.oid
+            WHERE c.relname = 'graph_entities'
+            """
+        )
+    )
+    assert partitioned.scalar_one() == "l"
+
+    partition_rows = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_class c
+            JOIN pg_inherits i ON c.oid = i.inhrelid
+            JOIN pg_class p ON p.oid = i.inhparent
+            WHERE p.relname = 'graph_entities'
+            """
+        )
+    )
+    partition_names = {row[0] for row in partition_rows}
+    expected_partitions = {
+        "graph_entities_usa",
+        "graph_entities_gbr",
+        "graph_entities_can",
+        "graph_entities_default",
+    }
+    assert expected_partitions.issubset(partition_names)
+
+    default_partition = await db_session.execute(
+        text(
+            """
+            SELECT c.relname
+            FROM pg_partitioned_table pt
+            JOIN pg_class parent ON parent.oid = pt.partrelid
+            JOIN pg_class c ON c.oid = pt.partdefid
+            WHERE parent.relname = 'graph_entities'
+            """
+        )
+    )
+    assert default_partition.scalar_one() == "graph_entities_default"
+
+    index_rows = await db_session.execute(
+        text(
+            """
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'graph_entities'
+            """
+        )
+    )
+    index_map = {row.indexname: row.indexdef for row in index_rows}
+    required_indexes = {
+        "ix_graph_entities_name",
+        "ix_graph_entities_document_id",
+        "ix_graph_entities_labels_gin",
+        "uq_graph_entities_base_scope",
+        "uq_graph_entities_user_scope",
+        "ix_graph_entities_embedding_hnsw",
+    }
+    assert required_indexes.issubset(index_map.keys())
+    assert "USING GIN" in index_map["ix_graph_entities_labels_gin"].upper()
+    assert "USING HNSW" in index_map["ix_graph_entities_embedding_hnsw"].upper()

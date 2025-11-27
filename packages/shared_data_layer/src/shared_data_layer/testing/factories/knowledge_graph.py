@@ -30,6 +30,13 @@ class GraphEntityFactory(AsyncSQLAlchemyFactory[GraphEntity]):
     document_id = Use(lambda: None)
     chunk_id = Use(lambda: None)
 
+    @classmethod
+    def build(cls, **kwargs):  # type: ignore[override]
+        entity = super().build(**kwargs)
+        if entity.owner_user_id is None and entity.country_code is None:
+            raise ValueError("Base graph entities require a country_code")
+        return entity
+
 
 def _chunk_with_document():
     document = DocumentFactory.build(chunks=[], ingestion_jobs=[])
@@ -78,6 +85,22 @@ class GraphEdgeFactory(AsyncSQLAlchemyFactory[GraphEdge]):
     metadata_ = Use(lambda: {"meta": "data"})
     algo_version = Use(lambda: "v1")
     weight = Use(lambda: 0.6)
+
+    @classmethod
+    def build(cls, **kwargs):  # type: ignore[override]
+        source = kwargs.get("source")
+        if source is None:
+            source = GraphEntityFactory.build()
+            kwargs["source"] = source
+
+        target = kwargs.get("target")
+        if target is None:
+            target = GraphEntityFactory.build()
+            kwargs["target"] = target
+
+        kwargs.setdefault("source_entity_country_code", source.country_code)
+        kwargs.setdefault("target_entity_country_code", target.country_code)
+        return super().build(**kwargs)
 
     @classmethod
     async def create_async(cls, session, **kwargs):  # type: ignore[override]

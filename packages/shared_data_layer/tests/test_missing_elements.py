@@ -141,6 +141,23 @@ async def test_graph_entity_embedding(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_graph_entity_requires_country_for_base_scope(
+    db_session: AsyncSession,
+):
+    entity = GraphEntity(
+        name="MissingCountry",
+        entity_type="organization",
+        entity_key=f"missing-{uuid4().hex}",
+        owner_user_id=None,
+        country_code=None,
+    )
+
+    db_session.add(entity)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+
+
+@pytest.mark.asyncio
 async def test_graph_edge_evidence_span(db_session: AsyncSession):
     entity_a = await GraphEntityFactory.create_async(session=db_session)
     entity_b = await GraphEntityFactory.create_async(session=db_session)

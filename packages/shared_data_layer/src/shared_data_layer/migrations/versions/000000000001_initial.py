@@ -307,6 +307,32 @@ def create_chunk_partitions() -> None:
     )
 
 
+def create_graph_entity_partitions() -> None:
+    partition_map = {
+        "usa": ["USA"],
+        "gbr": ["GBR"],
+        "can": ["CAN"],
+    }
+
+    for suffix, values in partition_map.items():
+        formatted_values = ", ".join(f"'{value}'" for value in values)
+        op.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS graph_entities_{suffix}
+            PARTITION OF graph_entities
+            FOR VALUES IN ({formatted_values})
+            """
+        )
+
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_entities_default
+        PARTITION OF graph_entities
+        DEFAULT
+        """
+    )
+
+
 def create_documents_domain() -> None:
     op.create_table(
         "documents",
@@ -1162,7 +1188,9 @@ def create_knowledge_graph_domain() -> None:
         sa.Column("labels", postgresql.ARRAY(sa.String()), nullable=True),
         sa.Column("properties", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("score", sa.Numeric(4, 3), nullable=True),
-        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column(
+            "country_code", sa.String(length=3), nullable=False, primary_key=True
+        ),
         sa.Column("owner_user_id", sa.UUID(), nullable=True),
         sa.Column("id", sa.UUID(), primary_key=True),
         sa.Column(
@@ -1191,8 +1219,8 @@ def create_knowledge_graph_domain() -> None:
             name="fk_graph_entities_chunk",
         ),
         sa.CheckConstraint(
-            "(owner_user_id IS NOT NULL) OR country_code IS NOT NULL",
-            name="ck_graph_entities_country_or_owner",
+            "(owner_user_id IS NOT NULL) OR (owner_user_id IS NULL AND country_code IS NOT NULL)",
+            name="ck_graph_entities_base_country",
         ),
         sa.CheckConstraint(
             "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
@@ -1203,7 +1231,9 @@ def create_knowledge_graph_domain() -> None:
             " OR (chunk_id IS NOT NULL AND chunk_country_code IS NOT NULL)",
             name="ck_graph_entities_chunk_country_pair",
         ),
+        postgresql_partition_by="LIST (country_code)",
     )
+    create_graph_entity_partitions()
     op.create_index("ix_graph_entities_name", "graph_entities", ["name"])
     op.create_index(
         "ix_graph_entities_document_id",
@@ -1226,7 +1256,7 @@ def create_knowledge_graph_domain() -> None:
     op.create_index(
         "uq_graph_entities_user_scope",
         "graph_entities",
-        ["entity_type", "entity_key", "owner_user_id"],
+        ["entity_type", "entity_key", "owner_user_id", "country_code"],
         unique=True,
         postgresql_where=sa.text("owner_user_id IS NOT NULL"),
     )
@@ -1241,7 +1271,9 @@ def create_knowledge_graph_domain() -> None:
     op.create_table(
         "graph_edges",
         sa.Column("source_entity_id", sa.UUID(), nullable=False),
+        sa.Column("source_entity_country_code", sa.String(length=3), nullable=False),
         sa.Column("target_entity_id", sa.UUID(), nullable=False),
+        sa.Column("target_entity_country_code", sa.String(length=3), nullable=False),
         sa.Column("edge_type", sa.String(), nullable=False),
         sa.Column(
             "weight", sa.Numeric(4, 3), nullable=True, server_default=sa.text("1")
@@ -1279,14 +1311,14 @@ def create_knowledge_graph_domain() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["source_entity_id"],
-            ["graph_entities.id"],
+            ["source_entity_id", "source_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
             ondelete="CASCADE",
             name="fk_graph_edges_source",
         ),
         sa.ForeignKeyConstraint(
-            ["target_entity_id"],
-            ["graph_entities.id"],
+            ["target_entity_id", "target_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
             ondelete="CASCADE",
             name="fk_graph_edges_target",
         ),

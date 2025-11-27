@@ -125,7 +125,17 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         Upsert a graph edge using
         (source_entity_id, target_entity_id, edge_type) as the unique key.
         """
-        stmt = insert(GraphEdge).values(**edge_data)
+        payload = edge_data.copy()
+        if "source_entity_country_code" not in payload:
+            payload["source_entity_country_code"] = await self._get_entity_country_code(
+                payload["source_entity_id"]
+            )
+        if "target_entity_country_code" not in payload:
+            payload["target_entity_country_code"] = await self._get_entity_country_code(
+                payload.get("target_entity_id", payload["source_entity_id"])
+            )
+
+        stmt = insert(GraphEdge).values(**payload)
 
         update_dict = {
             "weight": stmt.excluded.weight,
@@ -145,6 +155,15 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         await self.refresh_hot_entities()
 
         return edge
+
+    async def _get_entity_country_code(self, entity_id: UUID) -> str:
+        result = await self.session.execute(
+            select(GraphEntity.country_code).where(GraphEntity.id == entity_id)
+        )
+        country_code = result.scalar_one_or_none()
+        if country_code is None:
+            raise ValueError(f"GraphEntity {entity_id} not found")
+        return country_code
 
     async def _resolve_chunk_country_code(self, chunk_id: UUID) -> str:
         result = await self.session.execute(

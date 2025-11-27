@@ -162,7 +162,9 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
 
 ## Partitioned Tables & Refresh Helpers
 
-- `chunks`, `graph_entities`, and `base_documents_by_country` are LIST-partitioned. The base-doc cache now pre-creates partitions for **every** ISO-3166-1 alpha-3 country plus the `base_documents_by_country_default` catch-all, and `ensure_base_documents_partition()` still provisions new partitions if ISO ever expands.
+- `chunks` and `graph_entities` are LIST-partitioned. Graph entities ship eager partitions for `USA`, `GBR`, and `CAN`, and everything else (including tenant-specific rows) lands in `graph_entities_default`. The composite primary key `(id, country_code)` means every entity row now carries a concrete ISO-3 `country_code` value—even tenant-scoped data should use `MULT`/`UNK`/other explicit codes—so edges can reference the correct partition.
+- `graph_edges` now store `source_entity_country_code` / `target_entity_country_code`, letting the FK target the composite key without chasing the ORM for derived metadata.
+- `base_documents_by_country` is also LIST-partitioned. The cache now pre-creates partitions for **every** ISO-3166-1 alpha-3 country plus the `base_documents_by_country_default` catch-all, and `ensure_base_documents_partition()` still provisions new partitions if ISO ever expands.
 - Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. Python callers can also use `shared_data_layer.db.maintenance.refresh_all_base_documents_cache()` (global) or `refresh_base_documents_cache_for_country(session, "USA")` for targeted rebuilds—both wrap the same SQL helper.
 - Knowledge-graph consumers can refresh both materialized views via:
 
