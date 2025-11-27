@@ -4,7 +4,12 @@ from uuid import uuid4
 from polyfactory import Use
 
 from shared_data_layer.db.maintenance import refresh_base_documents_cache
-from shared_data_layer.db.models.documents import Artifact, Document, IngestionJob
+from shared_data_layer.db.models.documents import (
+    Artifact,
+    Document,
+    IngestionJob,
+    UploadedFile,
+)
 from shared_data_layer.testing.factories.base import AsyncSQLAlchemyFactory
 from shared_data_layer.testing.factories.retrieval import ChunkFactory
 
@@ -72,3 +77,31 @@ class ArtifactFactory(AsyncSQLAlchemyFactory[Artifact]):
     artifact_type = Use(lambda: "markdown")
     s3_uri = Use(lambda: "s3://bucket/key")
     content_hash = Use(lambda: "hash")
+
+
+class UploadedFileFactory(AsyncSQLAlchemyFactory[UploadedFile]):
+    __model__ = UploadedFile
+    __set_relationships__ = False
+    storage_uri = Use(lambda: f"s3://uploads/{uuid4().hex}.bin")
+    byte_size = Use(lambda: 4096)
+    content_hash = Use(lambda: uuid4().hex)
+    checksum = Use(lambda: uuid4().hex[:16])
+    ingestion_metadata = Use(lambda: {"stage": "upload"})
+
+    @classmethod
+    async def create_async(  # type: ignore[override]
+        cls,
+        session,
+        *,
+        document=None,
+        **kwargs,
+    ):
+        document_obj = document
+        if document_obj is None and "document_id" not in kwargs:
+            document_obj = await DocumentFactory.create_async(
+                session=session, chunk_count=0
+            )
+        if document_obj is not None:
+            kwargs.setdefault("document_id", document_obj.id)
+            kwargs.setdefault("owner_user_id", document_obj.owner_user_id)
+        return await super().create_async(session=session, **kwargs)

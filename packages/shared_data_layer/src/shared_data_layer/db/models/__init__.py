@@ -1,3 +1,4 @@
+from .agents import AgentEvent, AgentRun
 from .conversations import (
     AgentStateCheckpoint,
     Conversation,
@@ -12,6 +13,7 @@ from .documents import (
     Document,
     DocumentGCEvent,
     IngestionJob,
+    UploadedFile,
 )
 from .knowledge_graph import (
     GraphCommunity,
@@ -38,8 +40,11 @@ __all__ = [
     "MessageToolCall",
     "MessageCitation",
     "AgentStateCheckpoint",
+    "AgentRun",
+    "AgentEvent",
     "Document",
     "IngestionJob",
+    "UploadedFile",
     "Artifact",
     "ConversationDocument",
     "BaseDocumentByCountry",

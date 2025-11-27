@@ -1,4 +1,8 @@
-from testcontainers.core.wait_strategies import LogMessageWaitStrategy
+from testcontainers.core.wait_strategies import (
+    CompositeWaitStrategy,
+    LogMessageWaitStrategy,
+    PortWaitStrategy,
+)
 from testcontainers.postgres import PostgresContainer
 
 
@@ -11,7 +15,12 @@ class PostgresContainerWithVector(PostgresContainer):
             "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off"
         )
         self.waiting_for(
-            LogMessageWaitStrategy("database system is ready to accept connections")
+            CompositeWaitStrategy(
+                LogMessageWaitStrategy(
+                    "database system is ready to accept connections"
+                ),
+                PortWaitStrategy(5432),
+            )
         )
 
     def _connect(self):

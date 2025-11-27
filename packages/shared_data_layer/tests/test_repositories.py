@@ -2,10 +2,16 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared_data_layer.db.ltree import Ltree
-from shared_data_layer.repositories.documents import DocumentRepository
+from shared_data_layer.repositories.documents import (
+    DocumentRepository,
+    UploadedFileRepository,
+)
 from shared_data_layer.repositories.knowledge_graph import KnowledgeGraphRepository
 from shared_data_layer.repositories.workflow import WorkflowGraphRepository
-from shared_data_layer.testing.factories.documents import ChunkFactory, DocumentFactory
+from shared_data_layer.testing.factories.documents import (
+    ChunkFactory,
+    DocumentFactory,
+)
 from shared_data_layer.testing.factories.knowledge_graph import (
     GraphEdgeFactory,
     GraphEntityFactory,
@@ -55,6 +61,41 @@ class TestRepositories:
         assert not any(d.id == doc_uk_id for d in us_docs)
         return
 
+    async def test_uploaded_file_repository(self, db_session: AsyncSession):
+        doc = await DocumentFactory.create_async(
+            session=db_session, chunk_count=0, country_code="USA"
+        )
+        repo = UploadedFileRepository(db_session)
+        upload = await repo.register_upload(
+            document_id=doc.id,
+            owner_user_id=doc.owner_user_id,
+            storage_uri="s3://bucket/raw.pdf",
+            byte_size=1024,
+            content_hash="hash-123",
+            checksum="checksum",
+            ingestion_metadata={"stage": "preflight"},
+        )
+
+        duplicate = await repo.register_upload(
+            document_id=doc.id,
+            owner_user_id=doc.owner_user_id,
+            storage_uri="s3://bucket/raw.pdf",
+            byte_size=1024,
+            content_hash="hash-123",
+            checksum="checksum",
+        )
+
+        assert upload.id == duplicate.id
+
+        owner_uploads = await repo.list_for_owner(doc.owner_user_id)
+        assert len(owner_uploads) == 1
+        assert owner_uploads[0].id == upload.id
+        assert owner_uploads[0].storage_uri == "s3://bucket/raw.pdf"
+
+        document_uploads = await repo.list_for_document(doc.id)
+        assert len(document_uploads) == 1
+        assert document_uploads[0].id == upload.id
+
     async def test_knowledge_graph_repository(self, db_session: AsyncSession):
         repo = KnowledgeGraphRepository(db_session)
 
@@ -82,9 +123,6 @@ class TestRepositories:
         await db_session.run_sync(lambda session: session.expire_all())
 
         # Test fetch_entity_with_neighbors
-        # We need to refresh/load relationships if factory didn't do it fully
-        # for the repo query to work?
-        # The repo uses selectinload, so it should fetch fresh.
 
         result_a = await repo.fetch_entity_with_neighbors(entity_a_id)
         assert result_a is not None

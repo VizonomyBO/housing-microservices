@@ -253,6 +253,12 @@ Index(
 )
 
 Index(
+    "ix_chunks_updated_at_brin",
+    Chunk.updated_at,
+    postgresql_using="brin",
+)
+
+Index(
     "ix_chunk_metrics_chunk_id",
     ChunkMetrics.chunk_id,
     ChunkMetrics.chunk_country_code,
@@ -282,5 +288,12 @@ Index(
 Index(
     "ix_retrieval_runs_document_scope_gin",
     RetrievalRun.document_scope,
+    postgresql_using="gin",
+    postgresql_ops={"document_scope": "jsonb_path_ops"},
+)
+
+Index(
+    "ix_retrieval_runs_document_scope_country_codes_gin",
+    RetrievalRun.document_scope["country_codes"],
     postgresql_using="gin",
 )

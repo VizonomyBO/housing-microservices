@@ -5,9 +5,10 @@ Revises:
 Create Date: 2025-11-26 18:30:00.000000
 
 This migration establishes the full shared data layer schema as described
-in DATA_LAYER_GAP_PLAN.md. It creates all base tables, views, triggers,
-and stored procedures required by the documents, conversations,
-retrieval, knowledge graph, and workflow domains.
+in `docs/data/schema_and_persistence.md` and the supporting task plans
+(`packages/shared_data_layer/TASK_*_PLAN.md`). It creates all base tables,
+views, triggers, and stored procedures required by the documents,
+conversations, retrieval, knowledge graph, and workflow domains.
 """
 
 from __future__ import annotations
@@ -25,6 +26,261 @@ revision: str = "000000000001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+
+# ISO 3166-1 alpha-3 codes sourced from
+# https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.json
+ISO_ALPHA3_CODES: tuple[str, ...] = (
+    "ABW",
+    "AFG",
+    "AGO",
+    "AIA",
+    "ALA",
+    "ALB",
+    "AND",
+    "ARE",
+    "ARG",
+    "ARM",
+    "ASM",
+    "ATA",
+    "ATF",
+    "ATG",
+    "AUS",
+    "AUT",
+    "AZE",
+    "BDI",
+    "BEL",
+    "BEN",
+    "BES",
+    "BFA",
+    "BGD",
+    "BGR",
+    "BHR",
+    "BHS",
+    "BIH",
+    "BLM",
+    "BLR",
+    "BLZ",
+    "BMU",
+    "BOL",
+    "BRA",
+    "BRB",
+    "BRN",
+    "BTN",
+    "BVT",
+    "BWA",
+    "CAF",
+    "CAN",
+    "CCK",
+    "CHE",
+    "CHL",
+    "CHN",
+    "CIV",
+    "CMR",
+    "COD",
+    "COG",
+    "COK",
+    "COL",
+    "COM",
+    "CPV",
+    "CRI",
+    "CUB",
+    "CUW",
+    "CXR",
+    "CYM",
+    "CYP",
+    "CZE",
+    "DEU",
+    "DJI",
+    "DMA",
+    "DNK",
+    "DOM",
+    "DZA",
+    "ECU",
+    "EGY",
+    "ERI",
+    "ESH",
+    "ESP",
+    "EST",
+    "ETH",
+    "FIN",
+    "FJI",
+    "FLK",
+    "FRA",
+    "FRO",
+    "FSM",
+    "GAB",
+    "GBR",
+    "GEO",
+    "GGY",
+    "GHA",
+    "GIB",
+    "GIN",
+    "GLP",
+    "GMB",
+    "GNB",
+    "GNQ",
+    "GRC",
+    "GRD",
+    "GRL",
+    "GTM",
+    "GUF",
+    "GUM",
+    "GUY",
+    "HKG",
+    "HMD",
+    "HND",
+    "HRV",
+    "HTI",
+    "HUN",
+    "IDN",
+    "IMN",
+    "IND",
+    "IOT",
+    "IRL",
+    "IRN",
+    "IRQ",
+    "ISL",
+    "ISR",
+    "ITA",
+    "JAM",
+    "JEY",
+    "JOR",
+    "JPN",
+    "KAZ",
+    "KEN",
+    "KGZ",
+    "KHM",
+    "KIR",
+    "KNA",
+    "KOR",
+    "KWT",
+    "LAO",
+    "LBN",
+    "LBR",
+    "LBY",
+    "LCA",
+    "LIE",
+    "LKA",
+    "LSO",
+    "LTU",
+    "LUX",
+    "LVA",
+    "MAC",
+    "MAF",
+    "MAR",
+    "MCO",
+    "MDA",
+    "MDG",
+    "MDV",
+    "MEX",
+    "MHL",
+    "MKD",
+    "MLI",
+    "MLT",
+    "MMR",
+    "MNE",
+    "MNG",
+    "MNP",
+    "MOZ",
+    "MRT",
+    "MSR",
+    "MTQ",
+    "MUS",
+    "MWI",
+    "MYS",
+    "MYT",
+    "NAM",
+    "NCL",
+    "NER",
+    "NFK",
+    "NGA",
+    "NIC",
+    "NIU",
+    "NLD",
+    "NOR",
+    "NPL",
+    "NRU",
+    "NZL",
+    "OMN",
+    "PAK",
+    "PAN",
+    "PCN",
+    "PER",
+    "PHL",
+    "PLW",
+    "PNG",
+    "POL",
+    "PRI",
+    "PRK",
+    "PRT",
+    "PRY",
+    "PSE",
+    "PYF",
+    "QAT",
+    "REU",
+    "ROU",
+    "RUS",
+    "RWA",
+    "SAU",
+    "SDN",
+    "SEN",
+    "SGP",
+    "SGS",
+    "SHN",
+    "SJM",
+    "SLB",
+    "SLE",
+    "SLV",
+    "SMR",
+    "SOM",
+    "SPM",
+    "SRB",
+    "SSD",
+    "STP",
+    "SUR",
+    "SVK",
+    "SVN",
+    "SWE",
+    "SWZ",
+    "SXM",
+    "SYC",
+    "SYR",
+    "TCA",
+    "TCD",
+    "TGO",
+    "THA",
+    "TJK",
+    "TKL",
+    "TKM",
+    "TLS",
+    "TON",
+    "TTO",
+    "TUN",
+    "TUR",
+    "TUV",
+    "TWN",
+    "TZA",
+    "UGA",
+    "UKR",
+    "UMI",
+    "URY",
+    "USA",
+    "UZB",
+    "VAT",
+    "VCT",
+    "VEN",
+    "VGB",
+    "VIR",
+    "VNM",
+    "VUT",
+    "WLF",
+    "WSM",
+    "YEM",
+    "ZAF",
+    "ZMB",
+    "ZWE",
+)
 
 
 def create_chunk_partitions() -> None:
@@ -47,6 +303,32 @@ def create_chunk_partitions() -> None:
         """
         CREATE TABLE IF NOT EXISTS chunks_default
         PARTITION OF chunks
+        DEFAULT
+        """
+    )
+
+
+def create_graph_entity_partitions() -> None:
+    partition_map = {
+        "usa": ["USA"],
+        "gbr": ["GBR"],
+        "can": ["CAN"],
+    }
+
+    for suffix, values in partition_map.items():
+        formatted_values = ", ".join(f"'{value}'" for value in values)
+        op.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS graph_entities_{suffix}
+            PARTITION OF graph_entities
+            FOR VALUES IN ({formatted_values})
+            """
+        )
+
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_entities_default
+        PARTITION OF graph_entities
         DEFAULT
         """
     )
@@ -161,6 +443,59 @@ def create_documents_domain() -> None:
         postgresql_where=sa.text(
             "owner_user_id IS NOT NULL AND access_scope <> 'base' AND deleted_at IS NULL"
         ),
+    )
+
+    op.create_table(
+        "uploaded_files",
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("document_id", sa.UUID(), nullable=False),
+        sa.Column("storage_uri", sa.String(), nullable=False),
+        sa.Column("byte_size", sa.BigInteger(), nullable=False),
+        sa.Column("content_hash", sa.String(), nullable=False),
+        sa.Column("checksum", sa.String(), nullable=True),
+        sa.Column(
+            "ingestion_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["document_id"],
+            ["documents.id"],
+            ondelete="CASCADE",
+            name="fk_uploaded_files_document",
+        ),
+        sa.CheckConstraint(
+            "byte_size >= 0", name="ck_uploaded_files_byte_size_non_negative"
+        ),
+    )
+    op.create_index(
+        "ix_uploaded_files_document_id",
+        "uploaded_files",
+        ["document_id"],
+    )
+    op.create_index(
+        "ix_uploaded_files_owner_user_id",
+        "uploaded_files",
+        ["owner_user_id"],
+    )
+    op.create_index(
+        "uq_uploaded_files_owner_content_hash",
+        "uploaded_files",
+        ["owner_user_id", "content_hash"],
+        unique=True,
+        postgresql_where=sa.text("owner_user_id IS NOT NULL"),
     )
 
     op.create_table(
@@ -549,6 +884,142 @@ def create_conversations_domain() -> None:
     )
 
 
+def create_agents_domain() -> None:
+    op.create_table(
+        "agent_runs",
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("conversation_id", sa.UUID(), nullable=True),
+        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column("planner_name", sa.String(), nullable=False),
+        sa.Column("planner_version", sa.String(), nullable=True),
+        sa.Column(
+            "status",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'running'"),
+        ),
+        sa.Column(
+            "document_scope", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("input_prompt", sa.Text(), nullable=True),
+        sa.Column("result_summary", sa.Text(), nullable=True),
+        sa.Column(
+            "result_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "started_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column(
+            "completed_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+        ),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["conversation_id"],
+            ["conversations.id"],
+            ondelete="SET NULL",
+            name="fk_agent_runs_conversation",
+        ),
+        sa.CheckConstraint(
+            "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
+            name="ck_agent_runs_country_code_format",
+        ),
+        sa.CheckConstraint(
+            "status IN ('pending','running','succeeded','failed','canceled')",
+            name="ck_agent_runs_status_enum",
+        ),
+    )
+    op.create_index(
+        "ix_agent_runs_owner_created_at",
+        "agent_runs",
+        ["owner_user_id", "created_at"],
+    )
+    op.create_index(
+        "ix_agent_runs_conversation_created_at",
+        "agent_runs",
+        ["conversation_id", "created_at"],
+    )
+    op.create_index(
+        "ix_agent_runs_country_code_created_at",
+        "agent_runs",
+        ["country_code", "created_at"],
+    )
+
+    op.create_table(
+        "agent_events",
+        sa.Column("run_id", sa.UUID(), nullable=False),
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
+        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column("event_type", sa.String(), nullable=False),
+        sa.Column(
+            "sequence_index",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "error_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            onupdate=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["run_id"],
+            ["agent_runs.id"],
+            ondelete="CASCADE",
+            name="fk_agent_events_run",
+        ),
+        sa.CheckConstraint(
+            "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
+            name="ck_agent_events_country_code_format",
+        ),
+        sa.CheckConstraint(
+            "sequence_index >= 0",
+            name="ck_agent_events_sequence_non_negative",
+        ),
+    )
+    op.create_index(
+        "ix_agent_events_run_sequence",
+        "agent_events",
+        ["run_id", "sequence_index"],
+    )
+    op.create_index(
+        "ix_agent_events_owner_created_at",
+        "agent_events",
+        ["owner_user_id", "created_at"],
+    )
+
+
 def create_retrieval_domain() -> None:
     op.create_table(
         "chunks",
@@ -639,12 +1110,26 @@ def create_retrieval_domain() -> None:
         ["created_at"],
         postgresql_using="brin",
     )
+    op.create_index(
+        "ix_chunks_updated_at_brin",
+        "chunks",
+        ["updated_at"],
+        postgresql_using="brin",
+    )
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS ix_chunks_embedding_ivfflat
         ON chunks
         USING ivfflat (embedding vector_ip_ops)
         WITH (lists = 100)
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
+        ON chunks
+        USING hnsw (embedding vector_ip_ops)
+        WITH (m = 16, ef_construction = 64)
         """
     )
     op.create_table(
@@ -721,6 +1206,13 @@ def create_retrieval_domain() -> None:
         "ix_retrieval_runs_document_scope_gin",
         "retrieval_runs",
         ["document_scope"],
+        postgresql_using="gin",
+        postgresql_ops={"document_scope": "jsonb_path_ops"},
+    )
+    op.create_index(
+        "ix_retrieval_runs_document_scope_country_codes_gin",
+        "retrieval_runs",
+        [sa.text("(document_scope -> 'country_codes')")],
         postgresql_using="gin",
     )
 
@@ -886,7 +1378,9 @@ def create_knowledge_graph_domain() -> None:
         sa.Column("labels", postgresql.ARRAY(sa.String()), nullable=True),
         sa.Column("properties", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("score", sa.Numeric(4, 3), nullable=True),
-        sa.Column("country_code", sa.String(length=3), nullable=True),
+        sa.Column(
+            "country_code", sa.String(length=3), nullable=False, primary_key=True
+        ),
         sa.Column("owner_user_id", sa.UUID(), nullable=True),
         sa.Column("id", sa.UUID(), primary_key=True),
         sa.Column(
@@ -915,8 +1409,8 @@ def create_knowledge_graph_domain() -> None:
             name="fk_graph_entities_chunk",
         ),
         sa.CheckConstraint(
-            "(owner_user_id IS NOT NULL) OR country_code IS NOT NULL",
-            name="ck_graph_entities_country_or_owner",
+            "(owner_user_id IS NOT NULL) OR (owner_user_id IS NULL AND country_code IS NOT NULL)",
+            name="ck_graph_entities_base_country",
         ),
         sa.CheckConstraint(
             "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
@@ -927,7 +1421,9 @@ def create_knowledge_graph_domain() -> None:
             " OR (chunk_id IS NOT NULL AND chunk_country_code IS NOT NULL)",
             name="ck_graph_entities_chunk_country_pair",
         ),
+        postgresql_partition_by="LIST (country_code)",
     )
+    create_graph_entity_partitions()
     op.create_index("ix_graph_entities_name", "graph_entities", ["name"])
     op.create_index(
         "ix_graph_entities_document_id",
@@ -950,7 +1446,7 @@ def create_knowledge_graph_domain() -> None:
     op.create_index(
         "uq_graph_entities_user_scope",
         "graph_entities",
-        ["entity_type", "entity_key", "owner_user_id"],
+        ["entity_type", "entity_key", "owner_user_id", "country_code"],
         unique=True,
         postgresql_where=sa.text("owner_user_id IS NOT NULL"),
     )
@@ -965,7 +1461,9 @@ def create_knowledge_graph_domain() -> None:
     op.create_table(
         "graph_edges",
         sa.Column("source_entity_id", sa.UUID(), nullable=False),
+        sa.Column("source_entity_country_code", sa.String(length=3), nullable=False),
         sa.Column("target_entity_id", sa.UUID(), nullable=False),
+        sa.Column("target_entity_country_code", sa.String(length=3), nullable=False),
         sa.Column("edge_type", sa.String(), nullable=False),
         sa.Column(
             "weight", sa.Numeric(4, 3), nullable=True, server_default=sa.text("1")
@@ -1003,14 +1501,14 @@ def create_knowledge_graph_domain() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["source_entity_id"],
-            ["graph_entities.id"],
+            ["source_entity_id", "source_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
             ondelete="CASCADE",
             name="fk_graph_edges_source",
         ),
         sa.ForeignKeyConstraint(
-            ["target_entity_id"],
-            ["graph_entities.id"],
+            ["target_entity_id", "target_entity_country_code"],
+            ["graph_entities.id", "graph_entities.country_code"],
             ondelete="CASCADE",
             name="fk_graph_edges_target",
         ),
@@ -1271,6 +1769,37 @@ def create_workflow_domain() -> None:
         """
     )
 
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION workflow_version_max_depth(p_version_id uuid)
+        RETURNS integer AS $$
+        DECLARE
+            v_max_depth integer;
+        BEGIN
+            SELECT g.max_depth
+            INTO v_max_depth
+            FROM workflow_versions v
+            JOIN workflow_graphs g ON g.id = v.graph_id
+            WHERE v.id = p_version_id;
+
+            IF v_max_depth IS NULL THEN
+                RETURN 6;
+            END IF;
+
+            RETURN v_max_depth;
+        END;
+        $$ LANGUAGE plpgsql STABLE;
+        """
+    )
+
+    op.execute(
+        """
+        ALTER TABLE workflow_nodes
+        ADD CONSTRAINT ck_workflow_nodes_path_depth
+        CHECK (nlevel(path) <= workflow_version_max_depth(version_id))
+        """
+    )
+
     op.create_table(
         "workflow_edges",
         sa.Column("version_id", sa.UUID(), nullable=False),
@@ -1345,13 +1874,7 @@ def create_workflow_domain() -> None:
                 RAISE EXCEPTION 'Workflow version % has no parent graph', NEW.version_id;
             END IF;
 
-            SELECT max_depth INTO v_max_depth
-            FROM workflow_graphs
-            WHERE id = v_graph_id;
-
-            IF v_max_depth IS NULL THEN
-                v_max_depth := 6;
-            END IF;
+            v_max_depth := workflow_version_max_depth(NEW.version_id);
 
             IF NEW.path IS NULL THEN
                 RAISE EXCEPTION 'Path must be provided for workflow nodes';
@@ -1377,6 +1900,33 @@ def create_workflow_domain() -> None:
 
     op.execute(
         """
+        CREATE OR REPLACE FUNCTION workflow_nodes_prevent_cycle()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP = 'UPDATE' THEN
+                IF NEW.path <@ OLD.path AND NEW.path <> OLD.path THEN
+                    RAISE EXCEPTION
+                        'Cannot move workflow node % into its own descendant path',
+                        NEW.id;
+                END IF;
+            END IF;
+
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_workflow_nodes_prevent_cycle
+        BEFORE UPDATE ON workflow_nodes
+        FOR EACH ROW EXECUTE FUNCTION workflow_nodes_prevent_cycle()
+        """
+    )
+
+    op.execute(
+        """
         CREATE VIEW workflow_version_history AS
         SELECT
             v.id AS workflow_version_id,
@@ -1392,6 +1942,44 @@ def create_workflow_domain() -> None:
             v.created_at
         FROM workflow_versions v
         JOIN workflow_graphs g ON g.id = v.graph_id;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE VIEW workflow_version_diffs AS
+        WITH stats AS (
+            SELECT
+                v.id AS workflow_version_id,
+                v.graph_id,
+                v.from_version,
+                v.to_version,
+                v.change_log,
+                v.created_at,
+                COUNT(DISTINCT n.id) AS node_count,
+                COUNT(DISTINCT e.id) AS edge_count
+            FROM workflow_versions v
+            LEFT JOIN workflow_nodes n ON n.version_id = v.id
+            LEFT JOIN workflow_edges e ON e.version_id = v.id
+            GROUP BY v.id
+        )
+        SELECT
+            workflow_version_id,
+            graph_id,
+            from_version,
+            to_version,
+            change_log,
+            created_at,
+            node_count,
+            edge_count,
+            LAG(workflow_version_id) OVER w AS previous_version_id,
+            node_count - COALESCE(LAG(node_count) OVER w, 0) AS node_delta,
+            edge_count - COALESCE(LAG(edge_count) OVER w, 0) AS edge_delta
+        FROM stats
+        WINDOW w AS (
+            PARTITION BY graph_id
+            ORDER BY created_at, workflow_version_id
+        );
         """
     )
 
@@ -1431,6 +2019,26 @@ def create_operational_views_and_triggers() -> None:
             name="uq_base_documents_document",
         ),
         postgresql_partition_by="LIST (country_code)",
+    )
+
+    # Pre-create the partitions for every ISO-3 code so refresh cycles remain
+    # lightweight even for newly onboarded regions.
+    for country_code in ISO_ALPHA3_CODES:
+        partition_name = f"base_documents_by_country_{country_code.lower()}"
+        op.execute(
+            f"""
+            CREATE TABLE {partition_name}
+            PARTITION OF base_documents_by_country
+            FOR VALUES IN ('{country_code}')
+            """
+        )
+
+    op.execute(
+        """
+        CREATE TABLE base_documents_by_country_default
+        PARTITION OF base_documents_by_country
+        DEFAULT
+        """
     )
 
     op.execute(
@@ -1511,7 +2119,7 @@ def create_operational_views_and_triggers() -> None:
 
     op.execute(
         """
-        CREATE VIEW active_chunks AS
+        CREATE MATERIALIZED VIEW active_chunks AS
         SELECT
             c.id,
             c.document_id,
@@ -1528,6 +2136,12 @@ def create_operational_views_and_triggers() -> None:
         JOIN documents d ON c.document_id = d.id
         WHERE d.status = 'active' AND d.deleted_at IS NULL;
         """
+    )
+    op.create_index(
+        "uq_active_chunks_id",
+        "active_chunks",
+        ["id"],
+        unique=True,
     )
 
     op.execute(
@@ -1594,6 +2208,75 @@ def create_operational_views_and_triggers() -> None:
         BEGIN
             EXECUTE format('REFRESH MATERIALIZED VIEW %s graph_edge_evidence_rollup', concurrent);
             EXECUTE format('REFRESH MATERIALIZED VIEW %s graph_hot_entities', concurrent);
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION refresh_graph_communities(
+            p_country_code char(3) DEFAULT NULL,
+            p_algo_version text DEFAULT NULL,
+            p_community_id uuid DEFAULT NULL
+        )
+        RETURNS void AS $$
+        BEGIN
+            WITH target AS (
+                SELECT id
+                FROM graph_communities
+                WHERE (p_country_code IS NULL OR country_code = p_country_code)
+                  AND (p_algo_version IS NULL OR algo_version = p_algo_version)
+                  AND (p_community_id IS NULL OR id = p_community_id)
+                FOR UPDATE
+            ),
+            normalized AS (
+                SELECT
+                    gc.id,
+                    COALESCE(
+                        ARRAY(
+                            SELECT DISTINCT ge.id
+                            FROM unnest(COALESCE(gc.entity_ids, ARRAY[]::uuid[])) AS member(id)
+                            JOIN graph_entities ge ON ge.id = member.id
+                            ORDER BY ge.id
+                        ),
+                        ARRAY[]::uuid[]
+                    ) AS entity_ids
+                FROM graph_communities gc
+                JOIN target t ON gc.id = t.id
+            ),
+            metrics AS (
+                SELECT
+                    n.id,
+                    cardinality(n.entity_ids) AS member_count,
+                    COALESCE(edge_metrics.edge_count, 0) AS edge_count,
+                    COALESCE(edge_metrics.evidence_count, 0) AS evidence_count
+                FROM normalized n
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COUNT(DISTINCT e.id) AS edge_count,
+                        COALESCE(SUM(r.evidence_count), 0) AS evidence_count
+                    FROM graph_edges e
+                    LEFT JOIN graph_edge_evidence_rollup r ON r.edge_id = e.id
+                    WHERE cardinality(n.entity_ids) > 0
+                      AND e.source_entity_id = ANY(n.entity_ids)
+                      AND e.target_entity_id = ANY(n.entity_ids)
+                ) AS edge_metrics ON TRUE
+            )
+            UPDATE graph_communities gc
+            SET
+                entity_ids = COALESCE(n.entity_ids, ARRAY[]::uuid[]),
+                metrics = COALESCE(gc.metrics, '{}'::jsonb)
+                    || jsonb_build_object(
+                        'member_count', COALESCE(m.member_count, 0),
+                        'edge_count', COALESCE(m.edge_count, 0),
+                        'evidence_count', COALESCE(m.evidence_count, 0),
+                        'last_rollup_at', NOW()
+                    ),
+                updated_at = NOW()
+            FROM normalized n
+            JOIN metrics m ON m.id = n.id
+            WHERE gc.id = n.id;
         END;
         $$ LANGUAGE plpgsql;
         """
@@ -1929,6 +2612,7 @@ def upgrade() -> None:
     create_documents_domain()
     create_retrieval_domain()
     create_conversations_domain()
+    create_agents_domain()
     create_knowledge_graph_domain()
     create_workflow_domain()
     create_operational_views_and_triggers()
@@ -1966,9 +2650,17 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_workflow_nodes_validate_depth ON workflow_nodes"
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_workflow_nodes_prevent_cycle ON workflow_nodes"
+    )
+    op.execute(
         "DROP FUNCTION IF EXISTS workflow_nodes_move_subtree(UUID, ltree, ltree)"
     )
+    op.execute("DROP FUNCTION IF EXISTS workflow_nodes_prevent_cycle")
     op.execute("DROP FUNCTION IF EXISTS workflow_nodes_validate_depth")
+    op.execute(
+        "ALTER TABLE IF EXISTS workflow_nodes DROP CONSTRAINT IF EXISTS ck_workflow_nodes_path_depth"
+    )
+    op.execute("DROP FUNCTION IF EXISTS workflow_version_max_depth(uuid)")
     op.execute("DROP FUNCTION IF EXISTS refresh_graph_materializations(boolean)")
     op.execute("DROP FUNCTION IF EXISTS ensure_base_documents_partition(text)")
     op.execute("DROP FUNCTION IF EXISTS fn_sync_chunk_reference_country")
@@ -1976,10 +2668,12 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS fn_track_document_gc_events")
     op.execute("DROP FUNCTION IF EXISTS fn_update_document_chat_refs")
     op.execute("DROP FUNCTION IF EXISTS refresh_base_documents_by_country(text)")
+    op.execute("DROP VIEW IF EXISTS workflow_version_diffs")
     op.execute("DROP VIEW IF EXISTS workflow_version_history")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_hot_entities")
     op.execute("DROP MATERIALIZED VIEW IF EXISTS graph_edge_evidence_rollup")
-    op.execute("DROP VIEW IF EXISTS active_chunks")
+    op.drop_index("uq_active_chunks_id", table_name="active_chunks")
+    op.execute("DROP MATERIALIZED VIEW IF EXISTS active_chunks")
     op.drop_table("base_documents_by_country")
 
     # Workflow domain
@@ -1997,6 +2691,7 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_graph_communities_normalize ON graph_communities"
     )
     op.execute("DROP FUNCTION IF EXISTS graph_communities_normalize")
+    op.execute("DROP FUNCTION IF EXISTS refresh_graph_communities(char(3), text, uuid)")
     op.drop_index("ix_graph_communities_entity_ids_gin", table_name="graph_communities")
     op.drop_index("ix_graph_communities_country_level", table_name="graph_communities")
     op.drop_table("graph_communities")
@@ -2012,6 +2707,15 @@ def downgrade() -> None:
     op.drop_index("ix_graph_entities_document_id", table_name="graph_entities")
     op.drop_index("ix_graph_entities_name", table_name="graph_entities")
     op.drop_table("graph_entities")
+
+    # Agent telemetry domain
+    op.drop_index("ix_agent_events_owner_created_at", table_name="agent_events")
+    op.drop_index("ix_agent_events_run_sequence", table_name="agent_events")
+    op.drop_table("agent_events")
+    op.drop_index("ix_agent_runs_country_code_created_at", table_name="agent_runs")
+    op.drop_index("ix_agent_runs_conversation_created_at", table_name="agent_runs")
+    op.drop_index("ix_agent_runs_owner_created_at", table_name="agent_runs")
+    op.drop_table("agent_runs")
 
     # Conversations domain
     op.drop_table("agent_state_checkpoints")
@@ -2035,13 +2739,20 @@ def downgrade() -> None:
     op.drop_index("ix_pillar_answers_country_pillar", table_name="pillar_answers")
     op.drop_index("uq_pillar_answers_owner_country_pillar", table_name="pillar_answers")
     op.drop_table("pillar_answers")
+    op.drop_index(
+        "ix_retrieval_runs_document_scope_country_codes_gin",
+        table_name="retrieval_runs",
+    )
     op.drop_index("ix_retrieval_runs_document_scope_gin", table_name="retrieval_runs")
     op.drop_index("ix_retrieval_runs_created_at", table_name="retrieval_runs")
     op.drop_table("retrieval_run_items")
     op.drop_table("retrieval_runs")
     op.drop_index("ix_chunk_metrics_chunk_id", table_name="chunk_metrics")
     op.drop_table("chunk_metrics")
+    op.execute("DROP INDEX IF EXISTS ix_chunks_embedding_hnsw")
+    op.execute("DROP INDEX IF EXISTS ix_chunks_embedding_ivfflat")
     op.drop_index("ix_chunks_created_at_brin", table_name="chunks")
+    op.drop_index("ix_chunks_updated_at_brin", table_name="chunks")
     op.drop_index("ix_chunks_country_chunk_type", table_name="chunks")
     op.drop_index("ix_chunks_text_tsv_gin", table_name="chunks")
     op.drop_index("ix_chunks_document_position", table_name="chunks")
@@ -2055,6 +2766,10 @@ def downgrade() -> None:
     op.drop_table("ingestion_jobs")
     op.drop_index("ix_document_gc_events_document", table_name="document_gc_events")
     op.drop_table("document_gc_events")
+    op.drop_index("uq_uploaded_files_owner_content_hash", table_name="uploaded_files")
+    op.drop_index("ix_uploaded_files_owner_user_id", table_name="uploaded_files")
+    op.drop_index("ix_uploaded_files_document_id", table_name="uploaded_files")
+    op.drop_table("uploaded_files")
     op.drop_index("uq_documents_owner_canonical_name_active", table_name="documents")
     op.drop_index("uq_documents_base_country_hash", table_name="documents")
     op.drop_index("uq_documents_owner_content_hash_active", table_name="documents")

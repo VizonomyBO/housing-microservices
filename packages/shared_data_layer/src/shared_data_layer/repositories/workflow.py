@@ -1,10 +1,11 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from shared_data_layer.db.models.workflow import WorkflowGraph, WorkflowVersion
+from shared_data_layer.db.procedures import workflow_nodes_move_subtree
 from shared_data_layer.repositories.base import BaseRepository
 from shared_data_layer.schemas.workflow import WorkflowGraphRead
 
@@ -53,9 +54,11 @@ class WorkflowGraphRepository(BaseRepository[WorkflowGraph]):
             source_path: The ltree path of the subtree root to move (e.g. "A.B").
             target_parent_path: The ltree path of the new parent (e.g. "A.D").
         """
-        await self.session.execute(
-            text("SELECT workflow_nodes_move_subtree(:graph_id, :src, :dst)"),
-            {"graph_id": graph_id, "src": source_path, "dst": target_parent_path},
+        await workflow_nodes_move_subtree(
+            self.session,
+            graph_id=graph_id,
+            source_path=source_path,
+            target_parent_path=target_parent_path,
         )
         # We don't commit here, letting the unit of work handle it,
         # but we should probably expire objects to ensure consistency if they are

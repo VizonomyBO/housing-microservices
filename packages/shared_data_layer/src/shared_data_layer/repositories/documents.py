@@ -2,12 +2,22 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from shared_data_layer.db.models.documents import ConversationDocument, Document
+from shared_data_layer.db.maintenance import refresh_base_documents_cache
+from shared_data_layer.db.models.conversations import Conversation
+from shared_data_layer.db.models.documents import (
+    ConversationDocument,
+    Document,
+    UploadedFile,
+)
 from shared_data_layer.repositories.base import BaseRepository
-from shared_data_layer.schemas.documents import DocumentRead, DocumentWithChunksRead
+from shared_data_layer.schemas.documents import (
+    DocumentRead,
+    DocumentWithChunksRead,
+    UploadedFileRead,
+)
 
 
 class DocumentRepository(BaseRepository[Document]):
@@ -80,6 +90,16 @@ class DocumentRepository(BaseRepository[Document]):
         """
         Attach a document to a conversation and increment the reference count.
         """
+        document = await self.session.get(Document, document_id)
+        if document is None:
+            raise ValueError(f"Document {document_id} not found")
+
+        conversation = await self.session.get(Conversation, conversation_id)
+        if conversation is None:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        self._validate_attachment_scope(document, conversation)
+
         # Check if already attached
         stmt = select(ConversationDocument).where(
             ConversationDocument.conversation_id == conversation_id,
@@ -95,6 +115,7 @@ class DocumentRepository(BaseRepository[Document]):
                 existing_attachment.role = role
                 existing_attachment.visibility_override = visibility_override
                 existing_attachment.attached_by_user_id = attached_by_user_id
+                await self.session.flush()
             return existing_attachment
 
         attachment = ConversationDocument(
@@ -132,7 +153,89 @@ class DocumentRepository(BaseRepository[Document]):
         """
         Refresh the partitioned cache of base documents.
         """
-        await self.session.execute(
-            text("SELECT refresh_base_documents_by_country(:country_code)"),
-            {"country_code": country_code},
+        await refresh_base_documents_cache(self.session, country_code)
+
+    @staticmethod
+    def _validate_attachment_scope(
+        document: Document,
+        conversation: Conversation,
+    ) -> None:
+        if document.access_scope != "base":
+            return
+        if document.country_code is None:
+            raise ValueError(
+                "Base documents must define a country_code before attachment."
+            )
+        if conversation.country_code is None:
+            raise ValueError(
+                "Conversations must define a country_code "
+                "before attaching base documents."
+            )
+        if conversation.country_code != document.country_code:
+            raise ValueError(
+                "Base documents can only be attached to conversations "
+                "in the same country."
+            )
+
+
+class UploadedFileRepository(BaseRepository[UploadedFile]):
+    def __init__(self, session):
+        super().__init__(session, UploadedFile)
+
+    async def register_upload(
+        self,
+        *,
+        document_id: UUID,
+        owner_user_id: Optional[UUID],
+        storage_uri: str,
+        byte_size: int,
+        content_hash: str,
+        checksum: Optional[str] = None,
+        ingestion_metadata: Optional[dict] = None,
+    ) -> UploadedFile:
+        """
+        Create a new upload record unless an owner/hash duplicate already exists.
+        """
+        if owner_user_id is not None:
+            stmt = select(UploadedFile).where(
+                UploadedFile.owner_user_id == owner_user_id,
+                UploadedFile.content_hash == content_hash,
+            )
+            result = await self.session.execute(stmt)
+            existing_upload = result.scalar_one_or_none()
+            if existing_upload:
+                return existing_upload
+
+        upload = UploadedFile(
+            document_id=document_id,
+            owner_user_id=owner_user_id,
+            storage_uri=storage_uri,
+            byte_size=byte_size,
+            content_hash=content_hash,
+            checksum=checksum,
+            ingestion_metadata=ingestion_metadata,
         )
+        self.session.add(upload)
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def list_for_owner(self, owner_user_id: UUID) -> List[UploadedFileRead]:
+        stmt = (
+            select(UploadedFile)
+            .where(UploadedFile.owner_user_id == owner_user_id)
+            .order_by(UploadedFile.created_at)
+        )
+        result = await self.session.execute(stmt)
+        uploads = result.scalars().all()
+        return [UploadedFileRead.model_validate(upload) for upload in uploads]
+
+    async def list_for_document(self, document_id: UUID) -> List[UploadedFileRead]:
+        stmt = (
+            select(UploadedFile)
+            .where(UploadedFile.document_id == document_id)
+            .order_by(UploadedFile.created_at)
+        )
+        result = await self.session.execute(stmt)
+        uploads = result.scalars().all()
+        return [UploadedFileRead.model_validate(upload) for upload in uploads]

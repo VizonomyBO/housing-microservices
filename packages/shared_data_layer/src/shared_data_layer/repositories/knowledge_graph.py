@@ -1,10 +1,16 @@
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
+from shared_data_layer.db.maintenance import (
+    refresh_graph_community_rollups,
+    refresh_graph_edge_evidence_rollup,
+    refresh_graph_hot_entities,
+    refresh_graph_materializations,
+)
 from shared_data_layer.db.models.knowledge_graph import (
     GraphEdge,
     GraphEntity,
@@ -125,7 +131,17 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         Upsert a graph edge using
         (source_entity_id, target_entity_id, edge_type) as the unique key.
         """
-        stmt = insert(GraphEdge).values(**edge_data)
+        payload = edge_data.copy()
+        if "source_entity_country_code" not in payload:
+            payload["source_entity_country_code"] = await self._get_entity_country_code(
+                payload["source_entity_id"]
+            )
+        if "target_entity_country_code" not in payload:
+            payload["target_entity_country_code"] = await self._get_entity_country_code(
+                payload.get("target_entity_id", payload["source_entity_id"])
+            )
+
+        stmt = insert(GraphEdge).values(**payload)
 
         update_dict = {
             "weight": stmt.excluded.weight,
@@ -145,6 +161,15 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         await self.refresh_hot_entities()
 
         return edge
+
+    async def _get_entity_country_code(self, entity_id: UUID) -> str:
+        result = await self.session.execute(
+            select(GraphEntity.country_code).where(GraphEntity.id == entity_id)
+        )
+        country_code = result.scalar_one_or_none()
+        if country_code is None:
+            raise ValueError(f"GraphEntity {entity_id} not found")
+        return country_code
 
     async def _resolve_chunk_country_code(self, chunk_id: UUID) -> str:
         result = await self.session.execute(
@@ -190,26 +215,32 @@ class KnowledgeGraphRepository(BaseRepository[GraphEntity]):
         """
         Refresh the graph_edge_evidence_rollup materialized view.
         """
-        concurrently_clause = "CONCURRENTLY" if concurrently else ""
-        await self.session.execute(
-            text(
-                f"REFRESH MATERIALIZED VIEW {concurrently_clause} "
-                "graph_edge_evidence_rollup"
-            )
+        await refresh_graph_edge_evidence_rollup(
+            self.session, concurrently=concurrently
         )
 
     async def refresh_hot_entities(self, concurrently: bool = False) -> None:
         """
         Refresh the graph_hot_entities materialized view.
         """
-        concurrently_clause = "CONCURRENTLY" if concurrently else ""
-        await self.session.execute(
-            text(f"REFRESH MATERIALIZED VIEW {concurrently_clause} graph_hot_entities")
-        )
+        await refresh_graph_hot_entities(self.session, concurrently=concurrently)
 
     async def refresh_materializations(self, concurrently: bool = False) -> None:
         """Refresh both graph materialized views via the shared helper."""
-        await self.session.execute(
-            text("SELECT refresh_graph_materializations(:concurrently)"),
-            {"concurrently": concurrently},
+        await refresh_graph_materializations(self.session, concurrently=concurrently)
+
+    async def refresh_community_rollups(
+        self,
+        *,
+        country_code: Optional[str] = None,
+        algo_version: Optional[str] = None,
+        community_id: Optional[UUID] = None,
+    ) -> None:
+        """Recompute `graph_communities` metrics for the requested slice."""
+
+        await refresh_graph_community_rollups(
+            self.session,
+            country_code=country_code,
+            algo_version=algo_version,
+            community_id=community_id,
         )

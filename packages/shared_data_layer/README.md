@@ -8,13 +8,14 @@ The package is organized as follows:
 
 - **`src/shared_data_layer/db/models/`**: SQLAlchemy database models.
     - `users.py`: User management.
-    - `documents.py`: Documents, Chunks, Artifacts.
+    - `documents.py`: Documents, Uploaded Files, Chunks, Artifacts.
+    - `agents.py`: Agent runs and telemetry events.
     - `retrieval.py`: Retrieval runs and metrics.
     - `knowledge_graph.py`: Graph entities and edges.
     - `workflow.py`: Workflow definitions and versions.
 - **`src/shared_data_layer/repositories/`**: Async repositories for data access.
     - `base.py`: Generic `BaseRepository` with common CRUD operations.
-    - `documents.py`, `knowledge_graph.py`, etc.: Specialized repositories.
+    - `documents.py`, `knowledge_graph.py`, `agents.py`, etc.: Specialized repositories.
 - **`src/shared_data_layer/schemas/`**: Pydantic models (DTOs) for API responses and internal data transfer.
 - **`src/shared_data_layer/migrations/`**: Alembic migration scripts.
 - **`src/shared_data_layer/testing/`**: Testing utilities and factories.
@@ -108,6 +109,46 @@ async def get_doc(session, doc_id):
     return document
 ```
 
+Uploaded file registrations can be tracked without duplicating document logic:
+
+```python
+from shared_data_layer.repositories.documents import UploadedFileRepository
+
+async def register_upload(session, document, storage_uri, content_hash):
+    repo = UploadedFileRepository(session)
+    return await repo.register_upload(
+        document_id=document.id,
+        owner_user_id=document.owner_user_id,
+        storage_uri=storage_uri,
+        byte_size=document.byte_size or 0,
+        content_hash=content_hash,
+        ingestion_metadata={"stage": "upload"},
+    )
+```
+
+The repository enforces the `(owner_user_id, content_hash)` deduplication rule while still allowing base (ownerless) uploads to be recorded independently.
+
+Agent run/event telemetry can be logged for observability:
+
+```python
+from shared_data_layer.repositories.agents import AgentTelemetryRepository
+
+async def record_agent_activity(session, conversation_id, owner_id, payload):
+    repo = AgentTelemetryRepository(session)
+    run = await repo.create_run(
+        owner_user_id=owner_id,
+        conversation_id=conversation_id,
+        planner_name="planner.v2",
+        document_scope={"country_code": "USA"},
+        input_prompt="Summarize housing changes",
+    )
+    await repo.append_event(
+        run_id=run.id,
+        event_type="planner.step",
+        payload=payload,
+    )
+    return await repo.get_run_with_events(run.id)
+```
 ### 3. Using Schemas
 Pydantic schemas are available for type-safe data handling.
 
@@ -132,35 +173,42 @@ To run the tests for this package:
 
 For detailed agent instructions and quirks, see [AGENTS.md](AGENTS.md).
 
+### End-to-End Ingestion Smoke Suite
+
+The ingestion pipeline smoke tests live in `tests/test_end_to_end_ingestion.py`. They stitch together document ingestion, chunk activation, and knowledge-graph rollups, so they are **opt-in** and default to `skip`. Run them explicitly with the `--end-to-end` flag:
+
+```bash
+.venv/bin/pytest --end-to-end tests/test_end_to_end_ingestion.py -n 0
+```
+
+The flag can also be combined with a regular run (e.g., `.venv/bin/pytest --end-to-end -n auto`) when you want the suite included in CI.
+
 ## Identity & Ownership Contract
 
 - `owner_user_id` is **mandatory** for every document whose `access_scope` is not `base`. The database enforces this constraint and the `DocumentRead` schema validates it as well.
 - Base documents must omit `owner_user_id` and provide an ISO-3 `country_code`. This value is propagated automatically to child rows (chunks, artifacts) through triggers.
+- **Conversation attachments**: Base-scope documents can only be attached to conversations that share the same ISO-3 `country_code`. `DocumentRepository.attach_to_conversation(...)` now enforces this guardrail and raises a `ValueError` if the conversation or document are missing a country or the values do not match. Service/API layers should surface that error to clients so users understand why the attachment failed.
+- Pydantic schemas expose these ISO codes via the `CountryISOAlpha3` enum (`shared_data_layer.schemas.countries`), so application code gets type-safe hints instead of free-form strings.
+- **Pillar answers**: Use `PillarAnswerRepository.create_pillar_answer(...)` (or replicate its guard) so tenant-scoped answers always carry the same `owner_user_id` as their source document unless the document is truly `base`. This protects the published-only unique index on `(owner_user_id, country_code, pillar_name)` and keeps the regional `(country_code, pillar_name)` partial index—which filters to `status='published'`—useful for lookups.
 
 Keep this contract in mind when writing ingestion logic or creating fixtures—factories now default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` when building base corpus rows.
 
-## Row-Level Security & Session Settings
+## Access Control & Session Expectations
 
-RLS is enabled for documents, chunks, knowledge-graph entities/edges, workflow graphs, and GC events. Access is controlled via custom PostgreSQL settings:
+PostgreSQL no longer enforces Row-Level Security or custom `POLICY` objects for the shared data layer. Instead:
 
-- `SET app.bypass_rls = 'on'|'off'`: defaults to `on`. Turn it `off` to enforce policies.
-- `SET app.current_owner_id = '<uuid>'`: grants access to tenant-scoped rows for the matching owner.
-- `SET app.current_country_code = 'USA'`: grants access to base rows for the given country (upper-case ISO-3).
+- Each environment provisions a dedicated database user/password; services authenticate using that credential and enforce per-tenant/base visibility in their own logic.
+- Repository helpers (e.g., `DocumentRepository.attach_to_conversation`, `PillarAnswerRepository.create_pillar_answer`) validate owner identity, country scope, and dedup rules before issuing writes.
+- Database constraints (unique indexes, check constraints, FK pairs, partitions) guarantee structural integrity, but they do **not** replace service-layer authorization.
 
-Example (tenant scoped):
-
-```sql
-SET app.bypass_rls = 'off';
-SET app.current_owner_id = '4f1c59b6-3e2e-4d41-b883-4bd9a48a6e18';
-SELECT * FROM documents;
-```
-
-Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running scoped queries in tests.
+When running manual SQL, keep in mind that all rows are visible to the connected role—scope queries explicitly by `owner_user_id`, `country_code`, or other filters if you need to mimic tenant-visible data.
 
 ## Partitioned Tables & Refresh Helpers
 
-- `chunks`, `graph_entities`, and `base_documents_by_country` are LIST-partitioned (USA/GBR/CAN + default) to keep hot regions isolated.
-- Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. The function ensures that missing partitions are created on demand via `ensure_base_documents_partition()`.
+- `chunks` and `graph_entities` are LIST-partitioned. Graph entities ship eager partitions for `USA`, `GBR`, and `CAN`, and everything else (including tenant-specific rows) lands in `graph_entities_default`. The composite primary key `(id, country_code)` means every entity row now carries a concrete ISO-3 `country_code` value—even tenant-scoped data should use `MULT`/`UNK`/other explicit codes—so edges can reference the correct partition.
+- `graph_edges` now store `source_entity_country_code` / `target_entity_country_code`, letting the FK target the composite key without chasing the ORM for derived metadata.
+- `base_documents_by_country` is also LIST-partitioned. The cache now pre-creates partitions for **every** ISO-3166-1 alpha-3 country plus the `base_documents_by_country_default` catch-all, and `ensure_base_documents_partition()` still provisions new partitions if ISO ever expands.
+- Use `SELECT refresh_base_documents_by_country(NULL)` for a full rebuild or pass a `country_code` to refresh a single partition. Python callers can also use `shared_data_layer.db.maintenance.refresh_all_base_documents_cache()` (global) or `refresh_base_documents_cache_for_country(session, "USA")` for targeted rebuilds—both wrap the same SQL helper.
 - Knowledge-graph consumers can refresh both materialized views via:
 
   ```sql
@@ -168,11 +216,99 @@ Remember to `RESET` the settings (or set `app.bypass_rls = 'on'`) after running 
   ```
 
   Repositories expose `KnowledgeGraphRepository.refresh_materializations()` for async workflows.
+  Operators can now run `python -m shared_data_layer.manage refresh-graph-mviews [--concurrently]` to execute the same helper outside the app tier after bulk ingestion jobs complete. Use `--concurrently` only when the unique indexes backing the materialized views already exist so the refresh can keep them readable.
+- Community metrics also have a first-class refresh helper. Run `SELECT refresh_graph_communities(NULL, NULL, NULL);` (or target a specific country/algo/UUID) to rebuild `entity_ids`, `member_count`, `edge_count`, and `evidence_count`. Python callers can invoke `shared_data_layer.db.maintenance.refresh_graph_community_rollups(...)`, while operators can run `python -m shared_data_layer.manage refresh-graph-communities [--country-code USA --algo-version v2 --community-id <uuid>]` after bulk KG updates.
+- Retrieval queries use the `active_chunks` materialized view instead of joining `documents` repeatedly. Run `REFRESH MATERIALIZED VIEW active_chunks;` (or `... CONCURRENTLY` when the unique `id` index is available) after document status/deletion changes that bypass the standard ingestion pipeline, or call the async helper `shared_data_layer.db.maintenance.refresh_active_chunks_view(session, concurrently=False)` from Python.
+
+### Retrieval Chunk Partition Maintenance
+
+- `chunks` is LIST-partitioned on `country_code` with dedicated tables for `chunks_usa`, `chunks_gbr`, and `chunks_can`, plus a `chunks_default` partition for everything else. These hot partitions keep country-specific workloads off the default heap.
+- Retrieval workloads rely on multiple parent indexes—`GIN (text_tsv)`, `BRIN (created_at)`, `BRIN (updated_at)`, and both `IVFFLAT` + `HNSW` vector indexes on `embedding`. PostgreSQL automatically builds these indexes for the partitions that exist when the parent index is created.
+- When you provision a new partition (for example, a `chunks_mex` table), you must create and attach the matching indexes so the partition participates in search plans:
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS chunks_mex PARTITION OF chunks FOR VALUES IN ('MEX');
+  CREATE INDEX chunks_mex_document_position_idx
+    ON chunks_mex (document_id, chunk_type, position);
+  ALTER INDEX ix_chunks_document_position ATTACH PARTITION chunks_mex_document_position_idx;
+
+  CREATE INDEX chunks_mex_text_tsv_gin ON chunks_mex USING gin (text_tsv);
+  ALTER INDEX ix_chunks_text_tsv_gin ATTACH PARTITION chunks_mex_text_tsv_gin;
+
+  CREATE INDEX chunks_mex_created_at_brin ON chunks_mex USING brin (created_at);
+  ALTER INDEX ix_chunks_created_at_brin ATTACH PARTITION chunks_mex_created_at_brin;
+
+  CREATE INDEX chunks_mex_updated_at_brin ON chunks_mex USING brin (updated_at);
+  ALTER INDEX ix_chunks_updated_at_brin ATTACH PARTITION chunks_mex_updated_at_brin;
+
+  CREATE INDEX chunks_mex_embedding_ivfflat
+    ON chunks_mex USING ivfflat (embedding vector_ip_ops) WITH (lists = 100);
+  ALTER INDEX ix_chunks_embedding_ivfflat ATTACH PARTITION chunks_mex_embedding_ivfflat;
+
+  CREATE INDEX chunks_mex_embedding_hnsw
+    ON chunks_mex USING hnsw (embedding vector_ip_ops) WITH (m = 16, ef_construction = 64);
+  ALTER INDEX ix_chunks_embedding_hnsw ATTACH PARTITION chunks_mex_embedding_hnsw;
+  ```
+
+- After attaching indexes, run `ANALYZE chunks_mex;` so query plans understand the new partition's statistics. No ORM changes are necessary because SQLAlchemy targets the parent table.
+
+### Retrieval Telemetry Indexes
+
+- `retrieval_runs.document_scope` now has `GIN (document_scope jsonb_path_ops)` plus an expression index on `(document_scope -> 'country_codes')` to accelerate audits that filter by included countries. These indexes are created via the base migration and verified in `tests/test_views.py::test_retrieval_runs_document_scope_indexes`.
+- When writing custom queries, prefer `document_scope @> '{"country_codes":["USA"]}'::jsonb` so PostgreSQL can leverage the operator classes defined above.
 
 ## Observability Aids
 
 - `document_gc_events` stores trigger-generated audit rows whenever `active_chat_refs` falls to zero or `deleted_at` changes. Query this table to power GC dashboards or alerting.
 - `workflow_version_history` surfaces the approved version lineage for each workflow graph (graph metadata + change log + approver info).
+- `workflow_version_diffs` compares consecutive versions of a graph, exposing node/edge counts, deltas, and raw change logs so reviewers can audit structural changes quickly.
+
+## Operational Guardrails & Runbooks
+
+### Extension Rationale
+
+- We intentionally stick with vanilla PostgreSQL plus the core extensions that ship in every managed service (`pgcrypto`, `ltree`, `pg_trgm`, `vector`). They solve hashing, hierarchical paths, fuzzy search, and embedding search without introducing bespoke background daemons.
+- Avoiding heavier add-ons (Citus, Timescale, custom GC extensions) keeps backup/restore, failover, and IAM consistent across every environment: the same SQL snapshot runs locally, in CI’s Testcontainers, and in production.
+- Disaster recovery becomes a normal `pg_dump` + `pg_restore` flow because we never depend on external file systems or background workers owned by third-party extensions.
+
+### Document GC Workflow
+
+- Conversation attachment triggers keep `documents.active_chat_refs` accurate no matter how conversation rows are inserted or soft-deleted. When the count transitions to zero (or `deleted_at` toggles), a `document_gc_events` row with `event_type` of `active_refs_zero` or `deleted_state_changed` is inserted alongside before/after counters.
+- Operators should poll `document_gc_events` (ordered by `created_at`) to drive downstream cleanup jobs:
+  1. Query for the latest `active_refs_zero` per `document_id`.
+  2. Re-validate the document still has `active_chat_refs = 0` (race-safe guardrail).
+  3. Run the application-layer GC that purges orphaned chunks/artifacts.
+  4. Soft delete the document (or mark the GC event as processed via service metadata) so future attachments can rehydrate it cleanly.
+- Because the ledger lives entirely inside PostgreSQL you can replay GC decisions just by re-running the query or shipping the rows into observability—no external state machines required.
+
+### Refresh Cadence & CLI Hooks
+
+- **Base documents cache**: call `shared_data_layer.db.maintenance.refresh_base_documents_cache_for_country(session, "USA")` after ingesting new base corpus rows for a specific country or `refresh_all_base_documents_cache` for a global rebuild. Operators can run the same SQL directly: `SELECT refresh_base_documents_by_country(NULL);`.
+- **Active chunks snapshot**: whenever documents skip the standard ORM hooks (bulk COPY, data backfill), invoke `refresh_active_chunks_view(session, concurrently=True)` or run `REFRESH MATERIALIZED VIEW CONCURRENTLY active_chunks;` to keep retrieval workloads consistent.
+- **Graph materializations**: bulk KG imports should finish with `python -m shared_data_layer.manage refresh-graph-mviews [--concurrently]` followed by `python -m shared_data_layer.manage refresh-graph-communities` scoped to the affected country/algo. The helpers wire up the async session + transaction handling for you.
+- **Community rollups**: downstream analytics that only care about a single community can pass `--community-id <uuid>` to the CLI or call `refresh_graph_community_rollups(session, community_id=...)` for precise recomputations.
+
+### Partition & Index Maintenance
+
+- `base_documents_by_country` eagerly provisions a partition per ISO alpha-3 code. If ISO expands, run `SELECT ensure_base_documents_partition('<NEW>');` (already invoked inside the refresh helper) and re-run the catalog audit tests (`pytest -k catalog`) to prove the new partition exists.
+- Retrieval `chunks` and KG `graph_entities` tables require matching indexes on every new partition. Use the sample commands earlier in this README, then `ALTER INDEX ... ATTACH PARTITION ...` for each global index (`GIN`, `BRIN`, `IVFFLAT`, `HNSW`). Finish with `ANALYZE <partition>;`.
+- When in doubt, inspect the parent catalog: `SELECT partstrat FROM pg_partitioned_table ...` and `SELECT indexname FROM pg_indexes ...`. The new pytest utilities (see below) automate these checks so schema drift is caught during CI.
+
+### pgvector Tuning Cheat Sheet
+
+- Default index definitions target `vector_ip_ops` with `lists = 100` for `ivfflat` and `m = 16`, `ef_construction = 64` for `hnsw`. These work well for ~100k chunks. Increase `lists` or `m` before reindexing if recall drops at higher scale.
+- Query-side knobs: `SET ivfflat.probes = 10;` for low-latency approximate lookups, or bump toward 50–100 for higher recall. For HNSW searches, adjust `SET hnsw.ef_search = 64;` to trade CPU for accuracy.
+- Always run `VACUUM ANALYZE chunks_<country>;` after bulk embedding imports so the planner keeps using vector indexes instead of falling back to sequential scans. If maintenance windows are tight, increase `maintenance_work_mem` during refresh jobs to accelerate index builds.
+
+### Catalog Audits
+
+- The automated guardrails live in `tests/test_catalog_audits.py` and rely on reusable helpers from `tests/catalog_utils.py`. They verify partition strategies, required partitions, and index definitions for every critical table.
+- Run `./.venv/bin/pytest tests/test_catalog_audits.py -n auto` (or `pytest -k catalog`) whenever schema changes land. These checks run by default as part of the full suite, so migrations that drop/rename indexes will now fail fast.
+
+## Workflow Guardrails
+
+- The `ck_workflow_nodes_path_depth` constraint (plus the matching trigger) ensures every node's LTREE path respects the owning graph's `max_depth`, even when ORM hooks are bypassed.
+- `trg_workflow_nodes_prevent_cycle` rejects ad-hoc updates that would move a node under its own descendants, preserving acyclic workflow trees outside of the `workflow_nodes_move_subtree` stored procedure.
 
 ## Linting & Formatting
 

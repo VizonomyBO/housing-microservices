@@ -66,6 +66,9 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     gc_events: Mapped[list["DocumentGCEvent"]] = relationship(
         "DocumentGCEvent", back_populates="document", cascade="all, delete-orphan"
     )
+    uploaded_files: Mapped[list["UploadedFile"]] = relationship(
+        "UploadedFile", back_populates="document", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -238,6 +241,29 @@ class DocumentGCEvent(Base, UUIDPrimaryKeyMixin):
     document: Mapped["Document"] = relationship("Document", back_populates="gc_events")
 
 
+class UploadedFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "uploaded_files"
+
+    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
+    document_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    storage_uri: Mapped[str] = mapped_column(String, nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ingestion_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    document: Mapped["Document"] = relationship(
+        "Document", back_populates="uploaded_files"
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "byte_size >= 0", name="ck_uploaded_files_byte_size_non_negative"
+        ),
+    )
+
+
 Index(
     "ix_documents_status_updated_at",
     Document.status,
@@ -311,4 +337,22 @@ Index(
 Index(
     "ix_conversation_documents_attach_source",
     ConversationDocument.attach_source,
+)
+
+Index(
+    "ix_uploaded_files_document_id",
+    UploadedFile.document_id,
+)
+
+Index(
+    "ix_uploaded_files_owner_user_id",
+    UploadedFile.owner_user_id,
+)
+
+Index(
+    "uq_uploaded_files_owner_content_hash",
+    UploadedFile.owner_user_id,
+    UploadedFile.content_hash,
+    unique=True,
+    postgresql_where=UploadedFile.owner_user_id.isnot(None),
 )
