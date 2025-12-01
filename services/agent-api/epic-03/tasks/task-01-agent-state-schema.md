@@ -30,6 +30,7 @@ Define a strongly typed `AgentState` domain model that mirrors LangGraph checkpo
 2. **Type Safety**: Model the structure with Pydantic v2 (`BaseModel` subclasses) so runtime validation is automatic. Provide helper data classes for `MessageSnapshot`, `GraphContext`, etc., and use LangChain `BaseMessage` objects (or adapter helpers) for the `messages` collection to keep parity with LangGraph.
 3. **Serialization Helpers**: Implement `to_persistence(state)` and `from_persistence(row_set)` so repository code can convert between in-memory and DB representations (JSON columns vs. relational tables).
 4. **Validation**: Let Pydantic handle runtime validation (custom validators where needed) ensuring required fields exist before serialization. Keep validation light-weight to avoid runtime cost.
+5. **DB Contract Clarity**: Document the JSON payload stored in `agent_state_checkpoints.state`, including a `cache_metadata.schema_version` (default `1`) so migrations stay cheap. Call out any shared-data-layer follow-ups (e.g., TODOs for Task 02 when repository writers wire in the shared package) if schema changes are required.
 5. **Testing**: Cover
    - Schema instantiation with minimum required fields.
    - Validation failures for missing mandatory properties.

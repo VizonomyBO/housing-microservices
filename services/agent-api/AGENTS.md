@@ -38,6 +38,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 3. Keep documentation synchronized:
    - Update `docs/agents/implementation.md`, `docs/overview/system_architecture.md`, or other references when tasks require doc changes.
    - If you finish a task that alters subsequent work, edit the associated task files or checklist entries to prevent drift.
+   - If a prerequisite is missing, author/adjust additional task files and reorder the checklist so future agents inherit a coherent plan.
 
 ---
 

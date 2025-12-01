@@ -65,6 +65,7 @@ Feel free to add more spot checks (for example, targeting a small subset or usin
 
 - The script enforces clean staging to prevent committing unrelated work.
 - Helper utilities (like the git diff parser) run via `uv run python …`, guaranteeing every Python process uses the project’s virtualenv.
+- It automatically runs from the Agent API directory while issuing git commands from the repo root, so you can invoke it from anywhere without path glitches.
 - Default Codex flags can be overridden via `CODEX_CMD` / `CODEX_FLAGS` environment variables if needed.
 - All workflow instructions (plan, tracker, verification commands, checklist updates) come directly from `services/agent-api/AGENTS.md` and each task’s markdown file.
 

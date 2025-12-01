@@ -70,6 +70,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "❌ Unable to locate git repository root from ${SCRIPT_DIR}" >&2
+  exit 1
+fi
 TASKS_DIR="${SCRIPT_DIR}/epic-03/tasks"
 CHECKLIST_FILE="${SCRIPT_DIR}/epic-03/CHECKLIST.md"
 AGENT_GUIDE="${SCRIPT_DIR}/AGENTS.md"
@@ -100,10 +104,16 @@ if [[ ${#ALL_TASK_FILES[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if ! git diff --cached --quiet; then
+if ! git -C "${REPO_ROOT}" diff --cached --quiet; then
   echo "❌ Staging area is not clean. Please commit or reset staged changes before running this script." >&2
   exit 1
 fi
+
+pushd "${SCRIPT_DIR}" >/dev/null
+cleanup() {
+  popd >/dev/null || true
+}
+trap cleanup EXIT
 
 select_task_files() {
   if [[ ${#TASK_SELECTION[@]} -eq 0 ]]; then
@@ -158,7 +168,7 @@ render_prompt() {
 
 collect_status_snapshot() {
   local output_file="$1"
-  git status --porcelain=1 -z > "${output_file}"
+  git -C "${REPO_ROOT}" status --porcelain=1 -z > "${output_file}"
 }
 
 diff_new_files() {
@@ -291,12 +301,12 @@ while IFS= read -r task_path; do
       if [[ ${#filtered_files[@]} -eq 0 ]]; then
         echo "⚠️  No valid files detected after filtering; skipping commit."
       else
-        git add -- "${filtered_files[@]}"
-        if git diff --cached --quiet; then
+        git -C "${REPO_ROOT}" add -- "${filtered_files[@]}"
+        if git -C "${REPO_ROOT}" diff --cached --quiet; then
           echo "⚠️  No staged changes detected after add; skipping commit."
         else
           commit_msg="feat(agent-api): automated task ${task_number}"
-          git commit -m "${commit_msg}"
+          git -C "${REPO_ROOT}" commit -m "${commit_msg}"
           echo "💾 Committed ${#filtered_files[@]} file(s) for ${task_name}."
         fi
       fi
