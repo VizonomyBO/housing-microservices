@@ -263,9 +263,32 @@ class AgentState(TypedDict):
 - **Data contract**: `attachment_scope.documents[]` carries canonical name, scope, language, visibility, and provenance flags (`auto_attached`, `read_only`). `attachment_scope.workflows[]` surfaces workflow domain/version/status metadata so WorkflowPlanner can diff against cached plans without another DB hit.
 
 #### **Router**
-- **Function**: `route_request(state: AgentState) -> dict`
-- **Logic**: Uses **GPT-5-mini** to classify intent.
-- **Output**: Updates `route` and `route_confidence`.
+- **Function**: `RouterNode(state: AgentState) -> dict`
+- **Logic**:
+    1. Run `GuardrailEngine` (`services/agent-api/src/guardrails/engine.py`) using the declarative policy in `src/guardrails/policy.py`. Violations populate `state.guardrail_findings`; blocking issues immediately set `route=escalate` and `next_subgraph=human_gate`.
+    2. When guardrails pass, deterministically rank intents via:
+        - `normalized_input.intent_tags` (`route:<hint>`) — yields 0.9 confidence and short-circuits classification.
+        - Keyword heuristics (`calculate`, `plan`, `image`, etc.) plus digit density.
+        - `workflow_plan.steps[].tool_hints` (e.g., `polars`, `vision`) to reinforce Numerical/Vision routes.
+    3. Emit structured output with `route`, `route_confidence`, `router_reason`, and `next_subgraph` aligning to LangGraph node names (`informational_subgraph`, `analyst_subgraph`, `numerical_subgraph`, `vision_subgraph`, `human_gate`).
+- **Implementation**: `services/agent-api/src/nodes/router/router_node.py` with tests in `tests/router/test_router_node.py`.
+- **Sample output**:
+
+```jsonc
+{
+  "route": "numerical",
+  "route_confidence": 0.9,
+  "router_reason": "hint",
+  "next_subgraph": "numerical_subgraph",
+  "guardrails_passed": true,
+  "guardrail_findings": [],
+  "cache_metadata": {"cache_key": "agent-api:retrieval:conv-7:route-numerical:..."}
+}
+```
+
+- Task 07 (CacheWriter) inspects `cache_metadata` + `route`, while Task 08 (HumanGate) relies on `guardrails_passed` + `guardrail_findings` to determine whether to pause the graph.
+
+- **Future hooks**: TODO Task 12 wires SSE telemetry (`router_decision` event) + Prometheus counters. Guardrail docs live in `docs/security/guardrails.md` / `docs/security/prompt_policy.md`.
 
 #### **Retrieval Orchestrator (Subgraph)**
 This is a crucial component handling the "RAG" part.

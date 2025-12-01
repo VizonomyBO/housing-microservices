@@ -16,6 +16,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
+from guardrails.models import GuardrailViolation, RouterRoute
 from models.retrieval import AttachmentScope, NormalizedInput
 
 
@@ -351,6 +352,32 @@ class AgentState(BaseModel):
         default_factory=CacheMetadata,
         description="Valkey interaction metadata used for observability (docs/overview/system_architecture.md §3).",
     )
+    route: RouterRoute | None = Field(
+        default=None,
+        description="Router decision emitted by Task 06 (docs/epics/03.md Task 3.3).",
+    )
+    route_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score attached to the router decision.",
+    )
+    next_subgraph: str | None = Field(
+        default=None,
+        description="Graph node identifier scheduled to run next (HumanGate when guardrails fail).",
+    )
+    router_reason: str | None = Field(
+        default=None,
+        description="Short explanation of the heuristic/intent used to classify the route.",
+    )
+    guardrail_findings: list[GuardrailViolation] = Field(
+        default_factory=list,
+        description="Structured guardrail violations/warnings surfaced to HumanGate (Task 06).",
+    )
+    guardrails_passed: bool = Field(
+        default=True,
+        description="Indicates whether blocking guardrail violations were found.",
+    )
     retrieval_metrics: RetrievalMetrics = Field(
         default_factory=RetrievalMetrics,
         description="Hybrid retrieval telemetry forwarded via SSE metrics (docs/agents/implementation.md §3.2).",
@@ -428,9 +455,11 @@ __all__ = [
     "GraphRelationSummary",
     "GraphSummary",
     "GraphSummarySection",
+    "GuardrailViolation",
     "MessageSnapshot",
     "NormalizedInput",
     "RetrievalMetrics",
+    "RouterRoute",
     "VisionFinding",
     "WorkflowPlan",
     "WorkflowPlanStep",

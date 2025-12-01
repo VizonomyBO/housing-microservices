@@ -445,10 +445,12 @@ flowchart TB
 
 **Cross-cutting**: CacheReturn, Guardrails, ErrorHandler/Retry, RateLimiter
 
+**Router + Guardrails**: `services/agent-api/src/nodes/router/router_node.py` now runs `GuardrailEngine` (policy defined in `src/guardrails/policy.py`) before emitting any route. Violations populate `state.guardrail_findings` and automatically set `next_subgraph = human_gate`, ensuring HumanGate (Task 08) has everything it needs. Clean runs classify via intent tags, workflow hints, and keyword heuristics—no LLM dependency—keeping routing deterministic and cache-friendly.
+
 #### 2.2.5. Control Flow
 
 - **Entry/Exit**: START → InputNormalizer; cache hit → CacheReturn → END  
-- **Routing**: SessionLoader → Router; low confidence triggers human-in-the-loop interrupt  
+- **Routing**: SessionLoader → Router; guardrail failures or low confidence trigger HumanGate/interrupts  
 - **Retrieval**: Score thresholds trigger expansion, keyword fallback, or filter relaxation; bounded loops  
 - **Tools**: Enforces single tool call per loop iteration  
 - **Verification**: Failed citations trigger targeted retrieval repair with retry limits; graceful degradation on exhaustion  
