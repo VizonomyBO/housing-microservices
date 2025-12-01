@@ -255,16 +255,12 @@ while IFS= read -r task_path; do
   fi
   task_name="$(basename "${task_path}")"
   task_number="$(echo "${task_name}" | grep -oE '[0-9]+')"
+  plan_path="${SCRIPT_DIR}/TASK_${task_number}_PLAN.md"
 
   echo "---------------------------------------------------"
   echo "🚀 Starting ${task_name}"
 
   prompt_text="$(render_prompt "${PROMPT_BODY}" "${task_path}")"
-
-  echo "📝 Prompt to Codex:"
-  echo "----------------------------------------"
-  printf "%s\n" "${prompt_text}"
-  echo "----------------------------------------"
 
   tmp_before="$(mktemp)"
   collect_status_snapshot "${tmp_before}"
@@ -273,15 +269,29 @@ while IFS= read -r task_path; do
   mkdir -p "${log_dir}"
   log_file="${log_dir}/codex.log"
 
+  {
+    printf "===== PROMPT (%s) =====\n" "${task_name}"
+    printf "%s\n" "${prompt_text}"
+    printf "===== END PROMPT =====\n\n"
+  } >> "${log_file}"
+  echo "📝 Prompt for ${task_name} recorded in ${log_file}"
+
   if (( DRY_RUN )); then
     echo "[dry-run] Skipping Codex execution for ${task_name}."
   else
-    echo "📁 Streaming Codex output to ${log_file}".
-    if ! "${CODEX_CMD_ARR[@]}" "${CODEX_FLAGS_ARR[@]}" "${prompt_text}" > >(stdbuf -oL tee -a "${log_file}" >/dev/null) 2> >(stdbuf -oL tee -a "${log_file}" >&2); then
+    echo "📁 Logging Codex output to ${log_file}"
+    if ! {
+      "${CODEX_CMD_ARR[@]}" "${CODEX_FLAGS_ARR[@]}" "${prompt_text}"
+    } >>"${log_file}" 2>&1; then
       echo "❌ Codex failed on ${task_name}. Aborting to avoid cascading errors. See ${log_file}." >&2
       rm -f "${tmp_before}"
       exit 1
     fi
+  fi
+
+  if [[ -f "${plan_path}" ]]; then
+    rm -f "${plan_path}"
+    echo "🧹 Removed ${plan_path} after ${task_name}"
   fi
 
   tmp_after="$(mktemp)"

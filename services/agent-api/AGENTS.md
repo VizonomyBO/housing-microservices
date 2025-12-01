@@ -11,7 +11,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 ## 1. Always Plan → Research → Act → Verify
 
 ### Plan
-1. **Create a task-specific plan file** before touching code: `services/agent-api/TASK_<id>_PLAN.md`. Summarize the request, impacted files, risks, and ordered steps referencing the relevant epic task doc. Plans are auto-approved—note that in the file and proceed immediately.
+1. **Create a task-specific plan file** before touching code: `services/agent-api/TASK_<id>_PLAN.md`. Summarize the request, impacted files, risks, and ordered steps referencing the relevant epic task doc. Plans are auto-approved—note that in the file and proceed immediately, then treat the plan as ephemeral (delete it when the task is done).
 
 ### Research (prioritize external validation)
 - For every open question, **start with web research and Context7 documentation**. Capture the sources (URLs or doc IDs) inside the plan so reviewers see what informed the decisions.
@@ -26,7 +26,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 ### Verify
 1. **Run the standard command suite** (see §3) every time you reach a review-ready state.
 2. When DB interactions exist, rely on the shared data layer test harness and Testcontainers; never spin up Docker manually.
-3. After successful verification, remove the tracker file and document the commands/output in your final response along with links to affected files.
+3. After successful verification, remove both the tracker file and the plan file, then document the commands/output in your final response along with links to affected files.
 4. Update `services/agent-api/epic-03/CHECKLIST.md` to reflect the newly completed task (mark checkbox, add notes, or reorganize downstream tasks if scope changed).
 
 ---
@@ -112,7 +112,7 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 3. At the end of the task:
    - Ensure all steps are checked.
    - Copy any important retrospectives into the final response or task doc.
-   - Delete the tracker file to keep the workspace clean (document the deletion in your summary).
+   - Delete the tracker file **and** the associated plan (`TASK_<id>_PLAN.md`) to keep the workspace clean (document the deletions in your summary).
 4. Update the Epic 3 checklist entry corresponding to the completed work, including cross-links to code/doc changes or explaining any reordering/removal.
 
 ---
@@ -120,7 +120,7 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 ## 8. Definition of Done
 
 A task is complete only when:
-1. Plan + tracker workflow followed (tracker removed afterward).
+1. Plan + tracker workflow followed (both files removed afterward).
 2. All required docs/tests/code changes are committed.
 3. Commands in §3 succeeded locally; include summaries in the final response.
 4. `services/agent-api/epic-03/CHECKLIST.md` reflects the new status.
