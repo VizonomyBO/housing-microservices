@@ -57,54 +57,136 @@ usermod -aG docker ec2-user
 docker compose version
 
 # =============================================================================
-# 2. CLONE REPOSITORY
+# 2. CLONE REPOSITORIES
 # =============================================================================
-echo "[2/6] Cloning repository..."
+echo "[2/8] Cloning repositories..."
 mkdir -p $APP_DIR
 
-if [ -n "$GIT_REPO" ]; then
-    # Configure git credentials for private repos
-    if [ -n "$GIT_TOKEN" ]; then
-        # Extract host from repo URL and configure credential helper
-        GIT_HOST=$(echo "$GIT_REPO" | sed -n 's#.*://\([^/]*\)/.*#\1#p')
-        if [ -z "$GIT_HOST" ]; then
-            GIT_HOST="github.com"  # Default for ssh-style URLs
-        fi
-        
-        # Store credentials securely
-        git config --global credential.helper store
-        echo "https://git:$GIT_TOKEN@$GIT_HOST" > /root/.git-credentials
-        chmod 600 /root/.git-credentials
-        
-        # Convert SSH URL to HTTPS if needed
-        if [[ "$GIT_REPO" == git@* ]]; then
-            GIT_REPO=$(echo "$GIT_REPO" | sed 's#git@\([^:]*\):#https://\1/#')
-        fi
-        
-        echo "  Using token authentication for private repo"
+# Configure git credentials for private repos (if token provided)
+if [ -n "$GIT_TOKEN" ]; then
+    # Extract host from repo URL and configure credential helper
+    GIT_HOST=$(echo "$GIT_REPO" | sed -n 's#.*://\([^/]*\)/.*#\1#p')
+    if [ -z "$GIT_HOST" ]; then
+        GIT_HOST="github.com"  # Default for ssh-style URLs
     fi
     
-    git clone --branch $GIT_BRANCH --depth 1 $GIT_REPO $WORK_DIR
+    # Store credentials securely
+    git config --global credential.helper store
+    echo "https://git:$GIT_TOKEN@$GIT_HOST" > /root/.git-credentials
+    chmod 600 /root/.git-credentials
     
     # Store credentials for ec2-user too (for deploy.sh)
-    if [ -n "$GIT_TOKEN" ]; then
-        mkdir -p /home/ec2-user
-        cp /root/.git-credentials /home/ec2-user/.git-credentials
-        chown ec2-user:ec2-user /home/ec2-user/.git-credentials
-        chmod 600 /home/ec2-user/.git-credentials
-        sudo -u ec2-user git config --global credential.helper store
+    mkdir -p /home/ec2-user
+    cp /root/.git-credentials /home/ec2-user/.git-credentials
+    chown ec2-user:ec2-user /home/ec2-user/.git-credentials
+    chmod 600 /home/ec2-user/.git-credentials
+    sudo -u ec2-user git config --global credential.helper store
+    
+    echo "  Using token authentication for private repos"
+fi
+
+# Clone main backend repository
+if [ -n "$GIT_REPO" ]; then
+    # Convert SSH URL to HTTPS if needed
+    MAIN_REPO="$GIT_REPO"
+    if [[ "$MAIN_REPO" == git@* ]]; then
+        MAIN_REPO=$(echo "$MAIN_REPO" | sed 's#git@\([^:]*\):#https://\1/#')
     fi
+    
+    git clone --branch $GIT_BRANCH --depth 1 $MAIN_REPO $WORK_DIR
 else
     mkdir -p $WORK_DIR
     aws s3 cp s3://$S3_BUCKET/configs/docker-compose.yml $WORK_DIR/docker-compose.yml
 fi
 
+# Clone frontend repository
+FRONTEND_REPO="https://github.com/VizonomyBO/housing-frontend"
+FRONTEND_DIR="$APP_DIR/frontend"
+
+echo "  Cloning frontend repository..."
+if [[ "$FRONTEND_REPO" == git@* ]]; then
+    FRONTEND_REPO=$(echo "$FRONTEND_REPO" | sed 's#git@\([^:]*\):#https://\1/#')
+fi
+
+git clone --depth 1 $FRONTEND_REPO $FRONTEND_DIR || {
+    echo "  Warning: Failed to clone frontend repo, continuing..."
+    mkdir -p $FRONTEND_DIR
+}
+
 cd $WORK_DIR
 
 # =============================================================================
-# 3. CREATE ENVIRONMENT FILE
+# 3. CREATE FRONTEND ENVIRONMENT FILE
 # =============================================================================
-echo "[3/6] Creating environment file..."
+echo "[3/8] Creating frontend environment file..."
+if [ -d "$FRONTEND_DIR" ]; then
+    # Use relative URLs since frontend and API are served from the same nginx instance
+    # This works regardless of IP/domain changes and is more flexible
+    AUTH_URL="/api/auth"
+    USER_URL="/api/users"
+    
+    # Create frontend .env file
+    cat > $FRONTEND_DIR/.env << EOF
+# Frontend Environment Variables
+# Public content S3 bucket
+VITE_PUBLIC_CONTENT_URL=https://housing-public-content.s3.us-east-1.amazonaws.com
+
+# API endpoints (via nginx proxy - relative URLs work since same domain)
+VITE_BASE_AUTH_URL=$AUTH_URL
+VITE_BASE_USER_URL=$USER_URL
+EOF
+    
+    chmod 644 $FRONTEND_DIR/.env
+    echo "  Created frontend .env file with nginx proxy URLs"
+else
+    echo "  Frontend directory not found, skipping .env creation"
+fi
+
+# =============================================================================
+# 4. BUILD FRONTEND (if needed)
+# =============================================================================
+echo "[4/8] Building frontend..."
+if [ -d "$FRONTEND_DIR" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
+    cd $FRONTEND_DIR
+    
+    # Install Node.js 20+ if not present (for frontend build - React Router requires Node 20+)
+    if ! command -v node &> /dev/null; then
+        echo "  Installing Node.js 20..."
+        # Install Node.js 20 from NodeSource
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+        dnf install -y nodejs
+    else
+        # Check if Node version is >= 20, upgrade if needed
+        NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [ "$NODE_VERSION" -lt 20 ]; then
+            echo "  Upgrading Node.js to version 20..."
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            dnf install -y nodejs
+        fi
+    fi
+    
+    # Install dependencies and build
+    echo "  Installing frontend dependencies..."
+    npm install --production=false || npm install
+    
+    # Build frontend (common build commands)
+    if [ -f "$FRONTEND_DIR/package.json" ]; then
+        echo "  Building frontend..."
+        # Try common build scripts
+        npm run build 2>/dev/null || npm run build:prod 2>/dev/null || {
+            echo "  Warning: No build script found, assuming pre-built or different structure"
+        }
+    fi
+else
+    echo "  Frontend directory not found or no package.json, skipping build"
+fi
+
+cd $WORK_DIR
+
+# =============================================================================
+# 5. CREATE BACKEND ENVIRONMENT FILE
+# =============================================================================
+echo "[5/8] Creating backend environment file..."
 cat > $WORK_DIR/.env << EOF
 # Database Configuration (two databases on same postgres instance)
 # - housing: shared_data_layer (documents, chunks, knowledge graph)
@@ -126,9 +208,26 @@ EOF
 chmod 600 $WORK_DIR/.env
 
 # =============================================================================
-# 4. CONFIGURE NGINX
+# 6. CONFIGURE NGINX
 # =============================================================================
-echo "[4/6] Configuring Nginx..."
+echo "[6/8] Configuring Nginx..."
+
+# Ensure frontend directory has correct permissions for nginx
+if [ -d "$FRONTEND_DIR" ]; then
+    echo "  Setting frontend directory permissions..."
+    chown -R nginx:nginx $FRONTEND_DIR 2>/dev/null || chown -R root:root $FRONTEND_DIR
+    chmod -R 755 $FRONTEND_DIR
+    
+    # Find and set permissions on build directory
+    for build_dir in dist build public out; do
+        if [ -d "$FRONTEND_DIR/$build_dir" ]; then
+            chown -R nginx:nginx "$FRONTEND_DIR/$build_dir" 2>/dev/null || chown -R root:root "$FRONTEND_DIR/$build_dir"
+            chmod -R 755 "$FRONTEND_DIR/$build_dir"
+            echo "  Found build directory: $build_dir"
+        fi
+    done
+fi
+
 # Replace main nginx.conf (our config is a full config, not a partial)
 aws s3 cp s3://$S3_BUCKET/configs/nginx.conf /etc/nginx/nginx.conf
 nginx -t
@@ -136,9 +235,9 @@ systemctl start nginx
 systemctl enable nginx
 
 # =============================================================================
-# 5. CREATE SYSTEMD SERVICE (auto-restart on reboot)
+# 7. CREATE SYSTEMD SERVICE (auto-restart on reboot)
 # =============================================================================
-echo "[5/6] Creating systemd service..."
+echo "[7/8] Creating systemd service..."
 cat > /etc/systemd/system/vizonomy.service << EOF
 [Unit]
 Description=Vizonomy Microservices
@@ -161,9 +260,9 @@ systemctl daemon-reload
 systemctl enable vizonomy.service
 
 # =============================================================================
-# 6. BUILD AND START ALL SERVICES
+# 8. BUILD AND START ALL SERVICES
 # =============================================================================
-echo "[6/6] Building and starting all services..."
+echo "[8/8] Building and starting all services..."
 cd $WORK_DIR
 
 # Build all images (using docker compose v2)
@@ -190,49 +289,32 @@ sleep 30
 # =============================================================================
 # HELPER SCRIPTS
 # =============================================================================
-cat > $APP_DIR/deploy.sh << 'SCRIPT'
+cat > $APP_DIR/deploy.sh << 'EOF'
 #!/bin/bash
 set -e
-cd /opt/vizonomy/repo
-echo "📦 Pulling latest code..."
-git pull
-echo "🔨 Building images..."
-docker compose build --parallel
-echo "🚀 Restarting services (database volume preserved)..."
-docker compose up -d
-echo "✅ Deployment complete! Database data preserved."
-SCRIPT
+cd /opt/vizonomy/repo && git pull
+cd /opt/vizonomy/frontend && git pull 2>/dev/null || true
+cat > /opt/vizonomy/frontend/.env << E
+VITE_PUBLIC_CONTENT_URL=https://housing-public-content.s3.us-east-1.amazonaws.com
+VITE_BASE_AUTH_URL=/api/auth
+VITE_BASE_USER_URL=/api/users
+E
+[ -f package.json ] && npm install && npm run build 2>/dev/null || true
+cd /opt/vizonomy/repo && docker compose build --parallel && docker compose up -d
+EOF
 
-# DANGEROUS: Only use if you really want to wipe the database
-cat > $APP_DIR/reset-db.sh << 'SCRIPT'
-#!/bin/bash
-echo "⚠️  WARNING: This will DELETE ALL DATABASE DATA!"
-read -p "Type 'DELETE' to confirm: " confirm
-if [ "$confirm" = "DELETE" ]; then
-    cd /opt/vizonomy/repo
-    docker compose down -v
-    docker compose up -d
-    echo "Database wiped and recreated."
-else
-    echo "Cancelled."
-fi
-SCRIPT
-
-cat > $APP_DIR/logs.sh << 'SCRIPT'
+cat > $APP_DIR/logs.sh << 'EOF'
 #!/bin/bash
 cd /opt/vizonomy/repo && docker compose logs -f "$@"
-SCRIPT
+EOF
 
-cat > $APP_DIR/status.sh << 'SCRIPT'
+cat > $APP_DIR/status.sh << 'EOF'
 #!/bin/bash
-echo "=== Services ==="
 cd /opt/vizonomy/repo && docker compose ps
-echo ""
-echo "=== Health Checks ==="
 curl -sf http://localhost:5001/health && echo " ✅ Auth" || echo " ❌ Auth"
-curl -sf http://localhost:5002/v1/health && echo " ✅ Users" || echo " ❌ Users"  
+curl -sf http://localhost:5002/v1/health && echo " ✅ Users" || echo " ❌ Users"
 curl -sf http://localhost:3000/health && echo " ✅ Swagger" || echo " ❌ Swagger"
-SCRIPT
+EOF
 
 chmod +x $APP_DIR/*.sh
 chown -R ec2-user:ec2-user $APP_DIR
