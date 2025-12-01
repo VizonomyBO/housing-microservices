@@ -1,0 +1,70 @@
+[project]
+name = "agent-api"
+version = "0.1.0"
+description = "LangGraph agent microservice"
+requires-python = ">=3.13"
+dependencies = [
+  "langchain-core>=0.2.33",
+  "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+  "pytest-xdist>=3.6.0",
+  "ruff>=0.6.0",
+  "ty>=0.0.1a28",
+]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+xfail_strict = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID", "UP", "N", "B", "A", "C4", "DTZ", "T10", "ISC", "ICN", "PIE", "PT", "RET", "SIM", "ARG", "PTH", "PL", "RUF"]
+ignore = [
+  "E501",
+  "PLR0913",
+  "PLR2004",
+  "ISC001",
+  "PLR0911",
+  "PLR0915",
+  "DTZ003",
+  "DTZ006",
+  "N818",
+  "RET504",
+  "ARG001",
+  "ARG002",
+  "ARG003",
+  "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2.0",
+  "pytest-xdist>=3.6.0",
+  "ruff>=0.6.0",
+  "ty>=0.0.1a28",
+]
