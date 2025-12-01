@@ -382,6 +382,122 @@ resource "aws_cloudwatch_log_group" "table_normalizer" {
 }
 
 # =============================================================================
+# LAMBDA: Figure Captioner (Placeholder)
+# =============================================================================
+
+data "archive_file" "figure_captioner" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/figure_captioner"
+  output_path = "${path.module}/lambdas/figure_captioner.zip"
+}
+
+resource "aws_lambda_function" "figure_captioner" {
+  function_name = "${var.project_name}-figure-captioner-${var.environment}"
+  role          = aws_iam_role.marker_converter_lambda.arn
+
+  filename         = data.archive_file.figure_captioner.output_path
+  source_code_hash = data.archive_file.figure_captioner.output_base64sha256
+
+  runtime     = "python3.12"
+  handler     = "handler.handler"
+  timeout     = 30
+  memory_size = 128
+
+  tags = {
+    Name        = "${var.project_name}-figure-captioner-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
+
+# =============================================================================
+# LAMBDA: Embedding Writer (Placeholder)
+# =============================================================================
+
+data "archive_file" "embedding_writer" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/embedding_writer"
+  output_path = "${path.module}/lambdas/embedding_writer.zip"
+}
+
+resource "aws_lambda_function" "embedding_writer" {
+  function_name = "${var.project_name}-embedding-writer-${var.environment}"
+  role          = aws_iam_role.marker_converter_lambda.arn
+
+  filename         = data.archive_file.embedding_writer.output_path
+  source_code_hash = data.archive_file.embedding_writer.output_base64sha256
+
+  runtime     = "python3.12"
+  handler     = "handler.handler"
+  timeout     = 60
+  memory_size = 256
+
+  tags = {
+    Name        = "${var.project_name}-embedding-writer-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
+
+# =============================================================================
+# LAMBDA: Index Refresher (Placeholder)
+# =============================================================================
+
+data "archive_file" "index_refresher" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/index_refresher"
+  output_path = "${path.module}/lambdas/index_refresher.zip"
+}
+
+resource "aws_lambda_function" "index_refresher" {
+  function_name = "${var.project_name}-index-refresher-${var.environment}"
+  role          = aws_iam_role.marker_converter_lambda.arn
+
+  filename         = data.archive_file.index_refresher.output_path
+  source_code_hash = data.archive_file.index_refresher.output_base64sha256
+
+  runtime     = "python3.12"
+  handler     = "handler.handler"
+  timeout     = 30
+  memory_size = 128
+
+  tags = {
+    Name        = "${var.project_name}-index-refresher-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
+
+# =============================================================================
+# LAMBDA: Ingestion Finalizer
+# =============================================================================
+
+data "archive_file" "ingestion_finalizer" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/ingestion_finalizer"
+  output_path = "${path.module}/lambdas/ingestion_finalizer.zip"
+}
+
+resource "aws_lambda_function" "ingestion_finalizer" {
+  function_name = "${var.project_name}-ingestion-finalizer-${var.environment}"
+  role          = aws_iam_role.marker_converter_lambda.arn
+
+  filename         = data.archive_file.ingestion_finalizer.output_path
+  source_code_hash = data.archive_file.ingestion_finalizer.output_base64sha256
+
+  runtime     = "python3.12"
+  handler     = "handler.handler"
+  timeout     = 30
+  memory_size = 128
+
+  tags = {
+    Name        = "${var.project_name}-ingestion-finalizer-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
+
+# =============================================================================
 # OUTPUTS
 # =============================================================================
 

@@ -304,11 +304,15 @@ async def handler(event: dict, context: Any) -> dict:
                         # Mark current document as archived (deduped)
                         document.status = "archived"
                         document.content_hash = content_hash
-                        document.metadata_ = {
-                            **(document.metadata_ or {}),
-                            "deduped_from": str(existing.id),
-                            "dedup_detected_at": datetime.now(timezone.utc).isoformat(),
-                        }
+                        # metadata_ might be a JSON string or dict
+                        existing_meta = document.metadata_
+                        if isinstance(existing_meta, str):
+                            existing_meta = json.loads(existing_meta) if existing_meta else {}
+                        elif existing_meta is None:
+                            existing_meta = {}
+                        existing_meta["deduped_from"] = str(existing.id)
+                        existing_meta["dedup_detected_at"] = datetime.now(timezone.utc).isoformat()
+                        document.metadata_ = json.dumps(existing_meta)
                         
                         # Mark job as succeeded (dedup is a success case)
                         await job_manager.complete_job(job.id)

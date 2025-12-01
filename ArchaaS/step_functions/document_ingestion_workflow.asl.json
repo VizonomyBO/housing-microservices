@@ -247,16 +247,11 @@
     },
     "Embed": {
       "Type": "Task",
-      "Comment": "Generate Voyage AI embeddings and write to PostgreSQL/pgvector",
+      "Comment": "Generate embeddings (placeholder - Task 2.3)",
       "Resource": "${EmbeddingWriterLambdaArn}",
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
-        "access_scope.$": "$.access_scope",
-        "country_code.$": "$.country_code",
-        "chunks_key.$": "$.chunk_result.chunks_key",
-        "table_schemas.$": "$.parallel_results[0].table_result.schema_summaries",
-        "figure_captions.$": "$.parallel_results[1].caption_result.captions",
         "trace_id.$": "$.trace_id"
       },
       "ResultPath": "$.embed_result",
@@ -332,12 +327,11 @@
     },
     "Index": {
       "Type": "Task",
-      "Comment": "Index chunks and refresh materialized views",
+      "Comment": "Index chunks (placeholder - Task 2.3)",
       "Resource": "${IndexRefresherLambdaArn}",
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
-        "chunk_count.$": "$.chunk_result.chunk_count",
         "trace_id.$": "$.trace_id"
       },
       "ResultPath": "$.index_result",
@@ -406,18 +400,12 @@
     },
     "Activate": {
       "Type": "Task",
-      "Comment": "Update document status to active and emit completion event",
+      "Comment": "Update document status to active",
       "Resource": "${IngestionFinalizerLambdaArn}",
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
-        "access_scope.$": "$.access_scope",
-        "content_hash.$": "$.content_hash",
-        "status": "active",
-        "chunk_count.$": "$.chunk_result.chunk_count",
-        "embed_count.$": "$.embed_result.vectors_written",
         "trace_id.$": "$.trace_id",
-        "callback_url.$": "$.callback_url",
         "timestamps": {
           "started_at.$": "$$.Execution.StartTime",
           "completed_at.$": "$$.State.EnteredTime"
