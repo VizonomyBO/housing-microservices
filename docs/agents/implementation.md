@@ -356,6 +356,13 @@ def human_gate(state: AgentState):
 2.  **Stuck Loop**: `retry_counter` exceeds limit in any subgraph.
 3.  **Missing Data**: Retrieval returns 0 results after expansion.
 
+#### 3.4.1 Checkpoint Persistence & HITL Metadata
+
+-   `services/agent-api/src/repositories/agent_checkpoint_repository.py` persists every LangGraph step into `agent_state_checkpoints` using the Task‑01 `AgentState` schema. The adapter serializes `BaseMessage` payloads with LangChain's `message_to_dict` helpers, then rehydrates them by replaying the canonical `messages` table (ordered by `ordinal`, `created_at`). This guarantees that retries and HITL resumptions always see the same transcript the FastAPI gateway stored, even if an older checkpoint JSON omitted a late-arriving message.
+-   Visible documents are stitched into each checkpoint via a join on `conversation_documents` + `documents`, honoring `visibility_override != 'hidden'` as described in `docs/data/schema_and_persistence.md` §3.6. Hidden attachments remain in the bridge for auditing but never leak into LangGraph state, preventing stale scopes from bypassing user removals.
+-   HITL pauses write the `resume_token`, `resume_status`, `hitl_operator_id`, and `interrupt_reason` fields into the checkpoint metadata column. `resume_from_hitl(conversation_id, resume_token)` atomically claims the paused row, clears the token so it cannot be reused, stamps `resumed_at`, and returns a `HydratedCheckpoint` object (state + attachment metadata). Downstream nodes can inspect `hydrated.metadata.consumed_resume_token` to emit SSE resume events or audit logs.
+-   `services/agent-api/src/services/checkpoint_service.py` is the thin orchestration layer LangGraph nodes call: `save_checkpoint` handles routine persistence, while `pause_for_hitl` enforces that an `interrupt_reason` exists and generates a `resume_token` (UUID4) when one isn't supplied. This keeps Task‑08's `HumanGate` node implementation focused on business logic rather than persistence plumbing.
+
 ### 3.5. Rate Limiting & Token Counting
 
 To ensure compliance with global quotas and prevent throttling, all LLM nodes integrate with the **Centralized Rate Limiter SDK** (backed by ElastiCache Valkey).
