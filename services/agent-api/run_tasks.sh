@@ -269,11 +269,16 @@ while IFS= read -r task_path; do
   tmp_before="$(mktemp)"
   collect_status_snapshot "${tmp_before}"
 
+  log_dir="${SCRIPT_DIR}/logs/task_${task_number}"
+  mkdir -p "${log_dir}"
+  log_file="${log_dir}/codex.log"
+
   if (( DRY_RUN )); then
     echo "[dry-run] Skipping Codex execution for ${task_name}."
   else
-    if ! "${CODEX_CMD_ARR[@]}" "${CODEX_FLAGS_ARR[@]}" "${prompt_text}"; then
-      echo "❌ Codex failed on ${task_name}. Aborting to avoid cascading errors." >&2
+    echo "📁 Streaming Codex output to ${log_file}".
+    if ! "${CODEX_CMD_ARR[@]}" "${CODEX_FLAGS_ARR[@]}" "${prompt_text}" > >(stdbuf -oL tee -a "${log_file}" >/dev/null) 2> >(stdbuf -oL tee -a "${log_file}" >&2); then
+      echo "❌ Codex failed on ${task_name}. Aborting to avoid cascading errors. See ${log_file}." >&2
       rm -f "${tmp_before}"
       exit 1
     fi
