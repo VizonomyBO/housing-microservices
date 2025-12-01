@@ -4,7 +4,7 @@ Complete tasks sequentially. Each agent should mark the checkbox upon finishing 
 
 1. - [x] [Task 01 — AgentState Schema Foundation](tasks/task-01-agent-state-schema.md) — Added `src/state/agent_state.py` + tests/state coverage for serialization helpers.
 2. - [x] [Task 02 — Checkpoint Persistence & HITL Metadata](tasks/task-02-checkpoint-persistence.md) — Added checkpoint repository/service + HITL tests.
-3. - [ ] [Task 03 — InputNormalizer & AttachmentScopeLoader Nodes](tasks/task-03-input-normalizer.md)
+3. - [x] [Task 03 — InputNormalizer & AttachmentScopeLoader Nodes](tasks/task-03-input-normalizer.md) — Implemented LangGraph nodes + tests, updated docs + scope hash plumbing.
 4. - [ ] [Task 04 — GraphRetriever & GraphSummarizer Nodes](tasks/task-04-graph-retriever-summarizer.md)
 5. - [ ] [Task 05 — WorkflowPlanner Node & Cache Key Schema](tasks/task-05-workflow-planner-cache.md)
 6. - [ ] [Task 06 — Router Classification & Guardrail Policies](tasks/task-06-router-guardrails.md)

@@ -8,6 +8,14 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import ValidationError
 
+from models.retrieval import (
+    AttachmentDocument,
+    AttachmentReference,
+    AttachmentScope,
+    AttachmentType,
+    NormalizedInput,
+    TenantScope,
+)
 from state.agent_state import (
     AgentState,
     CacheMetadata,
@@ -93,6 +101,49 @@ def test_agent_state_round_trip_serialization() -> None:
         interrupt_reason="HITL clarification",
         checkpoint_id="chkpt-123",
         conversation_id="conv-003",
+        normalized_input=NormalizedInput(
+            normalized_prompt="ready to plan",
+            raw_prompt=" ready to plan  ",
+            language_code="en",
+            language_confidence=0.98,
+            intent_tags=["route:informational"],
+            tenant_scope=TenantScope(
+                conversation_id="conv-003",
+                thread_id="thr-003",
+                session_id="sess-1",
+                owner_user_id="user-1",
+                workspace_id="ws-9",
+                tenant_id="tenant-22",
+                country_code="USA",
+            ),
+            attachment_refs=[
+                AttachmentReference(
+                    asset_type=AttachmentType.DOCUMENT,
+                    asset_id="doc-1",
+                    attach_source="user_upload",
+                    canonical_name="Scope Doc",
+                    access_scope="user_private",
+                    visibility="visible",
+                    read_only=False,
+                    provided_in_request=True,
+                )
+            ],
+            scope_hash="hash-abc",
+            warnings=["trimmed whitespace"],
+        ),
+        attachment_scope=AttachmentScope(
+            documents=[
+                AttachmentDocument(
+                    document_id="doc-1",
+                    canonical_name="Scope Doc",
+                    access_scope="user_private",
+                    language="en",
+                    country_code="USA",
+                    tags=["finance"],
+                    auto_attached=False,
+                )
+            ]
+        ),
         created_at=datetime(2025, 12, 1, tzinfo=UTC),
     )
 
@@ -105,6 +156,10 @@ def test_agent_state_round_trip_serialization() -> None:
     assert rehydrated.workflow_plan.steps[0].key == "coarse.1"
     assert rehydrated.created_at == state.created_at
     assert rehydrated.cache_metadata.hit is True
+    assert rehydrated.normalized_input is not None
+    assert rehydrated.normalized_input.scope_hash == "hash-abc"
+    assert rehydrated.attachment_scope is not None
+    assert rehydrated.attachment_scope.documents[0].document_id == "doc-1"
 
 
 def test_agent_state_from_persistence_validates_required_fields() -> None:

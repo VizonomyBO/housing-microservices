@@ -215,8 +215,52 @@ class AgentState(TypedDict):
     3. Merge explicit attachments from the request payload.
     4. Filter out `visibility="hidden"`, mark `read_only` docs for numerical guardrails, and persist new links / ref-count updates.
     5. Compute `scope_hash = hash(sorted(doc_version_ids + visibility states))` and stash it in state for cache and telemetry.
+    6. Emit `normalized_input` payloads via `services/agent-api/src/nodes/retrieval/input_normalizer_node.py`, including detected language/intent tags, tenant scope metadata, attachment provenance flags, and guardrail warnings to short-circuit Router/HITL logic when users reference hidden assets.
 - **Cache Key**: After normalization, compute `cache_key = hash(country_code, normalized_prompt, scope_hash, route_hint, tool_parameters, retrieval_parameters)` and set `state["cache_hit"]` if Valkey already stores a finalized answer matching that key.
 - **Tools**: None (Pure logic).
+
+**Example** (trimmed for brevity)
+
+```jsonc
+// gateway payload
+{
+  "thread_id": "thr_92aa2",
+  "message": {
+    "content": "  Compare Liberia base docs   ",
+    "attachments": [
+      {"type": "document_reference", "document_id": "doc_user_budget", "visibility": "visible"}
+    ]
+  },
+  "constraints": {"country_code": "LBR", "auto_attach_base_docs": true},
+  "hints": {"route": "analyst"}
+}
+
+// normalized_input stored in AgentState
+{
+  "normalized_prompt": "Compare Liberia base docs",
+  "language_code": "en",
+  "intent_tags": ["route:analyst"],
+  "tenant_scope": {
+    "conversation_id": "thr_92aa2",
+    "thread_id": "thr_92aa2",
+    "country_code": "LBR"
+  },
+  "attachment_refs": [
+    {"asset_type": "document", "document_id": "doc_user_budget", "provided_in_request": true},
+    {"asset_type": "document", "document_id": "doc_base_macro", "auto_attached": true}
+  ],
+  "scope_hash": "37e8…",
+  "warnings": ["Auto-attached 1 base document(s) for LBR"]
+}
+```
+
+**TODOs for follow-up tasks**: plug Valkey cache lookups into the same node (currently only the scope hash is produced) and extend the detector to choose country defaults when conversations omit `constraints.country_code`.
+
+#### **AttachmentScopeLoader**
+- **Function**: `load_attachment_scope(state: AgentState) -> AgentState`
+- **Logic**: Fetch hydrated documents + workflow graphs referenced by `normalized_input.attachment_refs` using shared data layer repositories (`ConversationScopeRepository` + `WorkflowGraphRepository`). Validates each reference is still visible, annotates read-only or missing assets with guardrail warnings, and emits a deterministic `attachment_scope` structure consumed by Retrieval/GraphRetriever nodes.
+- **Implementation**: `services/agent-api/src/nodes/retrieval/attachment_scope_loader_node.py` + `tests/nodes/retrieval/test_attachment_scope_loader_node.py` cover happy-path + missing asset scenarios. Missing docs/workflows populate `attachment_scope.missing_assets` so Router/HITL can request clarification before continuing.
+- **Data contract**: `attachment_scope.documents[]` carries canonical name, scope, language, visibility, and provenance flags (`auto_attached`, `read_only`). `attachment_scope.workflows[]` surfaces workflow domain/version/status metadata so WorkflowPlanner can diff against cached plans without another DB hit.
 
 #### **Router**
 - **Function**: `route_request(state: AgentState) -> dict`

@@ -16,6 +16,8 @@ from typing import Any
 from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
+from models.retrieval import AttachmentScope, NormalizedInput
+
 
 def _utc_now() -> datetime:
     """Return a timezone-aware UTC timestamp."""
@@ -246,6 +248,14 @@ class AgentState(BaseModel):
         default=None,
         description="agent_state_checkpoints.id for the persisted row (docs/data/schema_and_persistence.md §3.6).",
     )
+    normalized_input: NormalizedInput | None = Field(
+        default=None,
+        description="Structured payload emitted by InputNormalizer (epic-03 Task 03).",
+    )
+    attachment_scope: AttachmentScope | None = Field(
+        default=None,
+        description="Hydrated documents/workflows from AttachmentScopeLoader (epic-03 Task 03).",
+    )
     conversation_id: str = Field(
         ...,
         description="FK to conversations.id anchoring this state (docs/data/schema_and_persistence.md §3.6).",
@@ -292,10 +302,12 @@ def agent_state_from_persistence(payload: Mapping[str, Any]) -> AgentState:
 
 __all__ = [
     "AgentState",
+    "AttachmentScope",
     "CacheMetadata",
     "GraphContext",
     "GraphEntitySummary",
     "MessageSnapshot",
+    "NormalizedInput",
     "RetrievalMetrics",
     "VisionFinding",
     "WorkflowPlan",
