@@ -5,9 +5,9 @@ Task focus:
 - Follow ONLY the service-specific guidance in `{{AGENT_GUIDE}}`; ignore AGENTS or rules files from other packages.
 
 Non-negotiable workflow (enforced by `{{AGENT_GUIDE}}` and shared-data-layer best practices):
-1. **Plan** – Draft `services/agent-api/TASK_{{TASK_NUMBER}}_PLAN.md` summarizing scope, risks, doc references, and ordered steps. Share it for approval before coding.
+1. **Plan** – Draft `services/agent-api/TASK_{{TASK_NUMBER}}_PLAN.md` summarizing scope, risks, doc references, and ordered steps. Note that the plan is auto-approved and proceed immediately.
 2. **Research first** – Prioritize external validation. Use web search + Context7 to confirm design/library details (cache, LangGraph, Valkey, Prometheus, uv, etc.) and cite sources in the plan so reviewers can verify and hallucinations are avoided.
-3. **Act with a tracker** – After plan approval, create `services/agent-api/TASK_{{TASK_NUMBER}}_TRACKER.md`, copy the plan steps, and check them off as work progresses. Keep the tracker current until the task is complete, then delete it before finishing.
+3. **Act with a tracker** – Immediately create `services/agent-api/TASK_{{TASK_NUMBER}}_TRACKER.md`, copy the plan steps, and check them off as work progresses. Keep the tracker current until the task is complete, then delete it before finishing.
 4. **Follow the shared workflow** – Reuse `packages/shared_data_layer` for every DB access, use Testcontainers when tests touch the DB, prefer web/context7-researched solutions, and update `services/agent-api/epic-03/CHECKLIST.md` plus any impacted task docs when scope changes.
 5. **Verify** – From `services/agent-api`, run (at minimum)  
    `uv run ruff format .`  
