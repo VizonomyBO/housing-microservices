@@ -23,3 +23,7 @@ class InputNormalizationError(NodeError):
 
 class AttachmentValidationError(NodeError):
     """Raised when attachment visibility or scope checks fail."""
+
+
+class WorkflowPlanningError(NodeError):
+    """Raised when WorkflowPlanner cannot materialize a workflow plan."""

@@ -81,6 +81,8 @@ def test_agent_state_round_trip_serialization() -> None:
                     tool_hints=["RAGTool"],
                 )
             ],
+            diff_summary={"added_nodes": ["coarse.1"]},
+            prerequisites=['country_code:"USA"'],
         ),
         cache_metadata=CacheMetadata(schema_version=1, cache_key="cache-abc", hit=True),
         retrieval_metrics=RetrievalMetrics(
@@ -154,6 +156,8 @@ def test_agent_state_round_trip_serialization() -> None:
     assert rehydrated.messages[0].message.content == "ready to plan"
     assert rehydrated.workflow_plan is not None
     assert rehydrated.workflow_plan.steps[0].key == "coarse.1"
+    assert rehydrated.workflow_plan.diff_summary == {"added_nodes": ["coarse.1"]}
+    assert rehydrated.workflow_plan.prerequisites == ['country_code:"USA"']
     assert rehydrated.created_at == state.created_at
     assert rehydrated.cache_metadata.hit is True
     assert rehydrated.normalized_input is not None

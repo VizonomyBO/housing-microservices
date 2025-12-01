@@ -744,3 +744,9 @@ hash(
 )
 
 **Operations**: Cache check after InputNormalizer; write-through after finalization
+
+**Implementation Notes**
+
+- `services/agent-api/src/cache/cache_keys.py::build_retrieval_cache_key` now enforces the concrete namespace `agent-api:retrieval:{conversation}:{intent}:{workflow_version}:{docs_sha256}`. Conversation/intent/workflow components are slugified and lowercased, while the trailing document fingerprint is `SHA256("|".join(sorted(content_hashes_or_ids)))`, preventing attachment order or casing from fragmenting the cache.
+- WorkflowPlanner writes the computed key to `AgentState.cache_metadata` before Router executes, so downstream nodes only need to call `ValkeyCacheClientProtocol.tag_hit` / `tag_miss` instead of recomputing keys.
+- TTL is pinned to 48 hours for workflow/retrieval entries (aligning with §3.3’s Valkey sizing notes). When `workflow_version_diffs` publishes a newer `to_version` or attachment scope hashes change, the namespaced key automatically shifts because the normalized `workflow_version`/doc fingerprint portion changes, delivering deterministic invalidation without bespoke purge scripts.

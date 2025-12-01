@@ -6,7 +6,7 @@ Complete tasks sequentially. Each agent should mark the checkbox upon finishing 
 2. - [x] [Task 02 — Checkpoint Persistence & HITL Metadata](tasks/task-02-checkpoint-persistence.md) — Added checkpoint repository/service + HITL tests.
 3. - [x] [Task 03 — InputNormalizer & AttachmentScopeLoader Nodes](tasks/task-03-input-normalizer.md) — Implemented LangGraph nodes + tests, updated docs + scope hash plumbing.
 4. - [x] [Task 04 — GraphRetriever & GraphSummarizer Nodes](tasks/task-04-graph-retriever-summarizer.md) — Added graph data utilities + LangGraph nodes, TTL/telemetry plumbing, tests, and doc updates.
-5. - [ ] [Task 05 — WorkflowPlanner Node & Cache Key Schema](tasks/task-05-workflow-planner-cache.md)
+5. - [x] [Task 05 — WorkflowPlanner Node & Cache Key Schema](tasks/task-05-workflow-planner-cache.md) — WorkflowPlanner node, cache helper/stub, docs/tests added (2025-12-01).
 6. - [ ] [Task 06 — Router Classification & Guardrail Policies](tasks/task-06-router-guardrails.md)
 7. - [ ] [Task 07 — CacheWriter & Response Serialization](tasks/task-07-cache-writer.md)
 8. - [ ] [Task 08 — HumanGate Pause/Resume Node](tasks/task-08-human-gate.md)

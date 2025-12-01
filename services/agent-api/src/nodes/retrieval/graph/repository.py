@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from uuid import UUID
 from typing import Protocol
+from uuid import UUID
 
 from shared_data_layer.db.models import (
     GraphEdge,
@@ -31,8 +31,7 @@ class GraphRepositoryProtocol(Protocol):
         *,
         filters: GraphFilterContext,
         settings: GraphRefreshSettings,
-    ) -> GraphRetrievalResult:
-        ...
+    ) -> GraphRetrievalResult: ...
 
 
 @dataclass(slots=True)

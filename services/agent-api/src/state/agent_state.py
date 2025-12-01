@@ -203,6 +203,14 @@ class WorkflowPlan(BaseModel):
         default_factory=list,
         description="Ordered list of actionable steps for subgraphs/HITL reviewers.",
     )
+    diff_summary: dict[str, Any] | None = Field(
+        default=None,
+        description="workflow_version_diffs projection or change_log for cache invalidation docs/epics/03.md Task 3.2.",
+    )
+    prerequisites: list[str] = Field(
+        default_factory=list,
+        description="Flattened list of unique preconditions to surface plan-level dependencies.",
+    )
 
 
 class CacheMetadata(BaseModel):

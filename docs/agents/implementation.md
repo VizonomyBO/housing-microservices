@@ -327,6 +327,27 @@ This is a crucial component handling the "RAG" part.
 ```
 
         -   WorkflowPlanner reuses the structured sections in prompts to keep citations ordered and deterministic.
+        -   Cache keys for WorkflowPlanner are minted via `services/agent-api/src/cache/cache_keys.py::build_retrieval_cache_key`, producing strings shaped like `agent-api:retrieval:{conversation_id}:{intent}:{workflow_version}:{docs_sha256}`. Document hashes are lowercased, sorted, and hashed (SHA-256) so attachment reordering or casing differences never fragment the cache. Keys respect the 48-hour Valkey TTL noted in `docs/overview/system_architecture.md §4.3`, and diff refreshes (`workflow_version_diffs.last_refreshed_at`) trigger invalidation by bumping the `workflow_version` component. A sample entry looks like:
+
+```jsonc
+{
+  "cache_key": "agent-api:retrieval:conv-7:route-analyst:v2.1.0:docs-6ce5…",
+  "ttl_seconds": 172800,
+  "workflow_plan": {
+    "plan_id": "graph-1",
+    "version": "v2.1.0",
+    "diff_summary": {"added_nodes": ["coarse.2"], "removed_nodes": []},
+    "prerequisites": ["country_code:\"USA\"", "requires_doc:\"doc-budget\""],
+    "steps": [
+      {"key": "coarse.1", "description": "Assess impact", "tool_hints": ["graph"]},
+      {"key": "mid.1", "description": "Coordinate response", "tool_hints": ["polars"]}
+    ]
+  },
+  "cache_metadata": {"hit": false, "tag": "retrieval"}
+}
+```
+
+        -   Future nodes (Router, CacheWriter) can call `ValkeyCacheClientProtocol.tag_hit/tag_miss` to emit cache observability events without changing the key schema introduced here.
     -   Operational guardrails:
         -   Run nightly **Leiden/Louvain community detection** plus **dynamic PageRank** so GraphRetriever can bias toward influential nodes and fresh clusters (see Memgraph GraphRAG guidance).
         -   Multi-hop traversals are capped (e.g., 3 hops) unless the workflow plan explicitly demands deeper exploration, preventing runaway queries.
