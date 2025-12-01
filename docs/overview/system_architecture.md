@@ -726,6 +726,8 @@ FastAPI Gateway provides RESTful interface:
 
 **Cache TTL**: 48-72 hours for Valkey TTL cache
 
+- Retrieval graph cache: `GraphRefreshSettings` (see `services/agent-api/src/nodes/retrieval/graph/config.py`) defaults to 15 minutes so GraphRetriever only re-queries `graph_hot_entities` / `graph_edge_evidence_rollup` when the attachment scope hash or intent tags change, or the TTL expires. The TTL metadata (`graph_context.fetched_at/expires_at`) lives inside the AgentState payload, keeping refresh decisions deterministic across LangGraph restarts.
+
 **Human-in-the-Loop**: Checkpointer required for interrupts; stable thread_id across resumptions (Not necessary in the first stage)
 
 ### 4.3. Cache Key Generation

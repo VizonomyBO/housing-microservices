@@ -300,10 +300,33 @@ This is a crucial component handling the "RAG" part.
         ```
 
 4.  **GraphRAG + Workflow Graph**:
-    -   **GraphRetriever** queries the pre-built knowledge graph (entity + relationship store with community detection) using the user prompt, reranked hits, and document scope to pull the most relevant nodes/edges.
-    -   **GraphSummarizer** distills those neighborhoods into structured `graph_context` payloads (per-entity facts, cross-document narratives, freshness metadata) that ride alongside `final_context`.
+    -   **GraphRetriever** queries the pre-built knowledge graph (entity + relationship store with community detection) using the user prompt, reranked hits, and document scope to pull the most relevant nodes/edges. The node enforces a TTL-based refresh policy (configurable in `services/agent-api/src/nodes/retrieval/graph/config.py`) so repeated LangGraph runs reuse cached graph context until the scope hash, intent tags, or TTL change. `graph_hot_entities` seeds entity rankings while `graph_edge_evidence_rollup` injects chunk/evidence provenance; both filters honor tenant/attachment scope to avoid surfacing foreign tenants.
+        -   Each run records a telemetry stub (hit/miss) that Task 13 can later wire into Prometheus/OpenTelemetry without changing node internals.
+    -   **GraphSummarizer** distills those neighborhoods into structured `graph_context` payloads (per-entity facts, cross-document narratives, freshness metadata) and a deterministic `graph_summary` prompt. The summarizer respects token budgets (`GraphSummarySettings`) by truncating entities/relations in score order and emits a fallback headline when no graph evidence survives filters.
     -   **WorkflowPlanner** maps the active query onto a workflow graph catalog (coarse→fine troubleshooting sequences) to produce a `workflow_plan` with explicit steps, preconditions, and tool affordances. Analyst/Numerical routes can reuse the plan directly or refine it with HITL feedback.
-    -   Graph artifacts persist in state so downstream nodes consume them deterministically and caches stay valid.
+        -   Graph artifacts persist in state so downstream nodes consume them deterministically and caches stay valid. WorkflowPlanner downstream nodes consume `graph_summary` sections directly; a typical output looks like:
+
+```jsonc
+{
+  "headline": "3 entities linked via 2 relations",
+  "sections": [
+    {
+      "title": "Key entities",
+      "body": "- Grid Stability Taskforce: ... (sources: doc_base_resilience)\n- FEMA Region 7 Ops: ...",
+      "tokens": 112
+    },
+    {
+      "title": "Key relations",
+      "body": "- Grid Stability Taskforce -> FEMA Region 7 Ops [supports] (chunks: chunk_a,chunk_b)",
+      "tokens": 42
+    }
+  ],
+  "scope_hash": "c157a...",
+  "budget_tokens": 400
+}
+```
+
+        -   WorkflowPlanner reuses the structured sections in prompts to keep citations ordered and deterministic.
     -   Operational guardrails:
         -   Run nightly **Leiden/Louvain community detection** plus **dynamic PageRank** so GraphRetriever can bias toward influential nodes and fresh clusters (see Memgraph GraphRAG guidance).
         -   Multi-hop traversals are capped (e.g., 3 hops) unless the workflow plan explicitly demands deeper exploration, preventing runaway queries.

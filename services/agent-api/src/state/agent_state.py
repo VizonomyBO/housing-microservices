@@ -70,9 +70,9 @@ class MessageSnapshot(BaseModel):
 
 
 class GraphEntitySummary(BaseModel):
-    """Lightweight view of graph_entities rows (docs/data/schema_and_persistence.md §3.9)."""
+    """Lightweight view of graph_entities rows (docs/data/schema_and_persistence.md §3.4)."""
 
-    entity_id: str = Field(..., description="UUID referencing graph_entities.id")
+    entity_id: str = Field(..., description="UUID referencing graph_entities.id.")
     label: str = Field(..., description="Human-friendly identifier surfaced to downstream nodes.")
     summary: str | None = Field(
         default=None,
@@ -85,6 +85,48 @@ class GraphEntitySummary(BaseModel):
         default_factory=list,
         description="Provenance documents that mentioned the entity (docs/agents/implementation.md §3.2).",
     )
+    labels: list[str] = Field(
+        default_factory=list,
+        description="Entity labels/tags leveraged for intent filtering.",
+    )
+    country_code: str | None = Field(
+        default=None, description="Country partition used when generating the entity."
+    )
+    owner_user_id: str | None = Field(
+        default=None,
+        description="Owns user scope rows (None indicates base scope).",
+    )
+    hot_rank: int | None = Field(
+        default=None, description="Rank based on graph_hot_entities view ordering."
+    )
+
+
+class GraphRelationSummary(BaseModel):
+    """Edge + evidence rollup passed to downstream prompt builders."""
+
+    relation_id: str = Field(..., description="graph_edges.id for determinism.")
+    source_entity_id: str = Field(..., description="FK to the source entity id.")
+    target_entity_id: str = Field(..., description="FK to the target entity id.")
+    relation_type: str = Field(..., description="graph_edges.edge_type semantics.")
+    directional: bool = Field(default=True, description="Whether the edge is directed.")
+    weight: float | None = Field(
+        default=None, description="Edge weighting used while ranking relations."
+    )
+    evidence_chunk_ids: list[str] = Field(
+        default_factory=list,
+        description="Chunk ids aggregated from graph_edge_evidence_rollup.",
+    )
+    evidence_count: int | None = Field(
+        default=None,
+        description="Number of evidence rows backing the relation.",
+    )
+    last_refreshed_at: datetime | None = Field(
+        default=None,
+        description="Timestamp recorded in graph_edge_evidence_rollup.last_refreshed_at.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Additional edge metadata when available."
+    )
 
 
 class GraphContext(BaseModel):
@@ -94,13 +136,39 @@ class GraphContext(BaseModel):
         default_factory=list,
         description="Graph neighborhoods shipped between retrieval and subgraphs (docs/agents/implementation.md §3.2).",
     )
+    relations: list[GraphRelationSummary] = Field(
+        default_factory=list,
+        description="Edge/evidence rollups derived from graph_edge_evidence_rollup (Task 04).",
+    )
     workflow_plan_version: str | None = Field(
         default=None,
         description="Workflow graph version embedded in cache keys (docs/agents/implementation.md §3.2, docs/overview/system_architecture.md §3).",
     )
     algo_version: str | None = Field(
         default=None,
-        description="Extraction/community detection algorithm version (docs/data/schema_and_persistence.md §3.9).",
+        description="Extraction/community detection algorithm version (docs/data/schema_and_persistence.md §3.4).",
+    )
+    scope_hash: str | None = Field(
+        default=None,
+        description="Hash of attachment scope ensuring GraphContext lines up with current documents.",
+    )
+    intent_tags: list[str] = Field(
+        default_factory=list,
+        description="Intent filters applied when gathering the graph view.",
+    )
+    fetched_at: datetime | None = Field(
+        default=None, description="Timestamp when the graph payload was last hydrated."
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        description="Computed expiry (fetched_at + TTL) used for refresh decisions.",
+    )
+    refresh_ttl_seconds: int | None = Field(
+        default=None, description="TTL applied to the cached graph payload."
+    )
+    telemetry: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Placeholder for retrieval metrics/telemetry emitted alongside the graph cache.",
     )
 
 
@@ -211,6 +279,45 @@ class VisionFinding(BaseModel):
     )
 
 
+class GraphSummarySection(BaseModel):
+    """Single deterministic block emitted by GraphSummarizer."""
+
+    title: str = Field(..., description="Section heading (e.g., Entities, Relations).")
+    body: str = Field(..., description="Plaintext content rendered into prompts.")
+    tokens: int = Field(
+        ge=0,
+        description="Approximate token count for this section (Task 04 token budgeting).",
+    )
+
+
+class GraphSummary(BaseModel):
+    """GraphSummarizer output consumed by downstream prompt builders."""
+
+    headline: str = Field(
+        ..., description="High-level summary for WorkflowPlanner/AnswerSynthesizer."
+    )
+    sections: list[GraphSummarySection] = Field(
+        default_factory=list,
+        description="Ordered prompt fragments with deterministic content ordering.",
+    )
+    total_tokens: int = Field(
+        ge=0,
+        description="Approximate total tokens consumed by the summary.",
+    )
+    budget_tokens: int = Field(
+        ge=0,
+        description="Configured max tokens allowed for the summary.",
+    )
+    fallback_used: bool = Field(
+        default=False,
+        description="Indicates whether the fallback/no-context summary was emitted.",
+    )
+    scope_hash: str | None = Field(
+        default=None,
+        description="Scope hash tied to this summary to keep cache alignment deterministic.",
+    )
+
+
 class AgentState(BaseModel):
     """Primary LangGraph state object persisted via checkpoints (docs/epics/03.md Task 3.1)."""
 
@@ -223,6 +330,10 @@ class AgentState(BaseModel):
     graph_context: GraphContext = Field(
         default_factory=GraphContext,
         description="Graph neighborhoods/workflow versions cached between nodes (docs/agents/implementation.md §3.2).",
+    )
+    graph_summary: GraphSummary | None = Field(
+        default=None,
+        description="GraphSummarizer output used by WorkflowPlanner/AnswerSynthesizer (epic-03 Task 04).",
     )
     workflow_plan: WorkflowPlan | None = Field(
         default=None,
@@ -306,6 +417,9 @@ __all__ = [
     "CacheMetadata",
     "GraphContext",
     "GraphEntitySummary",
+    "GraphRelationSummary",
+    "GraphSummary",
+    "GraphSummarySection",
     "MessageSnapshot",
     "NormalizedInput",
     "RetrievalMetrics",
