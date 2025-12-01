@@ -20,16 +20,16 @@ Define a strongly typed `AgentState` domain model that mirrors LangGraph checkpo
 4. `docs/epics/03.md` (Task 3.1 section) — high-level expectations for this state work.
 
 ## Implementation Scope & Files
-- Create `services/agent-api/src/state/AgentState.ts` (or `.ts` structure suitable for the stack; adjust extension if project uses TS/JS).
-- If shared types are needed for other packages, expose them via `services/agent-api/src/state/index.ts`.
-- Add accompanying unit tests under `services/agent-api/tests/state/AgentState.test.ts`.
+- Create `services/agent-api/src/state/agent_state.py`.
+- If shared types are needed for other packages, expose them via `services/agent-api/src/state/__init__.py`.
+- Add accompanying unit tests under `services/agent-api/tests/state/test_agent_state.py`.
 - Documentation snippet to be appended later (Task 02) — note TODO markers where context is needed.
 
 ## Step-by-Step Instructions
 1. **Model Fields**: Include `messages`, `graph_context`, `workflow_plan`, `cache_metadata`, `retrieval_metrics`, `vision_findings`, `interrupt_reason`, `checkpoint_id`, `conversation_id`, and `created_at`. Document each property with comments referencing the doc sections above.
-2. **Type Safety**: Use discriminated unions/enums where the domain expects finite values (e.g., `interrupt_reason`, `cache_hit_status`). Provide helper types for `MessageSnapshot`, `GraphContext`, etc.
-3. **Serialization Helpers**: Implement `toPersistence(state)` and `fromPersistence(rowSet)` so repository code can convert between in-memory and DB representations (JSON columns vs. relational tables).
-4. **Validation**: Provide runtime validation (zod/io-ts/custom) ensuring required fields exist before serialization. Keep validation light-weight to avoid runtime cost.
+2. **Type Safety**: Model the structure with Pydantic v2 (`BaseModel` subclasses) so runtime validation is automatic. Provide helper data classes for `MessageSnapshot`, `GraphContext`, etc., and use LangChain `BaseMessage` objects (or adapter helpers) for the `messages` collection to keep parity with LangGraph.
+3. **Serialization Helpers**: Implement `to_persistence(state)` and `from_persistence(row_set)` so repository code can convert between in-memory and DB representations (JSON columns vs. relational tables).
+4. **Validation**: Let Pydantic handle runtime validation (custom validators where needed) ensuring required fields exist before serialization. Keep validation light-weight to avoid runtime cost.
 5. **Testing**: Cover
    - Schema instantiation with minimum required fields.
    - Validation failures for missing mandatory properties.

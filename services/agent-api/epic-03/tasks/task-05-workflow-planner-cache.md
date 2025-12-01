@@ -19,9 +19,9 @@ Create the `WorkflowPlanner` node that projects workflow graphs into user-facing
 4. `docs/agents/implementation.md` §3.3 (workflow planning subgraph).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/nodes/retrieval/WorkflowPlannerNode.ts`
-- Cache helper module `services/agent-api/src/cache/cacheKeys.ts` + Valkey client wrapper stub `services/agent-api/src/cache/valkeyClient.ts` (no network ops beyond interface scaffolding yet).
-- Tests under `services/agent-api/tests/nodes/retrieval/workflow/` and `tests/cache/`.
+- `services/agent-api/src/nodes/retrieval/workflow_planner_node.py`
+- Cache helper module `services/agent-api/src/cache/cache_keys.py` + Valkey client wrapper stub `services/agent-api/src/cache/valkey_client.py` (no network ops beyond interface scaffolding yet).
+- Tests under `services/agent-api/tests/nodes/retrieval/workflow/` and `services/agent-api/tests/cache/`.
 - Documentation snippet describing cache key schema.
 
 ## Step-by-Step Instructions

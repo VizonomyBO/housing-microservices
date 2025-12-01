@@ -19,9 +19,9 @@ Implement repository adapters and integration tests ensuring LangGraph nodes can
 4. `docs/interfaces/api_contracts.md` §3.2 (streaming + interrupt events that rely on checkpoints).
 
 ## Implementation Scope & Files
-- Create `services/agent-api/src/repositories/AgentCheckpointRepository.ts`.
-- Add high-level service wrapper `services/agent-api/src/services/CheckpointService.ts` if orchestration logic (HITL vs. normal) is needed.
-- Tests: `services/agent-api/tests/repositories/AgentCheckpointRepository.test.ts` (integration style; use sqlite or shared mocks).
+- Create `services/agent-api/src/repositories/agent_checkpoint_repository.py`.
+- Add high-level service wrapper `services/agent-api/src/services/checkpoint_service.py` if orchestration logic (HITL vs. normal) is needed.
+- Tests: `services/agent-api/tests/repositories/test_agent_checkpoint_repository.py` (integration style; use sqlite or shared mocks).
 - Update docs: add a subsection to `docs/agents/implementation.md` referencing the repository API and HITL metadata handling.
 
 ## Step-by-Step Instructions

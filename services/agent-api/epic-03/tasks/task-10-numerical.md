@@ -19,10 +19,10 @@ Implement the Numerical subgraph including prompt builders, text-to-SQL node, Po
 4. `docs/overview/system_architecture.md` §3.6 (resource constraints, thread pools for heavy workloads).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/subgraphs/numerical/TextToSqlNode.ts`
-- `services/agent-api/src/subgraphs/numerical/PolarsExecutorNode.ts`
-- `services/agent-api/src/subgraphs/numerical/ResultValidatorNode.ts`
-- Artifact helpers `services/agent-api/src/subgraphs/numerical/artifacts.ts`
+- `services/agent-api/src/subgraphs/numerical/text_to_sql_node.py`
+- `services/agent-api/src/subgraphs/numerical/polars_executor_node.py`
+- `services/agent-api/src/subgraphs/numerical/result_validator_node.py`
+- Artifact helpers `services/agent-api/src/subgraphs/numerical/artifacts.py`
 - Tests `services/agent-api/tests/subgraphs/numerical/`
 - Update acceptance doc (`services/agent-api/epic-03/subgraph-acceptance.md`) with Numerical section.
 

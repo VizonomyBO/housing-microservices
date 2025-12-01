@@ -19,10 +19,10 @@ Create Informational and Analyst LangGraph subgraphs with nodes (`AnswerSynthesi
 4. `docs/overview/system_architecture.md` §3.6 (telemetry expectations for subgraphs).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/subgraphs/informational/AnswerSynthesizerNode.ts`
-- `services/agent-api/src/subgraphs/informational/CitationVerifierNode.ts`
-- `services/agent-api/src/subgraphs/analyst/AnalystPlannerNode.ts`
-- `services/agent-api/src/subgraphs/analyst/ComparisonSynthesizerNode.ts`
+- `services/agent-api/src/subgraphs/informational/answer_synthesizer_node.py`
+- `services/agent-api/src/subgraphs/informational/citation_verifier_node.py`
+- `services/agent-api/src/subgraphs/analyst/analyst_planner_node.py`
+- `services/agent-api/src/subgraphs/analyst/comparison_synthesizer_node.py`
 - Shared utilities (prompt builders, telemetry helper stubs) as needed.
 - Tests per subgraph under `services/agent-api/tests/subgraphs/`.
 - Acceptance criteria doc `services/agent-api/epic-03/subgraph-acceptance.md` (create + start populating for Informational + Analyst sections).

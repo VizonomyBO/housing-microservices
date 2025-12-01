@@ -1,7 +1,7 @@
 # Task 04 — GraphRetriever & GraphSummarizer Nodes
 
 ## System Snapshot
-- Input normalization and attachment loading nodes exist (`services/agent-api/src/nodes/retrieval/InputNormalizerNode.ts`, `AttachmentScopeLoaderNode.ts`).
+- Input normalization and attachment loading nodes exist (`services/agent-api/src/nodes/retrieval/input_normalizer_node.py`, `attachment_scope_loader_node.py`).
 - State + checkpoint repositories are available from Tasks 01–02.
 - No graph-context nodes exist yet; you will connect to graph tables.
 
@@ -19,8 +19,8 @@ Build nodes that pull contextual knowledge graph data and transform it into prom
 4. `docs/overview/system_architecture.md` §3.3 (cache + graph refresh strategy).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/nodes/retrieval/GraphRetrieverNode.ts`
-- `services/agent-api/src/nodes/retrieval/GraphSummarizerNode.ts`
+- `services/agent-api/src/nodes/retrieval/graph_retriever_node.py`
+- `services/agent-api/src/nodes/retrieval/graph_summarizer_node.py`
 - Supporting query utilities under `services/agent-api/src/nodes/retrieval/graph/`
 - Tests under `services/agent-api/tests/nodes/retrieval/graph/`
 - Docs update describing refresh logic + prompt format.

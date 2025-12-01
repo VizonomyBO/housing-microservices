@@ -18,8 +18,8 @@ Implement Prometheus/OTel metrics, cache observability helpers, and repository w
 4. `docs/agents/implementation.md` SSE appendix (Task 12 update) for event names.
 
 ## Implementation Scope & Files
-- `services/agent-api/src/telemetry/MetricsRegistry.ts`
-- `services/agent-api/src/telemetry/CacheObservability.ts`
+- `services/agent-api/src/telemetry/metrics_registry.py`
+- `services/agent-api/src/telemetry/cache_observability.py`
 - Wiring inside nodes/subgraphs to emit metrics (latency, token usage, cache ratio, guardrail/HITL counts).
 - Tests: `services/agent-api/tests/telemetry/`
 - Documentation updates describing metrics + dashboards.

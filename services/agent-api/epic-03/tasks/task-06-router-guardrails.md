@@ -19,7 +19,7 @@ Implement the Router node and guardrail policy framework that classifies request
 4. `docs/interfaces/api_contracts.md` §3 (SSE/telemetry fields for routing decisions).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/nodes/router/RouterNode.ts`
+- `services/agent-api/src/nodes/router/router_node.py`
 - Guardrail framework under `services/agent-api/src/guardrails/` (policy definitions, validators, error codes).
 - Tests under `services/agent-api/tests/router/` and `tests/guardrails/`.
 - Documentation updates describing classification + guardrail policies.

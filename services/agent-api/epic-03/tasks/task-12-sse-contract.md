@@ -18,10 +18,10 @@ Implement the SSE helper library and ensure every LangGraph transition emits eve
 4. Review Tasks 01–11 outputs to know where to insert emitters (look for TODO comments).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/streaming/SseEmitter.ts`
-- `services/agent-api/src/streaming/events.ts` (event type definitions)
-- Middleware or decorator `services/agent-api/src/streaming/withSse.ts` for LangGraph nodes/controllers.
-- Tests `services/agent-api/tests/streaming/SseEmitter.test.ts`
+- `services/agent-api/src/streaming/sse_emitter.py`
+- `services/agent-api/src/streaming/events.py` (event type definitions)
+- Middleware or decorator `services/agent-api/src/streaming/with_sse.py` for LangGraph nodes/controllers.
+- Tests `services/agent-api/tests/streaming/test_sse_emitter.py`
 - Documentation updates (SSE appendix in `docs/agents/implementation.md`).
 
 ## Step-by-Step Instructions

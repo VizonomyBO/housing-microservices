@@ -5,6 +5,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 - ✅ **Service status**: New LangGraph microservice implementing Epic 3 (see `services/agent-api/epic-03/tasks`). Nothing is deployed yet, but the shared schemas in `packages/shared_data_layer` are stable. Treat every change as production-ready.
 - 🐍 **Runtime**: Python 3.13 managed by `uv` (virtual env lives at `services/agent-api/.venv`).
 - 📚 **Source of truth**: Epic 3 task files under `services/agent-api/epic-03/tasks`. Complete them sequentially and update the checklist after each task.
+- 🧱 **Language & frameworks**: All service code is Python. Use Pydantic models (v2) for runtime validation/serialization and LangChain `BaseMessage` objects (or adapters) for conversational payloads and HITL checkpoints.
 - 🚫 **Avoid automation helpers**: Ignore `run_tasks.sh` and `RUN_TASKS.md`. Those files exist for humans orchestrating Codex sessions and must not influence how you plan or code a task.
 
 ## 1. Always Plan → Research → Act → Verify
@@ -75,6 +76,7 @@ uv run pytest -n auto
 - Use the repositories and DTOs from `packages/shared_data_layer`. Never duplicate schema definitions.
 - Integration tests that touch the DB must import the shared fixtures (see `packages/shared_data_layer/tests/conftest.py`) and leverage Testcontainers as described in that package’s AGENTS guide.
 - When new persistence needs arise in this service, add repository helpers inside `services/agent-api` but lean on the shared data layer for actual DB access over direct SQL.
+- If a task requires schema or repository changes, you may edit `packages/shared_data_layer` directly—just keep its AGENTS guide in mind and run the package’s test suite before finishing.
 - You can install the shared data layer in dev mode with `uv add -e ../packages/shared_data_layer`.
 
 ---

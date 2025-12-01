@@ -18,9 +18,9 @@ Implement the CacheWriter component that serializes positive answers (with citat
 4. `docs/agents/implementation.md` §4.2 (cache short-circuit path).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/cache/CacheWriter.ts`
-- Serialization helpers `services/agent-api/src/cache/responseSerializer.ts`
-- Tests: `services/agent-api/tests/cache/CacheWriter.test.ts`
+- `services/agent-api/src/cache/cache_writer.py`
+- Serialization helpers `services/agent-api/src/cache/response_serializer.py`
+- Tests: `services/agent-api/tests/cache/test_cache_writer.py`
 - Documentation update describing cache payloads + SSE placeholders.
 
 ## Step-by-Step Instructions

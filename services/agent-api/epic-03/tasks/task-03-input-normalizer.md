@@ -20,8 +20,8 @@ Implement LangGraph nodes that normalize incoming chat requests and preload atta
 
 ## Implementation Scope & Files
 - Nodes live under `services/agent-api/src/nodes/retrieval/`:
-  - `InputNormalizerNode.ts`
-  - `AttachmentScopeLoaderNode.ts`
+  - `input_normalizer_node.py`
+  - `attachment_scope_loader_node.py`
 - Shared utilities under `services/agent-api/src/nodes/retrieval/utils/` if needed.
 - Tests under `services/agent-api/tests/nodes/retrieval/`.
 - Update `docs/agents/implementation.md` retrieval section to mention these nodes and their responsibilities.

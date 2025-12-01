@@ -19,9 +19,9 @@ Implement the Vision subgraph to handle image-only or multimodal requests, lever
 4. `docs/interfaces/api_contracts.md` §3.5 (streaming multimodal payloads and attachment schema).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/subgraphs/vision/VisionRouterNode.ts`
-- `services/agent-api/src/subgraphs/vision/ImageReasonerNode.ts`
-- `services/agent-api/src/subgraphs/vision/MultimodalResponderNode.ts`
+- `services/agent-api/src/subgraphs/vision/vision_router_node.py`
+- `services/agent-api/src/subgraphs/vision/image_reasoner_node.py`
+- `services/agent-api/src/subgraphs/vision/multimodal_responder_node.py`
 - Tests `services/agent-api/tests/subgraphs/vision/`
 - Update acceptance doc with Vision section.
 

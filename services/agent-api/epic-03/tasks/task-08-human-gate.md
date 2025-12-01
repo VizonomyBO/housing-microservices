@@ -19,9 +19,9 @@ Implement the HumanGate node that evaluates confidence + policy outputs, pauses 
 4. `docs/overview/system_architecture.md` §3.5 (HITL services integration).
 
 ## Implementation Scope & Files
-- `services/agent-api/src/nodes/human/HumanGateNode.ts`
-- Helper `services/agent-api/src/hitl/HumanGateService.ts`
-- Tests `services/agent-api/tests/nodes/human/HumanGateNode.test.ts`
+- `services/agent-api/src/nodes/human/human_gate_node.py`
+- Helper `services/agent-api/src/hitl/human_gate_service.py`
+- Tests `services/agent-api/tests/nodes/human/test_human_gate_node.py`
 - Documentation updates on HITL pause/resume lifecycle.
 
 ## Step-by-Step Instructions
