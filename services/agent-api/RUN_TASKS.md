@@ -64,7 +64,7 @@ Feel free to add more spot checks (for example, targeting a small subset or usin
 ## Implementation notes
 
 - The script enforces clean staging to prevent committing unrelated work.
-- `python3` diffs new/renamed files so only task-relevant files are committed.
+- Helper utilities (like the git diff parser) run via `uv run python …`, guaranteeing every Python process uses the project’s virtualenv.
 - Default Codex flags can be overridden via `CODEX_CMD` / `CODEX_FLAGS` environment variables if needed.
 - All workflow instructions (plan, tracker, verification commands, checklist updates) come directly from `services/agent-api/AGENTS.md` and each task’s markdown file.
 

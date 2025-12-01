@@ -73,6 +73,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TASKS_DIR="${SCRIPT_DIR}/epic-03/tasks"
 CHECKLIST_FILE="${SCRIPT_DIR}/epic-03/CHECKLIST.md"
 AGENT_GUIDE="${SCRIPT_DIR}/AGENTS.md"
+UV_BIN="${UV_BIN:-uv}"
 
 if [[ -z "${PROMPT_TEMPLATE}" ]]; then
   PROMPT_TEMPLATE="${SCRIPT_DIR}/prompt_template.txt"
@@ -163,7 +164,7 @@ collect_status_snapshot() {
 diff_new_files() {
   local before_file="$1"
   local after_file="$2"
-  python3 - "${before_file}" "${after_file}" <<'PY'
+  "${UV_BIN}" run python - "${before_file}" "${after_file}" <<'PY'
 import sys
 from pathlib import Path
 
