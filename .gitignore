@@ -110,3 +110,4 @@ override.tf.json
 **/layer_package/
 **/dist/*.zip
 *.zip
+*.md

@@ -92,37 +92,13 @@ resource "aws_iam_role_policy" "marker_converter_lambda" {
   })
 }
 
-# Marker Converter Lambda Function (Container-based)
-# NOTE: Uncomment this after pushing the container image to ECR
-# resource "aws_lambda_function" "marker_converter" {
-#   function_name = "${var.project_name}-marker-converter-${var.environment}"
-#   role          = aws_iam_role.marker_converter_lambda.arn
-#   package_type  = "Image"
-#   image_uri     = "${aws_ecr_repository.marker_converter.repository_url}:latest"
-#   
-#   timeout     = 300  # 5 minutes for large PDFs
-#   memory_size = 3008 # 3GB for ML models
-#   
-#   environment {
-#     variables = {
-#       RAW_DOCUMENTS_BUCKET = aws_s3_bucket.raw_documents.id
-#       PROCESSED_BUCKET     = aws_s3_bucket.processed_artifacts.id
-#       OPENAI_API_KEY       = var.openai_api_key  # For AI-powered footnotes
-#       LOG_LEVEL            = var.log_level
-#       ENVIRONMENT          = var.environment
-#     }
-#   }
-#   
-#   tracing_config {
-#     mode = "Active"
-#   }
-#   
-#   tags = {
-#     Name        = "${var.project_name}-marker-converter-${var.environment}"
-#     Environment = var.environment
-#     Component   = "document-ingestion"
-#   }
-# }
+# Marker Converter now runs as a microservice on EC2 (not Lambda)
+# The EC2 marker-service handles PDF conversion with Marker library
+# See services/marker-service/ for the implementation
+# 
+# Lambda was not viable due to:
+# - Container image size > 10GB limit (PyTorch + CUDA + ML models)
+# - Cold start times too long for ML model loading
 
 # =============================================================================
 # LAMBDA: Chunk Builder (Semantic Chunking)
@@ -246,6 +222,130 @@ resource "aws_cloudwatch_log_group" "chunk_builder" {
 }
 
 # =============================================================================
+# LAMBDA: Table Normalizer
+# =============================================================================
+
+# Archive the table normalizer Lambda code
+data "archive_file" "table_normalizer" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/table_normalizer"
+  output_path = "${path.module}/lambdas/table_normalizer.zip"
+  excludes    = ["tests", "__pycache__", "*.pyc", ".pytest_cache"]
+}
+
+# IAM Role for Table Normalizer Lambda
+resource "aws_iam_role" "table_normalizer_lambda" {
+  name = "${var.project_name}-table-normalizer-lambda-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-table-normalizer-lambda-${var.environment}"
+    Environment = var.environment
+  }
+}
+
+# IAM Policy for Table Normalizer Lambda
+resource "aws_iam_role_policy" "table_normalizer_lambda" {
+  name = "${var.project_name}-table-normalizer-policy-${var.environment}"
+  role = aws_iam_role.table_normalizer_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = "${aws_s3_bucket.processed_artifacts.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Table Normalizer Lambda Function
+resource "aws_lambda_function" "table_normalizer" {
+  function_name    = "${var.project_name}-table-normalizer-${var.environment}"
+  role             = aws_iam_role.table_normalizer_lambda.arn
+  handler          = "handler.handler"
+  runtime          = "python3.12"
+  filename         = data.archive_file.table_normalizer.output_path
+  source_code_hash = data.archive_file.table_normalizer.output_base64sha256
+  
+  timeout     = 120
+  memory_size = 512
+  
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
+  
+  environment {
+    variables = {
+      PROCESSED_BUCKET = aws_s3_bucket.processed_artifacts.id
+      DATABASE_HOST    = aws_instance.microservices.public_ip
+      DATABASE_PORT    = var.database_port
+      DATABASE_NAME    = var.database_name
+      DATABASE_USER    = var.database_username
+      DATABASE_PASSWORD = var.database_password
+      LOG_LEVEL        = var.log_level
+      ENVIRONMENT      = var.environment
+    }
+  }
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-table-normalizer-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
+
+# CloudWatch Log Group for Table Normalizer
+resource "aws_cloudwatch_log_group" "table_normalizer" {
+  name              = "/aws/lambda/${aws_lambda_function.table_normalizer.function_name}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Name        = "${var.project_name}-table-normalizer-logs-${var.environment}"
+    Environment = var.environment
+  }
+}
+
+# =============================================================================
 # OUTPUTS
 # =============================================================================
 
@@ -262,5 +362,15 @@ output "chunk_builder_lambda_arn" {
 output "chunk_builder_lambda_name" {
   description = "Name of the Chunk Builder Lambda"
   value       = aws_lambda_function.chunk_builder.function_name
+}
+
+output "table_normalizer_lambda_arn" {
+  description = "ARN of the Table Normalizer Lambda"
+  value       = aws_lambda_function.table_normalizer.arn
+}
+
+output "table_normalizer_lambda_name" {
+  description = "Name of the Table Normalizer Lambda"
+  value       = aws_lambda_function.table_normalizer.function_name
 }
 

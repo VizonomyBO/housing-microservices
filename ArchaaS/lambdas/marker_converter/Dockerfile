@@ -3,11 +3,10 @@
 
 FROM public.ecr.aws/lambda/python:3.12
 
-# Install system dependencies for Marker (OCR, PDF processing)
+# Install system dependencies for Marker (PDF processing)
+# Note: Marker uses its own OCR models, tesseract not required
 RUN dnf install -y \
     poppler-utils \
-    tesseract \
-    tesseract-langpack-eng \
     && dnf clean all
 
 # Set working directory
@@ -20,9 +19,8 @@ COPY requirements.txt .
 # Note: Marker is heavy, consider using a smaller model or pre-caching
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download Marker models during build (optional - can also download at runtime)
-# This makes cold starts faster but increases image size
-RUN python -c "from marker.models import create_model_dict; create_model_dict()" || true
+# Models will be downloaded at runtime on first invocation
+# This keeps image size small but first cold start will be slow (~2-3 min)
 
 # Copy application code
 COPY handler.py .

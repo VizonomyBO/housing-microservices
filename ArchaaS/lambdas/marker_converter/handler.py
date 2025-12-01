@@ -6,13 +6,17 @@ This Lambda:
 2. Uses Marker library to convert to Markdown/JSON
 3. Extracts tables and figures with AI-generated footnotes (OpenAI)
 4. Uploads artifacts to S3
-5. Returns block inventory for downstream processing
+5. Creates artifact records via shared_data_layer
+6. Returns block inventory for downstream processing
+
+Note: Table normalization is handled by a separate table-normalizer Lambda.
 """
 
 import json
 import os
 import tempfile
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Optional
 import hashlib
@@ -22,6 +26,13 @@ import re
 import boto3
 from pydantic import BaseModel, Field
 from openai import OpenAI
+
+# Add common utilities to path
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.db import get_async_session
+from common.ingestion import create_artifact_record
 
 # Marker imports
 from marker.converters.pdf import PdfConverter
@@ -511,9 +522,9 @@ def generate_figure_footnote(
         return f"Figure {figure_number} on page {page_number}."
 
 
-def handler(event: dict, context: Any) -> dict:
+async def handler_async(event: dict, context: Any) -> dict:
     """
-    Lambda handler for document conversion.
+    Async Lambda handler for document conversion.
     
     Expected input (from Step Functions):
     {
@@ -525,8 +536,10 @@ def handler(event: dict, context: Any) -> dict:
         "trace_id": "trace-xxx"
     }
     """
+    from uuid import UUID as PyUUID
+    
     start_time = datetime.now(timezone.utc)
-    request_id = context.aws_request_id if context else str(uuid.uuid4())
+    request_id = getattr(context, "aws_request_id", None) or str(uuid.uuid4())
     
     logger.set_request_id(request_id)
     logger.info("Marker converter Lambda invoked", extra={"event": event})
@@ -570,6 +583,7 @@ def handler(event: dict, context: Any) -> dict:
             
             # Upload markdown
             markdown_key = f"{output_prefix}/document.md"
+            markdown_content = enhanced_markdown.encode("utf-8")
             upload_to_s3(
                 PROCESSED_BUCKET,
                 markdown_key,
@@ -577,7 +591,7 @@ def handler(event: dict, context: Any) -> dict:
                 content_type="text/markdown",
             )
             
-            # Create structured JSON
+            # Create structured JSON (used by table-normalizer and chunk-builder)
             structured_data = {
                 "document_id": document_id,
                 "ingestion_id": ingestion_id,
@@ -596,14 +610,16 @@ def handler(event: dict, context: Any) -> dict:
             
             # Upload structured JSON
             structured_json_key = f"{output_prefix}/structured.json"
+            structured_json_content = json.dumps(structured_data, indent=2)
             upload_to_s3(
                 PROCESSED_BUCKET,
                 structured_json_key,
-                json.dumps(structured_data, indent=2),
+                structured_json_content,
                 content_type="application/json",
             )
             
             # Upload images
+            image_keys = []
             for image_key, image_data in images_to_upload.items():
                 full_key = f"{output_prefix}/{image_key}"
                 upload_to_s3(
@@ -612,6 +628,7 @@ def handler(event: dict, context: Any) -> dict:
                     image_data,
                     content_type="image/png",
                 )
+                image_keys.append((full_key, len(image_data)))
             
             # Also upload any images from marker directly
             if images:
@@ -624,6 +641,55 @@ def handler(event: dict, context: Any) -> dict:
                             img_data,
                             content_type="image/png",
                         )
+                        image_keys.append((img_key, len(img_data)))
+            
+            # Create artifact records via shared_data_layer
+            async with get_async_session() as session:
+                # Markdown artifact
+                await create_artifact_record(
+                    session,
+                    document_id=PyUUID(document_id),
+                    artifact_type="markdown",
+                    s3_key=markdown_key,
+                    s3_bucket=PROCESSED_BUCKET,
+                    byte_size=len(markdown_content),
+                    metadata={
+                        "total_pages": len(pages),
+                        "total_words": sum(p.word_count for p in pages),
+                    },
+                )
+                
+                # Structured JSON artifact
+                await create_artifact_record(
+                    session,
+                    document_id=PyUUID(document_id),
+                    artifact_type="structured_json",
+                    s3_key=structured_json_key,
+                    s3_bucket=PROCESSED_BUCKET,
+                    byte_size=len(structured_json_content.encode("utf-8")),
+                    metadata={
+                        "total_tables": len(tables),
+                        "total_figures": len(figures),
+                    },
+                )
+                
+                # Figure artifacts
+                for figure in figures:
+                    await create_artifact_record(
+                        session,
+                        document_id=PyUUID(document_id),
+                        artifact_type="figure",
+                        s3_key=f"{output_prefix}/{figure.image_key}",
+                        s3_bucket=PROCESSED_BUCKET,
+                        metadata={
+                            "block_id": figure.block_id,
+                            "page_number": figure.page_number,
+                            "footnote_ref": figure.footnote_ref,
+                            "caption": figure.caption,
+                        },
+                    )
+                
+                await session.commit()
             
             # Calculate processing time
             end_time = datetime.now(timezone.utc)
@@ -670,6 +736,16 @@ def handler(event: dict, context: Any) -> dict:
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         raise ConversionError(f"Document conversion failed: {e}")
+
+
+def handler(event: dict, context: Any) -> dict:
+    """Lambda handler entry point."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(handler_async(event, context))
+    finally:
+        loop.close()
 
 
 def create_enhanced_markdown(

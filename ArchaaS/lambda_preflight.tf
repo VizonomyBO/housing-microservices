@@ -1,12 +1,34 @@
 # Preflight Validator Lambda Function
 # Step Function: DocumentIngestionStateMachine -> Preflight State
 
-# Archive the Lambda code (code only, deps in layer)
+# Build preflight validator with common module
+resource "null_resource" "preflight_validator_package" {
+  triggers = {
+    handler_hash = filemd5("${path.module}/lambdas/preflight_validator/handler.py")
+    common_hash  = filemd5("${path.module}/lambdas/common/__init__.py")
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      rm -rf ${path.module}/dist/preflight_pkg
+      mkdir -p ${path.module}/dist/preflight_pkg
+      cp -r ${path.module}/lambdas/preflight_validator/* ${path.module}/dist/preflight_pkg/
+      cp -r ${path.module}/lambdas/common ${path.module}/dist/preflight_pkg/
+      rm -rf ${path.module}/dist/preflight_pkg/tests
+      rm -rf ${path.module}/dist/preflight_pkg/__pycache__
+      find ${path.module}/dist/preflight_pkg -name "*.pyc" -delete
+    EOT
+  }
+}
+
+# Archive the Lambda code (code + common module, deps in layer)
 data "archive_file" "preflight_validator" {
   type        = "zip"
-  source_dir  = "${path.module}/lambdas/preflight_validator"
+  source_dir  = "${path.module}/dist/preflight_pkg"
   output_path = "${path.module}/dist/preflight_validator.zip"
   excludes    = ["tests", "__pycache__", "*.pyc", ".pytest_cache", "package", "requirements.txt", "pytest.ini"]
+
+  depends_on = [null_resource.preflight_validator_package]
 }
 
 # Lambda function
@@ -24,14 +46,14 @@ resource "aws_lambda_function" "preflight_validator" {
 
   role = aws_iam_role.preflight_validator_lambda.arn
 
-  # Use shared Lambda layer for Python dependencies
-  layers = [aws_lambda_layer_version.python_deps.arn]
+  # Use shared Lambda layers for Python dependencies and shared data layer
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn
+  ]
 
-  # NOTE: Not using VPC to allow S3 access. Database accessed via public IP.
-  # vpc_config {
-  #   subnet_ids         = var.private_subnet_ids
-  #   security_group_ids = [aws_security_group.lambda.id]
-  # }
+  # NOTE: Not using VPC to allow S3 access without VPC endpoint
+  # Database accessed via public IP with security group allowing port 5432
 
   environment {
     variables = {
@@ -42,7 +64,9 @@ resource "aws_lambda_function" "preflight_validator" {
       MAX_FILE_SIZE_BYTES        = var.max_file_size_bytes
       # Step Function for document processing
       STEP_FUNCTION_ARN          = aws_sfn_state_machine.document_ingestion.arn
-      # Database connection (using public IP since Lambda not in VPC)
+      # EventBridge for progress events
+      EVENT_BUS_NAME             = aws_cloudwatch_event_bus.ingestion.name
+      # Database connection (using public IP - EC2 SG allows 5432 from 0.0.0.0/0)
       DATABASE_URL               = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.public_ip}:${var.database_port}/${var.database_name}"
       DATABASE_HOST              = aws_instance.microservices.public_ip
       DATABASE_PORT              = var.database_port
@@ -50,6 +74,8 @@ resource "aws_lambda_function" "preflight_validator" {
       DATABASE_USER              = var.database_username
       DATABASE_PASSWORD          = var.database_password
       DATABASE_SECRET_ARN        = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
+      # Marker service for PDF conversion (runs on EC2)
+      MARKER_SERVICE_URL         = "http://${aws_instance.microservices.public_ip}:8004"
     }
   }
 
@@ -217,6 +243,27 @@ resource "aws_iam_role_policy" "preflight_validator_xray" {
           "xray:PutTelemetryRecords"
         ]
         Resource = "*"
+      }
+    ]
+  })
+}
+
+# EventBridge policy for progress events
+resource "aws_iam_role_policy" "preflight_validator_eventbridge" {
+  name = "${var.project_name}-preflight-validator-eventbridge-policy"
+  role = aws_iam_role.preflight_validator_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "events:PutEvents"
+        ]
+        Resource = [
+          aws_cloudwatch_event_bus.ingestion.arn
+        ]
       }
     ]
   })

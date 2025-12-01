@@ -7,6 +7,7 @@ This Lambda:
 3. Preserves document structure (headers, sections)
 4. Maintains references to tables and figures via footnotes
 5. Outputs JSONL files for embedding
+6. Creates artifact records via shared_data_layer
 """
 
 import json
@@ -20,6 +21,13 @@ from dataclasses import dataclass, field
 
 import boto3
 from pydantic import BaseModel, Field
+
+# Add common utilities to path
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.db import get_async_session
+from common.ingestion import create_artifact_record
 
 from core.logging import get_logger
 from core.exceptions import ChunkingError, S3Error, ValidationError
@@ -357,9 +365,9 @@ def process_structured_data(
     return special_chunks
 
 
-def handler(event: dict, context: Any) -> dict:
+async def handler_async(event: dict, context: Any) -> dict:
     """
-    Lambda handler for chunk building.
+    Async Lambda handler for chunk building.
     
     Expected input (from Step Functions - output of marker-converter):
     {
@@ -372,8 +380,11 @@ def handler(event: dict, context: Any) -> dict:
         "trace_id": "trace-xxx"
     }
     """
+    from uuid import UUID as PyUUID
+    import asyncio
+    
     start_time = datetime.now(timezone.utc)
-    request_id = context.aws_request_id if context else str(uuid.uuid4())
+    request_id = getattr(context, "aws_request_id", None) or str(uuid.uuid4())
     
     logger.set_request_id(request_id)
     logger.info("Chunk builder Lambda invoked", extra={"event": event})
@@ -426,6 +437,24 @@ def handler(event: dict, context: Any) -> dict:
         total_tokens = sum(c.token_count for c in all_chunks)
         total_chars = sum(c.char_count for c in all_chunks)
         
+        # Create artifact record via shared_data_layer
+        async with get_async_session() as session:
+            await create_artifact_record(
+                session,
+                document_id=PyUUID(document_id),
+                artifact_type="chunk_manifest",
+                s3_key=chunks_key,
+                s3_bucket=PROCESSED_BUCKET,
+                byte_size=len(jsonl_content.encode("utf-8")),
+                metadata={
+                    "chunk_count": len(all_chunks),
+                    "total_tokens": total_tokens,
+                    "text_chunks": len(text_chunks),
+                    "special_chunks": len(special_chunks),
+                },
+            )
+            await session.commit()
+        
         # Calculate processing time
         end_time = datetime.now(timezone.utc)
         processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -460,4 +489,16 @@ def handler(event: dict, context: Any) -> dict:
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         raise ChunkingError(f"Chunk building failed: {e}")
+
+
+def handler(event: dict, context: Any) -> dict:
+    """Lambda handler entry point."""
+    import asyncio
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(handler_async(event, context))
+    finally:
+        loop.close()
 

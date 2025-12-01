@@ -189,10 +189,21 @@ async def generate_presigned_url(
         )
 
 
-def extract_user_from_event(event: dict) -> tuple[int, list[str]]:
+def int_to_uuid(user_id: int) -> str:
+    """
+    Convert integer user_id to a deterministic UUID format.
+    Uses UUID v5 with a namespace to ensure consistency.
+    """
+    # Use a fixed namespace UUID for user ID conversion
+    namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # DNS namespace
+    return str(uuid.uuid5(namespace, f"user:{user_id}"))
+
+
+def extract_user_from_event(event: dict) -> tuple[str, list[str]]:
     """
     Extract user_id and roles from the Lambda event.
     Tries API Gateway authorizer first, then falls back to JWT decode.
+    Returns user_id as UUID string for database compatibility.
     """
     import base64
     
@@ -231,8 +242,11 @@ def extract_user_from_event(event: dict) -> tuple[int, list[str]]:
     if not user_id:
         raise AppValidationError("Missing user_id in authorization context")
     
-    # Convert to int for database bigint column
-    return int(user_id), roles
+    # Convert integer user_id to UUID format for database compatibility
+    user_id_int = int(user_id)
+    user_uuid = int_to_uuid(user_id_int)
+    
+    return user_uuid, roles
 
 
 def validate_base_scope_access(access_scope: str, roles: list[str]) -> None:

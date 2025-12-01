@@ -110,8 +110,37 @@ services:
     networks:
       - microservices-network
 
+  marker-service:
+    build:
+      context: ./services/marker-service
+      dockerfile: Dockerfile
+    container_name: marker-service
+    ports:
+      - "${MARKER_SERVICE_PORT:-8004}:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - RAW_DOCUMENTS_BUCKET=${RAW_DOCUMENTS_BUCKET:-vizonomy-raw-docs-dev}
+      - PROCESSED_BUCKET=${PROCESSED_BUCKET:-vizonomy-processed-dev}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+    volumes:
+      - marker_models:/root/.cache  # Cache ML models between restarts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Models take time to load
+    networks:
+      - microservices-network
+
 volumes:
   postgres_data:
+  marker_models:  # Persist ML models between container restarts
 
 networks:
   microservices-network:

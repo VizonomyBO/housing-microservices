@@ -7,11 +7,12 @@ resource "aws_sfn_state_machine" "document_ingestion" {
 
   definition = templatefile("${path.module}/step_functions/document_ingestion_workflow.asl.json", {
     # NOTE: Preflight validation now runs via S3 trigger BEFORE this Step Function starts
-    MarkerConverterLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-marker-converter-${var.environment}"
+    # Marker service runs on EC2 - called by preflight Lambda, results passed to Step Function
     ChunkBuilderLambdaArn        = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chunk-builder-${var.environment}"
     TableNormalizerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-table-normalizer-${var.environment}"
     FigureCaptionerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-figure-captioner-${var.environment}"
     EmbeddingWriterLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-embedding-writer-${var.environment}"
+    IndexRefresherLambdaArn      = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-index-refresher-${var.environment}"
     IngestionFinalizerLambdaArn  = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-ingestion-finalizer-${var.environment}"
     EventBusName                 = aws_cloudwatch_event_bus.ingestion.name
   })

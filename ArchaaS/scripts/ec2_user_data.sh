@@ -129,8 +129,8 @@ chmod 600 $WORK_DIR/.env
 # 4. CONFIGURE NGINX
 # =============================================================================
 echo "[4/6] Configuring Nginx..."
-aws s3 cp s3://$S3_BUCKET/configs/nginx.conf /etc/nginx/conf.d/vizonomy.conf
-rm -f /etc/nginx/conf.d/default.conf 2>/dev/null || true
+# Replace main nginx.conf (our config is a full config, not a partial)
+aws s3 cp s3://$S3_BUCKET/configs/nginx.conf /etc/nginx/nginx.conf
 nginx -t
 systemctl start nginx
 systemctl enable nginx

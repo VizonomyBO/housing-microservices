@@ -1,36 +1,88 @@
 {
-  "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts. NOTE: Preflight validation happens via S3 trigger BEFORE this Step Function starts.",
-  "StartAt": "Convert",
+  "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts with progress tracking.",
+  "StartAt": "EmitConvertStarted",
   "States": {
-    "Convert": {
+    "EmitConvertStarted": {
       "Type": "Task",
-      "Comment": "Convert PDF/DOCX to Markdown and structured JSON using Marker",
-      "Resource": "${MarkerConverterLambdaArn}",
+      "Resource": "arn:aws:states:::events:putEvents",
       "Parameters": {
-        "ingestion_id.$": "$.ingestion_id",
-        "document_id.$": "$.document_id",
-        "s3_key.$": "$.key",
-        "s3_bucket.$": "$.bucket",
-        "converted_key_prefix.$": "States.Format('processed/{}/converted', $.document_id)",
-        "source_type.$": "$.source_type",
-        "trace_id.$": "$.trace_id"
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "convert",
+              "status": "started",
+              "percent_complete": 10,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Convert"
+    },
+    "Convert": {
+      "Type": "Pass",
+      "Comment": "Conversion handled by preflight Lambda calling marker-service directly. Pass through convert_result from input.",
+      "Parameters": {
+        "markdown_key.$": "$.convert_result.markdown_key",
+        "metadata_key.$": "$.convert_result.metadata_key",
+        "figures_prefix.$": "$.convert_result.figures_prefix",
+        "tables_count.$": "$.convert_result.tables_count",
+        "figures_count.$": "$.convert_result.figures_count",
+        "structured_json_key.$": "$.convert_result.structured_json_key"
       },
       "ResultPath": "$.convert_result",
-      "Retry": [
-        {
-          "ErrorEquals": ["ConversionTransientError", "ServiceException", "Lambda.TooManyRequestsException"],
-          "IntervalSeconds": 10,
-          "MaxAttempts": 3,
-          "BackoffRate": 2.0
-        }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.error",
-          "Next": "DeadLetter"
-        }
-      ],
+      "Next": "EmitConvertCompleted"
+    },
+    "EmitConvertCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "convert",
+              "status": "completed",
+              "percent_complete": 25,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "EmitChunkStarted"
+    },
+    "EmitChunkStarted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "chunk",
+              "status": "started",
+              "percent_complete": 30,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
       "Next": "Chunk"
     },
     "Chunk": {
@@ -62,11 +114,34 @@
           "Next": "DeadLetter"
         }
       ],
+      "Next": "EmitChunkCompleted"
+    },
+    "EmitChunkCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "chunk",
+              "status": "completed",
+              "percent_complete": 45,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
       "Next": "ParallelProcessing"
     },
     "ParallelProcessing": {
       "Type": "Parallel",
-      "Comment": "Process tables, images, and embeddings in parallel",
+      "Comment": "Process tables, images in parallel",
       "Branches": [
         {
           "StartAt": "NormalizeTables",
@@ -78,7 +153,7 @@
               "Parameters": {
                 "ingestion_id.$": "$.ingestion_id",
                 "document_id.$": "$.document_id",
-                "table_blocks.$": "$.convert_result.block_inventory.tables",
+                "structured_json_key.$": "$.convert_result.structured_json_key",
                 "trace_id.$": "$.trace_id"
               },
               "ResultPath": "$.table_result",
@@ -104,7 +179,7 @@
               "Parameters": {
                 "ingestion_id.$": "$.ingestion_id",
                 "document_id.$": "$.document_id",
-                "figure_blocks.$": "$.convert_result.block_inventory.figures",
+                "structured_json_key.$": "$.convert_result.structured_json_key",
                 "trace_id.$": "$.trace_id"
               },
               "ResultPath": "$.caption_result",
@@ -129,6 +204,29 @@
           "Next": "DeadLetter"
         }
       ],
+      "Next": "EmitEmbedStarted"
+    },
+    "EmitEmbedStarted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "embed",
+              "status": "started",
+              "percent_complete": 60,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
       "Next": "Embed"
     },
     "Embed": {
@@ -140,8 +238,7 @@
         "document_id.$": "$.document_id",
         "access_scope.$": "$.access_scope",
         "country_code.$": "$.country_code",
-        "chunk_ids.$": "$.chunk_result.chunk_ids",
-        "chunks_s3_path.$": "$.chunk_result.chunks_s3_path",
+        "chunks_key.$": "$.chunk_result.chunks_key",
         "table_schemas.$": "$.parallel_results[0].table_result.schema_summaries",
         "figure_captions.$": "$.parallel_results[1].caption_result.captions",
         "trace_id.$": "$.trace_id"
@@ -169,18 +266,138 @@
           "Next": "DeadLetter"
         }
       ],
-      "Next": "Finalize"
+      "Next": "EmitEmbedCompleted"
     },
-    "Finalize": {
+    "EmitEmbedCompleted": {
       "Type": "Task",
-      "Comment": "Update document status to READY and emit completion event",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "embed",
+              "status": "completed",
+              "percent_complete": 80,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "EmitIndexStarted"
+    },
+    "EmitIndexStarted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "index",
+              "status": "started",
+              "percent_complete": 85,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Index"
+    },
+    "Index": {
+      "Type": "Task",
+      "Comment": "Index chunks and refresh materialized views",
+      "Resource": "${IndexRefresherLambdaArn}",
+      "Parameters": {
+        "ingestion_id.$": "$.ingestion_id",
+        "document_id.$": "$.document_id",
+        "chunk_count.$": "$.chunk_result.chunk_count",
+        "trace_id.$": "$.trace_id"
+      },
+      "ResultPath": "$.index_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["DatabaseTransientError"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
+      "Next": "EmitIndexCompleted"
+    },
+    "EmitIndexCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "index",
+              "status": "completed",
+              "percent_complete": 90,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "EmitActivateStarted"
+    },
+    "EmitActivateStarted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::events:putEvents",
+      "Parameters": {
+        "Entries": [
+          {
+            "Source": "vizonomy.ingestion",
+            "DetailType": "ingestion.progress",
+            "Detail": {
+              "ingestion_id.$": "$.ingestion_id",
+              "document_id.$": "$.document_id",
+              "stage": "activate",
+              "status": "started",
+              "percent_complete": 95,
+              "trace_id.$": "$.trace_id"
+            },
+            "EventBusName": "${EventBusName}"
+          }
+        ]
+      },
+      "ResultPath": null,
+      "Next": "Activate"
+    },
+    "Activate": {
+      "Type": "Task",
+      "Comment": "Update document status to active and emit completion event",
       "Resource": "${IngestionFinalizerLambdaArn}",
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
         "access_scope.$": "$.access_scope",
         "content_hash.$": "$.content_hash",
-        "status": "READY",
+        "status": "active",
         "chunk_count.$": "$.chunk_result.chunk_count",
         "embed_count.$": "$.embed_result.vectors_written",
         "trace_id.$": "$.trace_id",
@@ -190,7 +407,7 @@
           "completed_at.$": "$$.State.EnteredTime"
         }
       },
-      "ResultPath": "$.finalize_result",
+      "ResultPath": "$.activate_result",
       "Retry": [
         {
           "ErrorEquals": ["ServiceException"],
@@ -222,6 +439,7 @@
               "content_hash.$": "$.content_hash",
               "access_scope.$": "$.access_scope",
               "chunk_count.$": "$.chunk_result.chunk_count",
+              "percent_complete": 100,
               "execution_arn.$": "$$.Execution.Id"
             },
             "EventBusName": "${EventBusName}"
@@ -237,7 +455,7 @@
       "Parameters": {
         "ingestion_id.$": "$.ingestion_id",
         "document_id.$": "$.document_id",
-        "status": "FAILED",
+        "status": "failed",
         "error.$": "$.error",
         "trace_id.$": "$.trace_id",
         "callback_url.$": "$.callback_url"
@@ -269,5 +487,3 @@
     }
   }
 }
-
-
