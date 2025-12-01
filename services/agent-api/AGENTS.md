@@ -5,6 +5,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 - ✅ **Service status**: New LangGraph microservice implementing Epic 3 (see `services/agent-api/epic-03/tasks`). Nothing is deployed yet, but the shared schemas in `packages/shared_data_layer` are stable. Treat every change as production-ready.
 - 🐍 **Runtime**: Python 3.13 managed by `uv` (virtual env lives at `services/agent-api/.venv`).
 - 📚 **Source of truth**: Epic 3 task files under `services/agent-api/epic-03/tasks`. Complete them sequentially and update the checklist after each task.
+- 🚫 **Avoid automation helpers**: Ignore `run_tasks.sh` and `RUN_TASKS.md`. Those files exist for humans orchestrating Codex sessions and must not influence how you plan or code a task.
 
 ## 1. Always Plan → Research → Act → Verify
 

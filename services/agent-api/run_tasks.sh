@@ -3,31 +3,70 @@ set -euo pipefail
 
 # Runs Codex tasks sequentially using the prompt template + AGENTS instructions.
 # Usage:
-#   ./run_tasks.sh [--dry-run] [PROMPT_TEMPLATE] [task_number...]
-# - If PROMPT_TEMPLATE is omitted, defaults to ./prompt_template.txt.
+#   ./run_tasks.sh [--dry-run] [--template FILE] [task_number...]
+# - If no template is supplied, defaults to ./prompt_template.txt.
 # - Without task numbers, every task file in epic-03/tasks is processed.
 
+usage() {
+  cat <<'EOF'
+Usage: ./run_tasks.sh [options] [task_number...]
+
+Options:
+  --dry-run           Render prompts and log actions without calling Codex
+                      or running git commands.
+  --template <FILE>   Use a specific prompt template (defaults to ./prompt_template.txt)
+  --help              Show this message.
+
+Examples:
+  ./run_tasks.sh --dry-run               # preview all tasks with default template
+  ./run_tasks.sh 03 04                   # run tasks 03 and 04 (real Codex run)
+  ./run_tasks.sh --template custom.txt 05 --dry-run
+EOF
+}
+
 DRY_RUN=0
+PROMPT_TEMPLATE=""
+TASK_SELECTION=()
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
       DRY_RUN=1
+      ;;
+    --template)
       shift
+      if [[ $# -eq 0 ]]; then
+        echo "❌ --template requires a file path" >&2
+        exit 1
+      fi
+      PROMPT_TEMPLATE="$1"
+      ;;
+    --template=*)
+      PROMPT_TEMPLATE="${1#*=}"
       ;;
     --help|-h)
-      cat <<'EOF'
-Usage: ./run_tasks.sh [--dry-run] [PROMPT_TEMPLATE] [task_number...]
-
-Options:
-  --dry-run   Render prompts and log actions without calling Codex
-              or running git commands.
-EOF
+      usage
       exit 0
       ;;
-    *)
+    --)
+      shift
+      TASK_SELECTION+=("$@")
       break
       ;;
+    -*)
+      echo "❌ Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      if [[ -z "${PROMPT_TEMPLATE}" && -f "$1" ]]; then
+        PROMPT_TEMPLATE="$1"
+      else
+        TASK_SELECTION+=("$1")
+      fi
+      ;;
   esac
+  shift || true
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,10 +74,7 @@ TASKS_DIR="${SCRIPT_DIR}/epic-03/tasks"
 CHECKLIST_FILE="${SCRIPT_DIR}/epic-03/CHECKLIST.md"
 AGENT_GUIDE="${SCRIPT_DIR}/AGENTS.md"
 
-if [[ $# -gt 0 ]]; then
-  PROMPT_TEMPLATE="$1"
-  shift
-else
+if [[ -z "${PROMPT_TEMPLATE}" ]]; then
   PROMPT_TEMPLATE="${SCRIPT_DIR}/prompt_template.txt"
 fi
 
@@ -56,8 +92,6 @@ if [[ ! -f "${AGENT_GUIDE}" ]]; then
   echo "❌ Agent guide missing: ${AGENT_GUIDE}" >&2
   exit 1
 fi
-
-TASK_SELECTION=("$@")
 
 readarray -t ALL_TASK_FILES < <(ls "${TASKS_DIR}"/task-*.md 2>/dev/null | sort)
 if [[ ${#ALL_TASK_FILES[@]} -eq 0 ]]; then
@@ -129,7 +163,7 @@ collect_status_snapshot() {
 diff_new_files() {
   local before_file="$1"
   local after_file="$2"
-  python <<'PY' "${before_file}" "${after_file}"
+  python3 - "${before_file}" "${after_file}" <<'PY'
 import sys
 from pathlib import Path
 
@@ -183,11 +217,12 @@ else
     "gpt-5.1-codex"
     --config
     'model_reasoning_effort="medium"'
+    --config
+    'approval_policy="never"'
+    --config
+    'features.web_search_request=true'
     --sandbox
     danger-full-access
-    --ask-for-approval
-    never
-    --search
   )
 fi
 
