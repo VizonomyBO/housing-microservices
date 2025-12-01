@@ -26,17 +26,33 @@
       "Next": "Convert"
     },
     "Convert": {
-      "Type": "Pass",
-      "Comment": "Conversion handled by preflight Lambda calling marker-service directly. Pass through convert_result from input.",
+      "Type": "Task",
+      "Comment": "Convert PDF/DOCX to Markdown using markitdown Lambda",
+      "Resource": "${MarkerConverterLambdaArn}",
       "Parameters": {
-        "markdown_key.$": "$.convert_result.markdown_key",
-        "metadata_key.$": "$.convert_result.metadata_key",
-        "figures_prefix.$": "$.convert_result.figures_prefix",
-        "tables_count.$": "$.convert_result.tables_count",
-        "figures_count.$": "$.convert_result.figures_count",
-        "structured_json_key.$": "$.convert_result.structured_json_key"
+        "document_id.$": "$.document_id",
+        "ingestion_id.$": "$.ingestion_id",
+        "bucket.$": "$.bucket",
+        "key.$": "$.key",
+        "source_type.$": "$.source_type",
+        "trace_id.$": "$.trace_id"
       },
       "ResultPath": "$.convert_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "DeadLetter"
+        }
+      ],
       "Next": "EmitConvertCompleted"
     },
     "EmitConvertCompleted": {

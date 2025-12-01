@@ -92,13 +92,49 @@ resource "aws_iam_role_policy" "marker_converter_lambda" {
   })
 }
 
-# Marker Converter now runs as a microservice on EC2 (not Lambda)
-# The EC2 marker-service handles PDF conversion with Marker library
-# See services/marker-service/ for the implementation
-# 
-# Lambda was not viable due to:
-# - Container image size > 10GB limit (PyTorch + CUDA + ML models)
-# - Cold start times too long for ML model loading
+# Document Converter Lambda (using markitdown - lightweight, no ML)
+data "archive_file" "marker_converter" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambdas/marker_converter"
+  output_path = "${path.module}/dist/marker_converter.zip"
+  excludes    = ["tests", "__pycache__", "*.pyc", ".pytest_cache", "Dockerfile"]
+}
+
+resource "aws_lambda_function" "marker_converter" {
+  function_name = "${var.project_name}-marker-converter-${var.environment}"
+  role          = aws_iam_role.marker_converter_lambda.arn
+  
+  filename         = data.archive_file.marker_converter.output_path
+  source_code_hash = data.archive_file.marker_converter.output_base64sha256
+  
+  runtime     = "python3.12"
+  handler     = "handler.handler"
+  timeout     = 120
+  memory_size = 512
+  
+  layers = [
+    aws_lambda_layer_version.python_deps.arn
+  ]
+  
+  environment {
+    variables = {
+      RAW_DOCUMENTS_BUCKET = aws_s3_bucket.raw_documents.id
+      PROCESSED_BUCKET     = aws_s3_bucket.processed_artifacts.id
+      LOG_LEVEL            = var.log_level
+      ENVIRONMENT          = var.environment
+    }
+  }
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-marker-converter-${var.environment}"
+    Environment = var.environment
+    Component   = "document-ingestion"
+  }
+}
 
 # =============================================================================
 # LAMBDA: Chunk Builder (Semantic Chunking)

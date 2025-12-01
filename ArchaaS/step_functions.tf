@@ -7,7 +7,7 @@ resource "aws_sfn_state_machine" "document_ingestion" {
 
   definition = templatefile("${path.module}/step_functions/document_ingestion_workflow.asl.json", {
     # NOTE: Preflight validation now runs via S3 trigger BEFORE this Step Function starts
-    # Marker service runs on EC2 - called by preflight Lambda, results passed to Step Function
+    MarkerConverterLambdaArn     = aws_lambda_function.marker_converter.arn
     ChunkBuilderLambdaArn        = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chunk-builder-${var.environment}"
     TableNormalizerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-table-normalizer-${var.environment}"
     FigureCaptionerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-figure-captioner-${var.environment}"

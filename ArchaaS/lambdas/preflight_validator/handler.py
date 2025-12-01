@@ -55,69 +55,7 @@ logger = get_logger(__name__)
 # Configuration
 STEP_FUNCTION_ARN = os.environ.get("STEP_FUNCTION_ARN", "")
 PROCESSED_BUCKET = os.environ.get("PROCESSED_ARTIFACTS_BUCKET", "")
-MARKER_SERVICE_URL = os.environ.get("MARKER_SERVICE_URL", "http://localhost:8004")
 CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks for streaming hash
-
-
-async def call_marker_service(
-    document_id: str,
-    bucket: str,
-    key: str,
-    content_hash: str,
-    source_type: str,
-    owner_user_id: Optional[str],
-    country_code: Optional[str],
-    trace_id: str,
-) -> dict:
-    """
-    Call the marker-service to convert PDF to Markdown.
-    Returns conversion results dict with markdown_key, metadata_key, etc.
-    """
-    import aiohttp
-    
-    url = f"{MARKER_SERVICE_URL}/convert"
-    payload = {
-        "document_id": document_id,
-        "bucket": bucket,
-        "key": key,
-        "content_hash": content_hash,
-        "source_type": source_type,
-        "owner_user_id": owner_user_id,
-        "country_code": country_code,
-        "trace_id": trace_id,
-    }
-    
-    logger.info(f"Calling marker-service at {url} for document {document_id}")
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=300)  # 5 min timeout
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Marker service error: {response.status} - {error_text}")
-                    raise Exception(f"Marker service returned {response.status}: {error_text}")
-                
-                result = await response.json()
-                logger.info(f"Marker service completed for {document_id}: {result.get('status')}")
-                
-                return {
-                    "markdown_key": result.get("markdown_key"),
-                    "metadata_key": result.get("metadata_key"),
-                    "figures_prefix": result.get("figures_prefix"),
-                    "tables_count": result.get("tables_count", 0),
-                    "figures_count": result.get("figures_count", 0),
-                    "structured_json_key": result.get("metadata_key"),
-                }
-    except asyncio.TimeoutError:
-        logger.error(f"Marker service timeout for {document_id}")
-        raise Exception("Marker service timeout after 5 minutes")
-    except Exception as e:
-        logger.error(f"Failed to call marker service: {e}")
-        raise
 
 
 def async_handler(f):
@@ -411,19 +349,7 @@ async def handler(event: dict, context: Any) -> dict:
                 # Commit the transaction
                 await session.commit()
                 
-                # Call marker-service for PDF conversion
-                convert_result = await call_marker_service(
-                    document_id=document_id,
-                    bucket=bucket,
-                    key=key,
-                    content_hash=content_hash,
-                    source_type=source_type,
-                    owner_user_id=owner_user_id,
-                    country_code=document.country_code,
-                    trace_id=request_id,
-                )
-                
-                # Start Step Function for remaining processing (chunk, embed, etc.)
+                # Start Step Function for processing (convert, chunk, embed, etc.)
                 execution_arn = await start_step_function(
                     document_id,
                     ingestion_job_id,
@@ -438,7 +364,6 @@ async def handler(event: dict, context: Any) -> dict:
                         "language": document.language,
                         "access_scope": document.access_scope,
                         "trace_id": request_id,
-                        "convert_result": convert_result,  # Pass conversion results
                     }
                 )
                 

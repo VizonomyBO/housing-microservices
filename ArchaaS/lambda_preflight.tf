@@ -74,8 +74,6 @@ resource "aws_lambda_function" "preflight_validator" {
       DATABASE_USER              = var.database_username
       DATABASE_PASSWORD          = var.database_password
       DATABASE_SECRET_ARN        = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
-      # Marker service for PDF conversion (runs on EC2)
-      MARKER_SERVICE_URL         = "http://${aws_instance.microservices.public_ip}:8004"
     }
   }
 
