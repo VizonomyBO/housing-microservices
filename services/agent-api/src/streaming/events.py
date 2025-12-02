@@ -206,6 +206,7 @@ def build_envelope(
         timestamp=timestamp or datetime.now(UTC),
     )
 
+
 class DemoModePayload(SSEPayload):
     """Payload describing capabilities skipped while demo mode is active."""
 

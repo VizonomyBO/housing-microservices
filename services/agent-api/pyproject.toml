@@ -26,6 +26,7 @@ dev = [
   "pytest-xdist>=3.6.0",
   "ruff>=0.6.0",
   "ty>=0.0.1a28",
+  "httpx>=0.27.0",
 ]
 
 [build-system]
@@ -84,4 +85,5 @@ dev = [
   "pytest-xdist>=3.6.0",
   "ruff>=0.6.0",
   "ty>=0.0.1a28",
+  "httpx>=0.27.0",
 ]

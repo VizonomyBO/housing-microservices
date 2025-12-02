@@ -785,3 +785,8 @@ client.run_on_dataset(
     -   Implement `tools.py` with Polars SQL wrapper.
 4.  **Build Graph**: Create `graph.py` wiring nodes and edges.
 5.  **Test**: Run with `MemorySaver` and mock data.
+
+### Reduced-scope HTTP helpers (Epic 3.5)
+- `ReducedScopeIngestionJobService` (services/ingestion_job_service.py) auto-completes `ingestion_jobs` rows for markitdown uploads, stamps `documents.metadata_.reduced_scope.ingestion`, and enforces `allowed_chunk_types` before any chunk writes occur.
+- `DocumentUploadService` and `AttachmentService` gate `/v1/documents/upload` + `/v1/conversations/{id}/attachments` so only `chunk_type="text"` assets proceed. Feature-disabled flows return `202` with `Retry-After: 86400` while preserving skipped metadata for follow-up work.
+- `PillarService` materializes JSON pillar answers synchronously (country + conversation scopes) and drops any source rows whose chunks are not text, keeping the frontend aligned with the demo-mode dataset until the PDF/export workers return.

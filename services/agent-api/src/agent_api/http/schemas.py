@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -103,8 +105,140 @@ class BlockingChatResponse(BaseModel):
 
 
 __all__ = [
+    "AttachmentDeleteResponse",
+    "AttachmentListResponse",
+    "AttachmentMutationResponse",
+    "AttachmentRecord",
+    "AttachmentRequest",
     "BlockingChatResponse",
     "ChatMessageBody",
     "ChatRequestBody",
+    "DocumentUploadRequest",
+    "DocumentUploadResponse",
+    "PillarAnswerPayload",
+    "PillarResponse",
+    "PillarSourcePayload",
     "ResponseMode",
 ]
+
+
+class DocumentUploadRequest(BaseModel):
+    """Payload for POST /v1/documents/upload in reduced-scope mode."""
+
+    document_name: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+    content_type: Literal["text/markdown"] = Field(default="text/markdown")
+    chunk_type: Literal["text", "image", "table"] = Field(default="text")
+    access_scope: Literal["user_private", "user_shared", "base"] = Field(default="user_private")
+    country_code: str | None = Field(
+        default=None,
+        description="ISO-3 country code required for base documents.",
+    )
+    language: str | None = Field(default=None, description="ISO 639-1 language code")
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    owner_user_id: str | None = Field(
+        default=None,
+        description="Optional UUID override; defaults to auth context.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_country_code(self) -> DocumentUploadRequest:
+        if not self.document_name.strip():
+            raise ValueError("document_name must contain visible characters")
+        self.document_name = self.document_name.strip()
+        if self.country_code:
+            code = self.country_code.strip().upper()
+            if len(code) != 3:
+                raise ValueError("country_code must be a 3-letter ISO code")
+            self.country_code = code
+        if self.owner_user_id:
+            try:
+                UUID(str(self.owner_user_id))
+            except ValueError as exc:  # pragma: no cover - defensive guard
+                raise ValueError("owner_user_id must be a UUID string") from exc
+        if self.chunk_type not in {"text", "image", "table"}:
+            raise ValueError("chunk_type is invalid")
+        return self
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response payload for POST /v1/documents/upload."""
+
+    document_id: str | None = None
+    ingestion_id: str | None = None
+    content_hash: str
+    status: Literal["COMPLETED", "DEDUPED", "FEATURE_DISABLED"]
+    message: str | None = None
+    request_id: str
+    upload: dict[str, Any] | None = None
+    ingestion: dict[str, Any] | None = None
+    reduced_scope: dict[str, Any] | None = None
+
+
+class AttachmentRecord(BaseModel):
+    document_id: str
+    attach_source: str
+    role: str
+    visibility: Literal["visible", "hidden", "read_only"]
+    canonical_name: str | None = None
+    access_scope: str
+    country_code: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class AttachmentListResponse(BaseModel):
+    conversation_id: str
+    attachments: list[AttachmentRecord]
+    request_id: str
+
+
+class AttachmentRequest(BaseModel):
+    document_id: str
+    visibility: Literal["visible", "hidden", "read_only"] | None = None
+    role: str | None = Field(default="primary")
+    auto_attach_base_docs: bool = False
+
+
+class AttachmentMutationResponse(BaseModel):
+    conversation_id: str
+    document_id: str | None
+    status: Literal["ATTACHED", "FEATURE_DISABLED", "NOT_FOUND"]
+    attachment: AttachmentRecord | None = None
+    auto_attached: list[str] = Field(default_factory=list)
+    message: str | None = None
+    request_id: str
+    reduced_scope: dict[str, Any] | None = None
+
+
+class AttachmentDeleteResponse(BaseModel):
+    conversation_id: str
+    document_id: str
+    status: Literal["DETACHED", "NOT_FOUND", "FORBIDDEN"]
+    request_id: str
+
+
+class PillarSourcePayload(BaseModel):
+    chunk_id: str
+    document_id: str | None = None
+    chunk_type: str | None = None
+    evidence_text: str
+    page_number: int | None = None
+
+
+class PillarAnswerPayload(BaseModel):
+    pillar: str
+    score: float | None = None
+    summary_markdown: str
+    answer_json: dict[str, Any]
+    document_id: str
+    generated_at: datetime | None = None
+    sources: list[PillarSourcePayload] = Field(default_factory=list)
+
+
+class PillarResponse(BaseModel):
+    country_code: str
+    conversation_id: str | None = None
+    pillars: list[PillarAnswerPayload]
+    request_id: str
+    reduced_scope: dict[str, Any] | None = None

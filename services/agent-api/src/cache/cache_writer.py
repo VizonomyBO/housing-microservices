@@ -15,10 +15,11 @@ from cache.response_serializer import (
 )
 from cache.valkey_client import ValkeyCacheClientProtocol
 from state.agent_state import AgentState, CacheMetadata
-from telemetry.cache_observability import CacheObservability
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from telemetry.cache_observability import CacheObservability
 
 logger = logging.getLogger(__name__)
 

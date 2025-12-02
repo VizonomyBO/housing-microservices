@@ -78,7 +78,7 @@ class ValkeyRateLimiterStub(NullRateLimiter):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         # TODO(epic-04): integrate Valkey-backed limiter once reduced scope lifts.
-        await super().acquire(bucket=bucket, tokens=tokens, route=route, metadata=metadata)
+        return None
 
 
 __all__ = [

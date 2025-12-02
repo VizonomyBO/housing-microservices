@@ -49,7 +49,8 @@ Expose text-only upload, attachment, and pillar endpoints that behave synchronou
 - **Handoff Notes**: Execution agent must state which helper modules/endpoints were added, how ingestion job shortcuts are recorded, and which TODO markers point to re-enabling async exports.
 
 ## Handoff Notes
-- Provide API examples (request/response bodies) and fixture names for the synchronous endpoints for Task 03.
-- Call out any shared_data_layer changes or migrations so the next agent can reuse them when wiring the workerless runtime.
-- Document how pillar JSON payloads encode citations/metadata so frontend + Task 03 remain aligned.
-- Task 01 wired `ReducedScopeSettings` + `demo_mode_skipped` SSE events; reuse `settings.reduced_scope.allowed_chunk_types` + `ReducedScopeRateLimiter` when gating uploads/attachments.
+- `/v1/documents/upload`, `/v1/conversations/{id}/attachments`, `/v1/pillars/{country}` + `/v1/conversations/{id}/pillars` are implemented in text-only mode. See `tests/http/test_documents_route.py`, `tests/http/test_attachments_route.py`, and `tests/http/test_pillars_route.py` for request/response fixtures Task 03 can reuse.
+- `ReducedScopeIngestionJobService` auto-completes ingestion rows and stamps `document.metadata_.reduced_scope.ingestion`. Attachment skips (images/tables) append to `document.metadata_.reduced_scope.skipped` so later workers know which uploads to replay.
+- No shared_data_layer schema changes were required; repositories are reused via `DocumentFactory` + `ConversationScopeRepository`. Workerless runtime can continue to import these services without new migrations.
+- Pillar JSON responses surface only text chunk citations via `sources[]`; PDF/export TODOs remain inline in `services/pillar_service.py` and `http/routes/pillars.py` for future async reactivation.
+- Every route sets ReducedScope headers + `Retry-After` for 202 feature-disabled flows; keep using `settings.reduced_scope.allowed_chunk_types` + `ReducedScopeRateLimiter` when new endpoints arrive.

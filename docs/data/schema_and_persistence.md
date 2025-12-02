@@ -136,6 +136,8 @@ Constraints & indexes:
 
 Indexes: `(document_id, stage)` plus partial `(status) WHERE status IN ('pending','failed')`.
 
+> **Reduced Scope (Task 3.5.2):** The FastAPI gateway now calls `ReducedScopeIngestionJobService`, which inserts a single `ingestion_jobs` row per upload, stamps it with `stage='activate'`/`status='succeeded'`, and annotates `documents.metadata_.reduced_scope.ingestion = {"mode": "text_only", "auto_completed": true}`. This keeps the schema untouched while clearly signaling that the job was satisfied inline during the demo build.
+
 **Table: artifacts**
 
 | Column | Type | Notes |
@@ -168,6 +170,8 @@ Indexes: `(document_id, artifact_type)` and GIN on `metadata`.
 | `deleted_at` | `timestamptz` | Null unless detaching for audit. |
 
 Primary key `(conversation_id, document_id)`. Triggers increment/decrement `documents.active_chat_refs` when rows insert/delete (ignoring soft deletes until hard removal). Indexes on `(document_id)` and `(attach_source)` support GC and analytics.
+
+> **Reduced Scope:** Attachment APIs update `document.metadata_.reduced_scope.skipped` whenever a user tries to attach a document whose chunks include `image`/`table`. These metadata stubs preserve auditability without mutating the structural tables, and the HTTP layer returns `202 + Retry-After` so clients know the request was short-circuited.
 
 ### 3.4 Retrieval Units
 

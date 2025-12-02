@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import HTTPException, Request, status
 from shared_data_layer.db.session import DatabaseSessionManager
@@ -48,8 +48,8 @@ async def get_auth_context(request: Request) -> AuthContext:
 
     header = request.headers.get("Authorization")
     if header and header.startswith("Bearer "):
-        token = header.split(" ", 1)[1]
-        return AuthContext(user_id=f"user:{token[:8]}")
+        token = header.split(" ", 1)[1].strip()
+        return AuthContext(user_id=_coerce_user_id(token))
     return AuthContext(user_id=None)
 
 
@@ -65,8 +65,8 @@ def get_stream_settings() -> StreamSettings:
     return _STREAM_SETTINGS
 
 
-def get_cache_client(request: Request = None) -> ValkeyCacheClientProtocol:
-    if request is not None and hasattr(request, "app"):
+def get_cache_client(request: Request) -> ValkeyCacheClientProtocol:
+    if hasattr(request, "app"):
         client = getattr(request.app.state, "valkey_client", None)
         if client is not None:
             return client
@@ -79,8 +79,8 @@ def set_cache_client(client: ValkeyCacheClientProtocol) -> None:
     _CACHE_CLIENT_STATE["client"] = client
 
 
-def get_rate_limiter(request: Request = None) -> RateLimiterProtocol:
-    if request is not None and hasattr(request, "app"):
+def get_rate_limiter(request: Request) -> RateLimiterProtocol:
+    if hasattr(request, "app"):
         limiter = getattr(request.app.state, "rate_limiter", None)
         if limiter is not None:
             return limiter
@@ -93,12 +93,11 @@ def set_rate_limiter(limiter: RateLimiterProtocol) -> None:
     _RATE_LIMITER_STATE["limiter"] = limiter
 
 
-def get_settings(request: Request = None) -> Settings:
+def get_settings(request: Request) -> Settings:
     """Return the cached Settings instance stored on the app state."""
 
-    if request is None or not hasattr(request, "app"):
-        # Fallback primarily used in tests that bypass FastAPI state.
-        return load_settings()
+    if not hasattr(request, "app"):
+        raise RuntimeError("FastAPI request context is required for get_settings")
     settings = getattr(request.app.state, "settings", None)
     if settings is None:
         settings = load_settings()
@@ -156,3 +155,10 @@ __all__ = [
     "set_chat_runner",
     "set_rate_limiter",
 ]
+
+
+def _coerce_user_id(raw: str) -> str:
+    try:
+        return str(UUID(raw))
+    except ValueError:
+        return str(uuid5(NAMESPACE_URL, raw))

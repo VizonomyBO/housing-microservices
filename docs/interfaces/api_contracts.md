@@ -70,6 +70,8 @@ When the payload matches an existing `(owner_user_id, content_hash)` document, t
 - Duplicate `Idempotency-Key` returns the original payload with `status` reflecting latest pipeline stage.
 - Validation failures return `400 + VALIDATION_ERROR` with field-level issues.
 
+> **Reduced Scope (Epic 3.5):** `POST /v1/documents/upload` runs synchronously in text-only mode. Only `content_type="text/markdown"` + `chunk_type="text"` payloads are accepted. When callers submit image/table chunks the API returns `202 Accepted` with `{ "status": "feature_disabled" }`, a `Retry-After: 86400` header, and records the skipped capability inside `document.metadata_.reduced_scope.skipped`. Successful uploads immediately mark the document `active`, create a single text chunk, and return `status="COMPLETED"` plus `ingestion_id` referencing the auto-completed job.
+
 ### 1.3 POST /v1/chat
 Primary conversational endpoint anchored to LangGraph threads.
 
@@ -229,6 +231,48 @@ Returns latest precomputed pillar answers for the requested country.
 }
 ```
 Conditional caching allowed for 5 minutes via `ETag` / `If-None-Match`.
+
+> **Reduced Scope:** Pillar calls now return JSON payloads only; PDF/export workflows are paused until Valkey/worker features return. Only sources backed by `chunk_type="text"` are emitted, so image/table citations are silently skipped with `reduced_scope` metadata communicating the limitation.
+
+### 1.7 POST /v1/conversations/{id}/attachments
+Creates or reactivates a `conversation_documents` bridge row.
+
+**Request**:
+```json
+{
+  "document_id": "45e3...",
+  "visibility": "visible", // optional override
+  "role": "primary",
+  "auto_attach_base_docs": true
+}
+```
+
+**Response** `201/202`:
+```json
+{
+  "conversation_id": "thr_92aa2",
+  "document_id": "45e3...",
+  "status": "ATTACHED",
+  "attachment": {
+    "document_id": "45e3...",
+    "attach_source": "user_request",
+    "role": "primary",
+    "visibility": "visible"
+  },
+  "auto_attached": ["doc_base_LBR_macro"],
+  "request_id": "..."
+}
+```
+
+- If `auto_attach_base_docs=true`, the API also attaches active base documents for the conversation’s country and lists them under `auto_attached`.
+- Image/table documents are short-circuited with `202 Accepted`, `{ "status": "FEATURE_DISABLED" }`, and `Retry-After: 86400`. The skip is recorded in `document.metadata_.reduced_scope.skipped` for auditing.
+- Base-scope documents cannot be detached; clients should mark them `visibility=hidden` instead until the full workflow returns.
+
+### 1.8 GET /v1/conversations/{id}/attachments
+Lists the effective attachment set with the same `AttachmentRecord` schema used in the mutation response. Hidden/read-only entries remain in the payload so clients can expose audit controls, but retrieval still honors the stored visibility.
+
+### 1.9 GET /v1/conversations/{id}/pillars
+Returns the same JSON structure as `GET /v1/pillars/{country_code}` scoped to the conversation’s active attachments. Only answers referencing the attached document set are returned; when no attachments exist, the API responds with an empty `pillars` array and still echoes the `conversation_id` + reduced-scope metadata so Task 03 can render deterministic screens.
 
 ## 2. Ingestion Workflow Event Contracts
 ### 2.1 S3 Trigger Event

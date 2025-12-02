@@ -8,7 +8,7 @@ import random
 import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from valkey import asyncio as valkey_async
@@ -27,7 +27,9 @@ from valkey.exceptions import (
 
 from cache.valkey_client import ValkeyCacheClientProtocol
 from config import ValkeySettings
-from telemetry import CacheObservability
+
+if TYPE_CHECKING:
+    from telemetry import CacheObservability
 
 logger = logging.getLogger(__name__)
 
