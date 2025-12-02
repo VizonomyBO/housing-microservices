@@ -429,8 +429,32 @@ resource "aws_lambda_function" "embedding_writer" {
 
   runtime     = "python3.12"
   handler     = "handler.handler"
-  timeout     = 60
-  memory_size = 256
+  timeout     = 300  # 5 min for large documents
+  memory_size = 512
+
+  layers = [
+    aws_lambda_layer_version.python_deps.arn
+  ]
+
+  environment {
+    variables = {
+      VOYAGE_API_KEY     = var.voyage_api_key
+      VOYAGE_MODEL       = "voyage-3-lite"
+      PROCESSED_BUCKET   = aws_s3_bucket.processed_artifacts.id
+      DATABASE_HOST      = aws_instance.microservices.private_ip
+      DATABASE_PORT      = "5432"
+      DATABASE_NAME      = var.database_name
+      DATABASE_USER      = var.database_user
+      DATABASE_PASSWORD  = var.database_password
+      EMBEDDING_BATCH_SIZE = "32"
+      LOG_LEVEL          = var.log_level
+    }
+  }
+
+  vpc_config {
+    subnet_ids         = [aws_subnet.private.id]
+    security_group_ids = [aws_security_group.lambda.id]
+  }
 
   tags = {
     Name        = "${var.project_name}-embedding-writer-${var.environment}"
