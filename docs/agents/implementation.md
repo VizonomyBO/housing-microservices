@@ -431,6 +431,29 @@ Designed for safe, sandboxed data analysis with **self-correction** and **HITL**
 -   **Purpose**: On cache hit, short-circuit execution and return the cached answer/citations/metrics. Cache entries are keyed by `hash(country_code, normalized_prompt, scope_hash, route, tool_parameters, retrieval_parameters, workflow_plan_version)` so replays remain deterministic and audit-friendly.
 -   **State Effects**: Populate `answer`, `citations`, `quality_score`, set `cache_hit=True`, and emit the same telemetry payload (metrics + document_scope) as a fresh run would.
 
+##### CacheWriter & Short-Circuit Helper (Task 07)
+-   `CacheWriter` now serializes positive answers via `CacheResponsePayload` before persisting them to Valkey. The payload is versioned (`schema_version`, default `1`) and captures `answer_text`, normalized `citations[]` (`doc_id`, `chunk_id`, `snippet`, optional metadata), deduplicated `chunk_ids[]`, `workflow_plan_excerpt` (plan id/version + ordered summary steps), `workflow_plan_id`, `model_metadata` (model name, temperature, token counts, etc.), and `created_at`. Deterministic serialization (`serialize_cache_response`) enforces sorted citations/chunk identifiers so payload bytes remain identical for equivalent answers, minimizing duplicate cache entries.
+-   `CacheWriter.write` only executes when `AgentState.cache_metadata.cache_key` exists and updates `cache_metadata.written_at` while tagging a placeholder `tag_miss(..., reason="write_through")` event. The telemetry hook feeds Task 13 so cache writes automatically show up in SSE metrics/Prometheus once those integrations land; for now the events accumulate in the in-memory client for testing.
+-   Downstream nodes call `maybe_serve_from_cache(client=..., cache_metadata=state.cache_metadata)` before expensive work. On hit, it deserializes the payload, marks `cache_metadata.hit=True`/`hit_at=now`, and returns a `CacheShortCircuitResult` containing the structured payload. On miss it tags `tag_miss(..., reason="not_found")` and leaves metadata untouched. Guards swallow Valkey errors and log warnings so LangGraph never fails due to cache unavailability.
+-   **Example usage** (router/subgraph entrypoints):
+
+    ```python
+    cache_result = await maybe_serve_from_cache(
+        client=valkey_client,
+        cache_metadata=state.cache_metadata,
+    )
+    if cache_result.hit:
+        return {
+            "cache_metadata": cache_result.cache_metadata,
+            "answer": cache_result.payload.answer_text,
+            "citations": cache_result.payload.citations,
+            "cache_hit": True,
+        }
+    ```
+
+    Subsequent nodes may still call `CacheWriter` with enriched payloads (model metadata, workflow excerpts) to persist the latest answer.
+-   **SSE placeholder**: Router + CacheWriter will emit `metrics` events describing `cache_key`, `cache_hit`, TTL, and perceived reason (`write_through`, `not_found`, `hit`) once Task 12 wires the handler. Having deterministic payloads today means Task 12 only needs to forward these events without reshaping the schema.
+
 ### 3.3. Edges & Conditional Logic
 
 -   **`conditional_edge(Router)`**:
