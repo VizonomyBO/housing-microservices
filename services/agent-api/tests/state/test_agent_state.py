@@ -19,10 +19,13 @@ from models.retrieval import (
 from state.agent_state import (
     AgentState,
     CacheMetadata,
+    ComparisonAttachment,
     GraphContext,
     GraphEntitySummary,
     HitlTranscriptEntry,
     MessageSnapshot,
+    NumericalTable,
+    NumericalTableColumn,
     RetrievalMetrics,
     VisionFinding,
     WorkflowPlan,
@@ -92,6 +95,41 @@ def test_agent_state_round_trip_serialization() -> None:
             repairs=1,
             schema_relaxations=0,
         ),
+        numerical_tables=[
+            NumericalTable(
+                table_id="tbl-gdp",
+                table_name="GDP Table",
+                alias="gdp",
+                columns=[
+                    NumericalTableColumn(
+                        name="country",
+                        data_type="text",
+                        description="Country code",
+                    ),
+                    NumericalTableColumn(
+                        name="gdp",
+                        data_type="float",
+                        min_value=0.0,
+                        max_value=50.0,
+                    ),
+                ],
+                row_count=200,
+                sample_rows=[{"country": "LBR", "gdp": 2.1}],
+                metadata={"source": "doc-1"},
+            )
+        ],
+        numerical_selected_table="gdp",
+        numerical_sql="SELECT country, gdp FROM gdp",
+        numerical_sql_reasoning="Need GDP per country",
+        numerical_result_rows=[{"country": "LBR", "gdp": 2.1}],
+        numerical_result_metrics={"execution_ms": 12.3, "row_count": 1},
+        numerical_artifacts=[
+            ComparisonAttachment(
+                attachment_type="table",
+                label="GDP preview",
+                payload={"rows": 1},
+            )
+        ],
         vision_findings=[
             VisionFinding(
                 chunk_id="chunk-1",
@@ -165,6 +203,10 @@ def test_agent_state_round_trip_serialization() -> None:
     assert rehydrated.normalized_input.scope_hash == "hash-abc"
     assert rehydrated.attachment_scope is not None
     assert rehydrated.attachment_scope.documents[0].document_id == "doc-1"
+    assert rehydrated.numerical_selected_table == "gdp"
+    assert rehydrated.numerical_tables[0].columns[0].name == "country"
+    assert rehydrated.numerical_result_rows[0]["country"] == "LBR"
+    assert rehydrated.numerical_artifacts[0].attachment_type == "table"
 
 
 def test_hitl_transcript_round_trip() -> None:

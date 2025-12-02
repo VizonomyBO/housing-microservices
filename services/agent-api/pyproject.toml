@@ -10,6 +10,7 @@ dependencies = [
   "lingua-language-detector>=2.0.2",
   "shared-data-layer",
   "testcontainers[postgresql]>=4.0.0",
+  "polars>=1.35.2",
 ]
 
 [project.optional-dependencies]

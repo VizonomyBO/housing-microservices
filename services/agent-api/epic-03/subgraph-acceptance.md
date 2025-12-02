@@ -17,7 +17,11 @@ Use this file to record QA criteria per modality as tasks are completed.
 - SSE placeholders remain in `subgraph_metrics` pending Task 12 event emitters.
 
 ## Numerical Subgraph (Task 10)
-- TODO: populate once Task 10 implements nodes.
+- TextToSQL node (`subgraphs/numerical/text_to_sql_node.py`) builds deterministic prompts from workflow plans + table schemas, validates generated SQL against shared metadata, and records guardrail violations (code `numerical_sql`) before routing to HumanGate on unsupported joins.
+- Polars executor node (`subgraphs/numerical/polars_executor_node.py`) registers only the selected table with `pl.SQLContext`, executes queries inside `asyncio.to_thread`, and records execution metrics (`numerical.polars.*`) alongside materialized rows.
+- Result validator (`subgraphs/numerical/result_validator_node.py`) enforces schema + column bounds, emits `numerical_validation` guardrails, and optionally pauses via HumanGate when numeric ranges are violated or result sets are empty.
+- Artifact helpers (`subgraphs/numerical/artifacts.py`) serialize table previews and heuristic chart specs that align with the SSE attachment contract (table/chart payloads) so Guardrails/Router can stream them downstream.
+- Tests in `tests/subgraphs/numerical/` cover SQL prompt guardrails, Polars execution success/error cases, and validator → HumanGate escalation, ensuring failure paths (invalid SQL, out-of-bounds rows) are deterministic.
 
 ## Vision Subgraph (Task 11)
 - TODO: populate once Task 11 implements nodes.

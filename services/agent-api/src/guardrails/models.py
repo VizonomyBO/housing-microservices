@@ -33,6 +33,8 @@ class GuardrailCode(str, Enum):
     WORKFLOW_POLICY = "workflow_policy"
     COMPLIANCE_POLICY = "compliance_policy"
     CITATION_MISMATCH = "citation_mismatch"
+    NUMERICAL_SQL = "numerical_sql"
+    NUMERICAL_VALIDATION = "numerical_validation"
 
 
 class GuardrailViolation(BaseModel):

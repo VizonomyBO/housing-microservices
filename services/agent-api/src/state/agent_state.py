@@ -321,6 +321,47 @@ class AnalystComparison(BaseModel):
     )
 
 
+class NumericalTableColumn(BaseModel):
+    """Column metadata surfaced to the Numerical subgraph."""
+
+    name: str = Field(..., description="Column name as it appears in the dataset/schema.")
+    data_type: str = Field(..., description="Logical data type (e.g., int, float, category).")
+    description: str | None = Field(default=None, description="Optional business-friendly notes.")
+    min_value: float | None = Field(
+        default=None,
+        description="Lower bound used by validators when enforcing numeric ranges.",
+    )
+    max_value: float | None = Field(
+        default=None,
+        description="Upper bound used by validators when enforcing numeric ranges.",
+    )
+
+
+class NumericalTable(BaseModel):
+    """Table artifact selected for Numerical subgraph execution."""
+
+    table_id: str = Field(..., description="Deterministic identifier for the table artifact.")
+    table_name: str = Field(..., description="Human-readable name (for prompts/attachments).")
+    alias: str = Field(..., description="Alias registered with the Polars SQLContext.")
+    columns: list[NumericalTableColumn] = Field(
+        default_factory=list,
+        description="Column metadata exposed to prompt builders and validators.",
+    )
+    row_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="Approximate row count surfaced to the prompt/contextualizer.",
+    )
+    sample_rows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Optional small sample of rows, helpful for prompt grounding.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary metadata (e.g., data currency, source document ids).",
+    )
+
+
 class CacheMetadata(BaseModel):
     """Metadata around cache lookups/writes (docs/overview/system_architecture.md §3)."""
 
@@ -462,6 +503,34 @@ class AgentState(BaseModel):
     analyst_comparison: AnalystComparison | None = Field(
         default=None,
         description="Latest analyst comparison result including attachments (Task 09).",
+    )
+    numerical_tables: list[NumericalTable] = Field(
+        default_factory=list,
+        description="Table artifacts supplied by TableSelector for numerical reasoning.",
+    )
+    numerical_selected_table: str | None = Field(
+        default=None,
+        description="Alias of the table selected for the next numerical query execution.",
+    )
+    numerical_sql: str | None = Field(
+        default=None,
+        description="Latest Polars SQL query proposed by the TextToSQL node.",
+    )
+    numerical_sql_reasoning: str | None = Field(
+        default=None,
+        description="Model/tool reasoning notes for the generated SQL query.",
+    )
+    numerical_result_rows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Materialized rows returned by the Polars executor.",
+    )
+    numerical_result_metrics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Execution metrics for numerical analysis (duration, row_count, etc.).",
+    )
+    numerical_artifacts: list[ComparisonAttachment] = Field(
+        default_factory=list,
+        description="Serialized attachments (tables/charts) derived from numerical results.",
     )
     cache_metadata: CacheMetadata = Field(
         default_factory=CacheMetadata,
@@ -617,6 +686,8 @@ __all__ = [
     "HitlTranscriptEntry",
     "MessageSnapshot",
     "NormalizedInput",
+    "NumericalTable",
+    "NumericalTableColumn",
     "RetrievalMetrics",
     "RouterRoute",
     "VisionFinding",
