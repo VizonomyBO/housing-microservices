@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class SSEEventType(str, Enum):
     """Enumerates all supported SSE event categories."""
 
+    META = "meta"
     TASK_START = "task_start"
     TASK_END = "task_end"
     CACHE_HIT = "cache_hit"
@@ -26,6 +27,8 @@ class SSEEventType(str, Enum):
     HITL_PAUSE = "hitl_pause"
     HITL_RESUME = "hitl_resume"
     TELEMETRY_SNAPSHOT = "telemetry_snapshot"
+    DONE = "done"
+    TASK_ERROR = "task_error"
 
 
 class SSEPayload(BaseModel):
@@ -123,11 +126,24 @@ class TelemetrySnapshotPayload(SSEPayload):
     window_ms: int | None = Field(default=None, description="Measurement window in milliseconds.")
 
 
+class TaskErrorPayload(SSEPayload):
+    """Payload emitted when the gateway surfaces an unexpected error."""
+
+    code: str = Field(..., description="Application-level error code (e.g., INTERNAL_ERROR).")
+    message: str = Field(..., description="Human-readable explanation of the failure.")
+    retryable: bool = Field(default=False, description="Whether clients may safely retry.")
+    details: Mapping[str, Any] = Field(
+        default_factory=dict,
+        description="Optional structured metadata (stack hashes, node info, etc.).",
+    )
+
+
 PayloadType = (
     TaskLifecyclePayload
     | CacheEventPayload
     | HitlEventPayload
     | TelemetrySnapshotPayload
+    | TaskErrorPayload
     | SSEPayload
 )
 
@@ -199,4 +215,7 @@ EVENT_PAYLOAD_MODEL: dict[SSEEventType, type[SSEPayload]] = {
     SSEEventType.HITL_PAUSE: HitlEventPayload,
     SSEEventType.HITL_RESUME: HitlEventPayload,
     SSEEventType.TELEMETRY_SNAPSHOT: TelemetrySnapshotPayload,
+    SSEEventType.META: SSEPayload,
+    SSEEventType.DONE: SSEPayload,
+    SSEEventType.TASK_ERROR: TaskErrorPayload,
 }

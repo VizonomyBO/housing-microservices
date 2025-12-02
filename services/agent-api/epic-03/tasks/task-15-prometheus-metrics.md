@@ -20,9 +20,9 @@ Wire the telemetry stack into the actual service lifecycle: instantiate `Metrics
 4. Task 13 log summary under `services/agent-api/logs/task_13/codex.log` for explicit TODOs (lines 80870–80905).
 
 ## Implementation Scope & Files
-- Application bootstrap (`services/agent-api/src/http/app.py` or equivalent) to create/load `MetricsRegistry`, `CacheObservability`, and DB session factories.
-- Dependency modules (e.g., `services/agent-api/src/http/deps.py`) that inject metrics/observability into CacheWriter, HumanGateService, Router, etc.
-- New `/metrics` route module (`services/agent-api/src/http/routes/metrics.py`) returning `MetricsRegistry.render_prometheus()` with proper headers/auth guards.
+- Application bootstrap (`services/agent-api/src/agent_api/http/app.py` or equivalent) to create/load `MetricsRegistry`, `CacheObservability`, and DB session factories.
+- Dependency modules (e.g., `services/agent-api/src/agent_api/http/deps.py`) that inject metrics/observability into CacheWriter, HumanGateService, Router, etc.
+- New `/metrics` route module (`services/agent-api/src/agent_api/http/routes/metrics.py`) returning `MetricsRegistry.render_prometheus()` with proper headers/auth guards.
 - Telemetry wiring in cache/HITL code paths to ensure DB writes receive an `AsyncSession` (`services/agent-api/src/cache/cache_writer.py`, `services/agent-api/src/hitl/human_gate_service.py`, `services/agent-api/src/streaming/with_sse.py`).
 - Tests under `services/agent-api/tests/http/test_metrics_route.py` and/or `tests/telemetry/test_prometheus_endpoint.py` verifying Prometheus output, auth, and error handling.
 

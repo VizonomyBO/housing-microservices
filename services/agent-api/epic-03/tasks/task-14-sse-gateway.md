@@ -20,9 +20,9 @@ Expose a FastAPI streaming endpoint for `POST /v1/chat` (and any supporting depe
 4. `services/agent-api/AGENTS.md` (workflow + verification commands).
 
 ## Implementation Scope & Files
-- Introduce a FastAPI application (e.g., `services/agent-api/src/http/app.py`) plus routers under `services/agent-api/src/http/routes/chat.py`.
-- Dependency helpers & request models (e.g., `services/agent-api/src/http/deps.py`, `services/agent-api/src/http/schemas.py`).
-- Streaming orchestration glue (e.g., `services/agent-api/src/http/streaming.py`) that takes a validated chat request, instantiates `SSEEmitter`, invokes the LangGraph runner, and turns the emitter iterator into an `EventSourceResponse`/`StreamingResponse`.
+- Introduce a FastAPI application (e.g., `services/agent-api/src/agent_api/http/app.py`) plus routers under `services/agent-api/src/agent_api/http/routes/chat.py`.
+- Dependency helpers & request models (e.g., `services/agent-api/src/agent_api/http/deps.py`, `services/agent-api/src/agent_api/http/schemas.py`).
+- Streaming orchestration glue (e.g., `services/agent-api/src/agent_api/http/streaming.py`) that takes a validated chat request, instantiates `SSEEmitter`, invokes the LangGraph runner, and turns the emitter iterator into an `EventSourceResponse`/`StreamingResponse`.
 - Tests under `services/agent-api/tests/http/test_chat_stream.py` that mock the LangGraph runner and assert SSE formatting, keep-alives, and error propagation.
 - Minimal entrypoint (`services/agent-api/src/main.py`) or `uvicorn` config hooking FastAPI’s lifespan/startup if not already present.
 

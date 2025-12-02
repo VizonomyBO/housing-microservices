@@ -116,6 +116,14 @@ Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store
 | `interrupt` | `{ "type": "clarification", "prompt": "Need GDP base year" }` |
 | `metrics` | `{ "tokens_prompt": 1234, "tokens_completion": 245, "retrieval": {"hybrid_k": 10}, "document_scope": {"base": ["doc_base_LBR_macro"], "user": ["doc_user_42_budget"]} }` |
 | `done` | `{ "status": "COMPLETED", "answer": "...", "citations": [{"doc_id": "doc_a12b3", "chunk_id": "ch_9"}], "cache_hit": false }` |
+| `task_error` | `{ "code": "INTERNAL_ERROR", "message": "boom", "retryable": false }` |
+
+**Gateway implementation notes**:
+
+- `POST /v1/chat` is now served directly from FastAPI via `services/agent-api/src/agent_api/http/app.py` and `services/agent-api/src/agent_api/http/routes/chat.py`. Requests inherit a `Viz-Request-Id` whether or not the caller supplies one, and the ID is echoed on every response (streaming + blocking).
+- Streaming responses set `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-store`, `Connection: keep-alive`, and `X-Accel-Buffering: no` so nginx/ALB do not buffer the feed. The gateway injects comment-based keep-alives (`: keep-alive`) at ≤10s intervals via `SSEEmitter`.
+- Blocking responses share the same request schema but add `Cache-Control: no-store` to guarantee intermediaries do not cache transcripts.
+- The gateway emits an initial `meta` frame (thread/session/request identifiers) before LangGraph fires node-level telemetry frames, and emits `task_error` when uncaught exceptions propagate. Clients should treat `task_error` as terminal and rely on the accompanying HTTP 5xx to trigger retries.
 
 Blocking mode returns the final `done` payload plus `messages` array in a single JSON response.
 

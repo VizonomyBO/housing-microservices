@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "LangGraph agent microservice"
 requires-python = ">=3.13"
 dependencies = [
+  "fastapi>=0.115.0",
   "langchain-core>=0.2.33",
   "pydantic>=2.7.0",
   "pytest-asyncio>=1.3.0",
@@ -15,6 +16,7 @@ dependencies = [
   "shared-data-layer",
   "testcontainers[postgresql]>=4.0.0",
   "polars>=1.35.2",
+  "uvicorn>=0.30.0",
 ]
 
 [project.optional-dependencies]

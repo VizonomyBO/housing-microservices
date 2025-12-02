@@ -652,21 +652,7 @@ The FastAPI gateway and the LangGraph executor now live in the same ASGI process
 **Implementation**:
 The service runs as a standalone FastAPI container/process, listening on an internal port (e.g., 8000) and fronted by an ALB or API Gateway HTTP API. Because the FastAPI router already fronts the public interface, no separate Go proxy is required—the `/agent` streaming endpoint is mounted directly in FastAPI.
 
-```python
-from fastapi import FastAPI
-from langserve import add_routes
-from graph import graph # The compiled LangGraph
-
-app = FastAPI(title="Vizonomy Agent Service")
-
-# 1. Standard Agent Routes (Invoke, Stream, Batch)
-add_routes(
-    app,
-    graph,
-    path="/agent",
-    enabled_endpoints=["invoke", "stream_events"], # We focus on streaming
-)
-```
+`services/agent-api/src/agent_api/http/app.py` hosts the FastAPI factory while `src/agent_api/http/routes/chat.py` wires `/v1/chat` and delegates to `src/agent_api/http/streaming.py` for SSE orchestration. The streaming helper wraps `SSEEmitter`, injects gateway metadata (`meta` frames), enforces keep-alives, and forwards LangGraph events to `text/event-stream` responses or buffers them for blocking callers. Future LangServe wiring can mount subgraphs alongside the bespoke `/v1/chat` router by extending the app in `src/main.py`.
 
 **Scalability**:
 -   **Stateless**: The service itself is stateless (state is persisted in Postgres/Redis via the Checkpointer).
