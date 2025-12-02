@@ -7,14 +7,14 @@ Use this file to record QA criteria per modality as tasks are completed.
 - CitationVerifier validates every citation against retrieved context, records `citation_mismatch` guardrail violations, and routes to HumanGate with `interrupt_reason=invalid_citation` when evidence is missing.
 - Cache misses drive the composer path (LLM adapter) and populate `answer_chunk_ids`, `answer_metadata`, and `quality_score` for downstream streaming/CacheWriter usage.
 - Integration test `tests/subgraphs/test_informational_flow.py` exercises the happy path (cache miss → synthesis → verification) while unit tests cover cache hits and invalid citation HITL escalation.
-- Outstanding TODO (Task 12): wire SSE metrics for cache events + HITL payloads emitted by these nodes; placeholders live in `subgraph_metrics`.
+- SSE emitters instrument these nodes (Task 12) to produce cache hit/miss/write frames plus `agent_cache_events_total` metric references; wiring the FastAPI SSE endpoint will surface these events to clients without further node changes.
 
 ## Analyst Subgraph (Task 09)
 - AnalystPlanner translates `workflow_plan` outputs into `AnalystPlan` (step metadata + complexity telemetry), updating `subgraph_metrics` for eventual SSE streaming.
 - ComparisonSynthesizer builds the final analyst answer plus attachments, persists Valkey entries through `CacheWriter`, and captures highlights for streaming clients.
 - Tests (`tests/subgraphs/analyst/*`) verify plan generation, cache writes, attachment serialization, and builder integration.
 - HumanGate escalation for analyst mode piggybacks on CitationVerifier logic via guardrails; additional analyst-specific guardrails/telemetry land in Tasks 10–13.
-- SSE placeholders remain in `subgraph_metrics` pending Task 12 event emitters.
+- Task 12 instrumentation now emits analyst-specific SSE metrics (`analyst.plan.*`, `analyst.comparison.*`) with cache/HITL metric references ready for consumption once the HTTP streaming endpoint is wired.
 
 ## Numerical Subgraph (Task 10)
 - TextToSQL node (`subgraphs/numerical/text_to_sql_node.py`) builds deterministic prompts from workflow plans + table schemas, validates generated SQL against shared metadata, and records guardrail violations (code `numerical_sql`) before routing to HumanGate on unsupported joins.
@@ -28,4 +28,4 @@ Use this file to record QA criteria per modality as tasks are completed.
 - ImageReasonerNode consumes `image_caption` chunks (falling back to deterministic descriptors as needed), records warnings in `error_log`, and populates `vision_findings` with model metadata/figures referenced for downstream nodes + Guardrails.
 - MultimodalResponderNode merges visual findings with textual prompts, writes deterministic cache payloads (`CacheWriter`), annotates `answer_metadata["vision_attachments"]`, and routes to HumanGate when any blocking vision guardrails remain.
 - Tests under `tests/subgraphs/vision/test_vision_nodes.py` cover image-only vs multimodal flows, cache writes, and guardrail-triggered HITL routing.
-- SSE handoff (Task 12) should stream `vision.router.mode`, `vision.reasoner.findings`, `vision.responder.attachments`, and the `vision_attachments` list from `answer_metadata` so clients can reference figures by `figure_id`/`document_id` without schema changes.
+- Task 12’s SSE hooks emit `vision.router.mode`, `vision.reasoner.findings`, `vision.responder.attachments`, and the `vision_attachments` list from `answer_metadata`; wiring the streaming endpoint will expose these frames without additional node work.
