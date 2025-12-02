@@ -12,6 +12,7 @@ from guardrails.models import GuardrailSeverity, GuardrailViolation, RouterRoute
 from repositories.agent_checkpoint_repository import HydratedCheckpoint
 from services.checkpoint_service import CheckpointService
 from state.agent_state import AgentState, HitlTranscriptEntry
+from telemetry import get_metrics_registry
 
 EventEmitter = Callable[[str, Mapping[str, Any]], Awaitable[None]]
 Clock = Callable[[], datetime]
@@ -97,7 +98,13 @@ class HumanGateService:
             "route": persisted_state.route.value if persisted_state.route else None,
             "confidence": persisted_state.route_confidence,
             "timestamp": self.clock().isoformat(),
+            "metric_refs": ["agent_hitl_events_total"],
         }
+        METRICS.record_hitl_event(
+            event="pause",
+            reason=reason,
+            route=persisted_state.route.value if persisted_state.route else None,
+        )
         await self._emit(payload, override=event_emitter)
         return HumanGateDecision(
             paused=True,
@@ -134,7 +141,13 @@ class HumanGateService:
             "checkpoint_id": checkpoint.checkpoint_id,
             "resume_token": checkpoint.metadata.consumed_resume_token,
             "timestamp": self.clock().isoformat(),
+            "metric_refs": ["agent_hitl_events_total"],
         }
+        METRICS.record_hitl_event(
+            event="resume",
+            reason="hitl_resume",
+            route=state.route.value if state.route else None,
+        )
         await self._emit(payload, override=event_emitter)
         return HumanGateResumeResult(state=state, checkpoint=checkpoint)
 
@@ -212,3 +225,6 @@ class HumanGateService:
         if emitter is None:
             return
         await emitter(payload["event"], payload)
+
+
+METRICS = get_metrics_registry()

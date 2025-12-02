@@ -13,6 +13,7 @@ from models.retrieval import NormalizedInput
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, lifecycle_span, set_route
+from telemetry import get_metrics_registry
 
 
 class RouterNodeError(RuntimeError):
@@ -80,6 +81,9 @@ class RouterNode:
                 normalized_input=normalized_input, attachment_scope=state.attachment_scope
             )
         )
+        for violation in guardrail_result.violations:
+            severity = getattr(violation.severity, "value", str(violation.severity))
+            _METRICS.record_guardrail_violation(code=violation.code, severity=str(severity))
         async with lifecycle_span(
             emitter=sse_emitter,
             node="router",
@@ -217,3 +221,6 @@ class RouterNode:
         if workflow_hit or score >= 2:
             return self.strong_signal_confidence
         return self.default_confidence
+
+
+_METRICS = get_metrics_registry()

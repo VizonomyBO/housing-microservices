@@ -34,7 +34,10 @@ class StubValidator:
 
 class StubHumanGate(HumanGateEvaluator):
     async def evaluate(
-        self, state: AgentState, *, event_emitter=None  # type: ignore[override,unused-argument]
+        self,
+        state: AgentState,
+        *,
+        event_emitter=None,  # type: ignore[override,unused-argument]
     ) -> HumanGateDecision:
         return HumanGateDecision(paused=True, state=state, reason=state.interrupt_reason)
 

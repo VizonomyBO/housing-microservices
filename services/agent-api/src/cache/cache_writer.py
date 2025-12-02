@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from cache.response_serializer import (
     CacheResponsePayload,
@@ -13,7 +14,11 @@ from cache.response_serializer import (
     serialize_cache_response,
 )
 from cache.valkey_client import ValkeyCacheClientProtocol
-from state.agent_state import CacheMetadata
+from state.agent_state import AgentState, CacheMetadata
+from telemetry.cache_observability import CacheObservability
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,7 @@ class CacheWriter:
     default_ttl_seconds: int = 60 * 60 * 48
     serializer: Callable[[CacheResponsePayload], bytes] = field(default=serialize_cache_response)
     clock: Clock = field(default=_utc_now)
+    observability: CacheObservability | None = None
 
     async def write(
         self,
@@ -54,6 +60,8 @@ class CacheWriter:
         cache_metadata: CacheMetadata,
         cache_key: str | None = None,
         ttl_seconds: int | None = None,
+        state: AgentState | None = None,
+        db_session: AsyncSession | None = None,
     ) -> CacheWriteResult:
         """Serialize + persist payload if cache metadata includes a key.
 
@@ -86,11 +94,22 @@ class CacheWriter:
         updated_metadata = cache_metadata.model_copy(
             update={"cache_key": key, "written_at": self.clock(), "hit": False}
         )
-        return CacheWriteResult(
+        result = CacheWriteResult(
             cache_metadata=updated_metadata,
             cache_key=key,
             bytes_written=serialized,
         )
+        if self.observability is not None:
+            resolved_route = state.route.value if state and state.route else None
+            await self.observability.record_cache_write(
+                cache_key=key,
+                route=resolved_route,
+                ttl_seconds=ttl,
+                session=db_session,
+                state=state,
+                payload=payload,
+            )
+        return result
 
 
 @dataclass(slots=True)
@@ -109,6 +128,8 @@ async def maybe_serve_from_cache(
     cache_metadata: CacheMetadata,
     cache_key: str | None = None,
     clock: Clock = _utc_now,
+    observability: CacheObservability | None = None,
+    state: AgentState | None = None,
 ) -> CacheShortCircuitResult:
     """Attempt to pull a cached response, tagging telemetry hooks on hit/miss."""
 
@@ -122,8 +143,11 @@ async def maybe_serve_from_cache(
             cache_key=None,
         )
 
+    latency_ms: float | None = None
     try:
+        start = clock()
         raw_value = await client.get(key)
+        latency_ms = (clock() - start).total_seconds() * 1000
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Cache read failed for %s: %s", key, exc)
         return CacheShortCircuitResult(
@@ -135,6 +159,14 @@ async def maybe_serve_from_cache(
             await client.tag_miss(key, reason="not_found")
         except Exception:  # pragma: no cover - telemetry best-effort
             logger.debug("Cache miss telemetry failed for %s", key)
+        if observability is not None:
+            resolved_route = state.route.value if state and state.route else None
+            await observability.record_cache_miss(
+                cache_key=key,
+                route=resolved_route,
+                reason="not_found",
+                latency_ms=latency_ms,
+            )
         return CacheShortCircuitResult(
             cache_metadata=cache_metadata, hit=False, payload=None, cache_key=key
         )
@@ -155,6 +187,14 @@ async def maybe_serve_from_cache(
         await client.tag_hit(key)
     except Exception:  # pragma: no cover
         logger.debug("Cache hit telemetry failed for %s", key)
+
+    if observability is not None:
+        resolved_route = state.route.value if state and state.route else None
+        await observability.record_cache_hit(
+            cache_key=key,
+            route=resolved_route,
+            latency_ms=latency_ms,
+        )
 
     return CacheShortCircuitResult(
         cache_metadata=updated_metadata,

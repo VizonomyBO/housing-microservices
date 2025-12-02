@@ -107,7 +107,7 @@ class SSEEmitter:
         while True:
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=self.heartbeat_interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._closed:
                     break
                 yield self._heartbeat()

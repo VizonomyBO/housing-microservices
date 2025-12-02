@@ -684,6 +684,13 @@ flowchart LR
 
 **Persistence**: Citations attached to answers/messages for analytics/audits
 
+### 3.5. Telemetry & Cache Observability
+
+- **Metrics registry** (`services/agent-api/src/telemetry/metrics_registry.py`): exposes Prometheus counters/histograms for node latency (`agent_node_latency_seconds`), cache ratio (`agent_cache_hit_ratio`), token consumption (`agent_token_usage_total`), guardrail violations, HITL pauses, and limiter waits. Each LangGraph node executes inside a `lifecycle_span()` that emits `task_start`/`task_end` SSE frames and a matching OpenTelemetry span (`langgraph.<node>`), keeping traces aligned with streaming metadata.
+- **Cache observability** (`services/agent-api/src/telemetry/cache_observability.py`): wraps Valkey clients so hits/misses/writes update the Prometheus counters, snapshot Valkey pool health (`snapshot_valkey_stats()`), and write structured telemetry into `retrieval_runs`, `retrieval_run_items`, `chunk_metrics`, `pillar_answers`, and `pillar_answer_sources`. The helper uses the normalized prompt + attachment scope to persist document_scope JSON for each retrieval, enabling deterministic replays.
+- **SSE metric references**: Cache and HITL events now include `metric_refs` (e.g., `["agent_cache_events_total","agent_cache_hit_ratio"]`) so Grafana panels can jump directly to the correlated Prometheus series when an SSE frame is received.
+- **Rate limiter guidance**: When Valkey token buckets defer an LLM call, record the wait via `MetricsRegistry.record_rate_limiter_wait(model, route, wait_seconds)`. Dashboards should chart these waits next to cache hit ratio because low hit rates typically raise limiter pressure.
+- **Scraping & replay**: Mount a FastAPI `/metrics` route that calls `MetricsRegistry.render_prometheus()` for Prometheus to scrape. In staging, run `uv run pytest tests/telemetry` or call `CacheObservability.record_cache_write(..., session=db_session)` to backfill telemetry rows and confirm dashboards before promoting a change.
 ## 4. Interface Design
 
 ### 4.1. API Design

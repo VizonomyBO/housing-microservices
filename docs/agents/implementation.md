@@ -625,6 +625,18 @@ data: {"event":"telemetry_snapshot","timestamp":"2025-12-02T14:48:31.750Z","conv
 
 Keep-alive comments `: keep-alive` are emitted whenever the stream is idle, satisfying the SSE spec and preventing intermediaries from closing long-lived chat sessions.
 
+#### 3.6.2. Metrics, Prometheus & Cache Observability (Task 13)
+
+Task 13 introduces a dedicated telemetry stack (`src/telemetry/metrics_registry.py` + `src/telemetry/cache_observability.py`) that fans metrics to both Prometheus and OpenTelemetry:
+
+- **Prometheus primitives** – `MetricsRegistry` registers `agent_node_latency_seconds`, `agent_token_usage_total`, `agent_cache_events_total`, `agent_cache_hit_ratio`, `agent_hitl_events_total`, `agent_guardrail_violations_total`, and `agent_rate_limiter_wait_seconds`. `lifecycle_span()` now captures each LangGraph node’s duration and emits an OTel span (`langgraph.<node>`) with `agent.node`, `agent.subgraph`, and `agent.route` attributes so traces can be correlated with streaming metadata.
+- **SSE metric refs** – cache + HITL events add `metric_refs` so dashboards know which Prometheus series to highlight when a frame arrives (`["agent_cache_events_total","agent_cache_hit_ratio"]` for cache events, `["agent_hitl_events_total"]` for HITL).
+- **Cache observability** – `CacheObservability` tracks Valkey hit/miss/write counters, rate-limiter waits, and writes retrieval telemetry to the shared data layer: `retrieval_runs` (per prompt + chunk ranks), `chunk_metrics` (per chunk quality counters), and `pillar_answers` (+ `pillar_answer_sources`) when a cache write succeeds and tenant/document IDs are known.
+- **Scraping metrics** – expose `MetricsRegistry.render_prometheus()` behind the FastAPI `/metrics` route (protected by the existing auth middleware). Grafana dashboards should chart hit ratio + latency histograms with `namespace="agent-api"`, while alerting on `agent_hitl_events_total{event="pause"}` spikes and `agent_guardrail_violations_total` growth.
+- **Staging replays** – run `uv run pytest tests/telemetry` or call `CacheObservability.record_cache_write(..., session=db_session)` inside a staging shell to backfill telemetry rows and validate dashboards without touching production. `CacheObservability.snapshot_valkey_stats()` mirrors the counters Task 12 SSE frames emit, so you can diff them against Prometheus scraped values when debugging Valkey pools.
+
+Rate limiter integrations should call `MetricsRegistry.record_rate_limiter_wait(model=<provider>, route=<router_route>, wait_seconds=<elapsed>)` whenever the Valkey permit gate enforces a delay. Valkey pooling guidance (docs/overview §3.7–3.8) now expects these waits plus the cache hit ratio to sit on the same dashboard so operators can see when low hit rates are lifting limiter pressure.
+
 
 ### 3.7. Service Interface (FastAPI + LangServe)
 

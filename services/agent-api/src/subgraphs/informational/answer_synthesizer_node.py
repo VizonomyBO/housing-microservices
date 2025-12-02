@@ -12,6 +12,7 @@ from models.retrieval import AttachmentScope
 from state.agent_state import AgentState, GraphContext, GraphSummary, WorkflowPlan
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, emit_cache_hit, emit_cache_miss, lifecycle_span
+from telemetry import CacheObservability
 
 
 class AnswerSynthesisError(RuntimeError):
@@ -53,6 +54,7 @@ class AnswerSynthesizerNode:
 
     composer: AnswerComposerProtocol
     cache_client: ValkeyCacheClientProtocol
+    cache_observability: CacheObservability | None = None
 
     async def __call__(
         self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
@@ -69,6 +71,8 @@ class AnswerSynthesizerNode:
             cache_result = await maybe_serve_from_cache(
                 client=self.cache_client,
                 cache_metadata=state.cache_metadata,
+                observability=self.cache_observability,
+                state=state,
             )
             if cache_result.cache_key:
                 if cache_result.hit:

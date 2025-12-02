@@ -103,6 +103,7 @@ class ComparisonSynthesizerNode:
             write_result = await self.cache_writer.write(
                 payload=payload,
                 cache_metadata=state.cache_metadata,
+                state=state,
             )
             if write_result.cache_key:
                 await emit_cache_write(

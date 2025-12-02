@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from streaming.events import (
@@ -17,6 +18,7 @@ from streaming.events import (
     TelemetrySnapshotPayload,
 )
 from streaming.sse_emitter import SSEEmitter
+from telemetry import get_metrics_registry
 
 if TYPE_CHECKING:  # pragma: no cover - import-time guard
     from guardrails import RouterRoute
@@ -24,6 +26,7 @@ else:  # pragma: no cover - runtime fallback when guardrails not loaded
     RouterRoute = Any  # type: ignore[misc, assignment]
 
 F = TypeVar("F", bound=Callable[..., Any])
+_METRICS = get_metrics_registry()
 
 
 @dataclass(slots=True)
@@ -112,23 +115,42 @@ async def lifecycle_span(
         metadata=dict(metadata or {}),
     )
     token = _CURRENT_SPAN.set(span)
-    try:
-        if emitter is not None:
-            start_payload = span.to_payload(metadata=span.snapshot(status="running"))
-            await emitter.emit(event=SSEEventType.TASK_START, payload=start_payload)
-        yield span
-    except Exception as exc:
-        if emitter is not None:
-            span.add_metadata(error=str(exc))
-            end_payload = span.to_payload(metadata=span.snapshot(status="error"))
-            await emitter.emit(event=SSEEventType.TASK_END, payload=end_payload)
-        raise
-    else:
-        if emitter is not None:
-            end_payload = span.to_payload(metadata=span.snapshot(status="success"))
-            await emitter.emit(event=SSEEventType.TASK_END, payload=end_payload)
-    finally:
-        _CURRENT_SPAN.reset(token)
+    perf_start = perf_counter()
+    status = "success"
+    with _METRICS.span(
+        f"langgraph.{node}",
+        attributes={
+            "agent.node": node,
+            "agent.subgraph": subgraph or "none",
+            "agent.route": route or "none",
+        },
+    ):
+        try:
+            if emitter is not None:
+                start_payload = span.to_payload(metadata=span.snapshot(status="running"))
+                await emitter.emit(event=SSEEventType.TASK_START, payload=start_payload)
+            yield span
+        except Exception as exc:
+            status = "error"
+            if emitter is not None:
+                span.add_metadata(error=str(exc))
+                end_payload = span.to_payload(metadata=span.snapshot(status="error"))
+                await emitter.emit(event=SSEEventType.TASK_END, payload=end_payload)
+            raise
+        else:
+            if emitter is not None:
+                end_payload = span.to_payload(metadata=span.snapshot(status="success"))
+                await emitter.emit(event=SSEEventType.TASK_END, payload=end_payload)
+        finally:
+            duration = perf_counter() - perf_start
+            _METRICS.observe_node_latency(
+                node=node,
+                subgraph=subgraph,
+                route=span.route or route,
+                status=status,
+                duration_seconds=duration,
+            )
+            _CURRENT_SPAN.reset(token)
 
 
 def instrumented(
@@ -267,6 +289,7 @@ async def _emit_cache_event(
         ttl_seconds=ttl_seconds,
         payload_hash=payload_hash,
         metadata=dict(extra_metadata or {}),
+        metric_refs=["agent_cache_events_total", "agent_cache_hit_ratio"],
     )
     await emitter.emit(event=event, payload=payload)
 

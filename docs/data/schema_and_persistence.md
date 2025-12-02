@@ -254,6 +254,12 @@ Same base structure as prior doc, with highlights:
 
 `retrieval_runs` and `retrieval_run_items` unchanged except `retrieval_runs.document_scope` records base vs user doc IDs to aid auditing and caching decisions.
 
+`CacheObservability` (Task 13) now writes to these tables whenever a cache entry is created:
+
+- `retrieval_runs`: captures the normalized prompt, router route, intent tags, and attachment scope JSON so auditors can reproduce the context that produced the cached answer.
+- `retrieval_run_items`: one row per cited chunk (`chunk_id`, `chunk_country_code`, `score`, `rank`) derived from the cache payload’s citations. This ties Prometheus cache hit metrics back to the exact evidence rows in Postgres.
+- `chunk_metrics`: increments `retrieval_count`, updates `quality_score` (when provided), and stamps `last_seen_at` so the ingestion team can prune stale content without losing insight into what the agent actually served.
+
 ### 3.8 Postgres Extensions & Settings
 
 All schemas continue to live in Postgres, but we enable a few extensions cluster-wide:
@@ -269,6 +275,7 @@ All schemas continue to live in Postgres, but we enable a few extensions cluster
 Configuration updates:
 - Increase `work_mem` for graph + workflow materialization queries (recommend 64–128MB session-level in ingestion workers).
 - Set `pgvector.max_dimensions` high enough (2048) to accommodate future graph embeddings.
+- Enable `pg_stat_statements`/`pg_stat_monitor` in staging so spikes in `agent_rate_limiter_wait_seconds` or `agent_cache_hit_ratio` drops can be correlated with SQL backpressure.
 
 ### 3.9 Knowledge Graph Tables (GraphRAG)
 

@@ -77,6 +77,10 @@ class CacheEventPayload(SSEPayload):
     metadata: Mapping[str, Any] = Field(
         default_factory=dict, description="Miscellaneous cache telemetry."
     )
+    metric_refs: list[str] = Field(
+        default_factory=list,
+        description="Prometheus metric names associated with this cache event.",
+    )
 
 
 class HitlEventPayload(SSEPayload):
@@ -100,6 +104,10 @@ class HitlEventPayload(SSEPayload):
     metadata: Mapping[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary annotations (e.g., operator id, resume status).",
+    )
+    metric_refs: list[str] = Field(
+        default_factory=list,
+        description="Prometheus metric names that track this HITL event.",
     )
 
 
