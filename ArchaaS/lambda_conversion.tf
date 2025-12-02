@@ -441,19 +441,14 @@ resource "aws_lambda_function" "embedding_writer" {
       VOYAGE_API_KEY     = var.voyage_api_key
       VOYAGE_MODEL       = "voyage-3-lite"
       PROCESSED_BUCKET   = aws_s3_bucket.processed_artifacts.id
-      DATABASE_HOST      = aws_instance.microservices.private_ip
+      DATABASE_HOST      = aws_instance.microservices.public_ip
       DATABASE_PORT      = "5432"
-      DATABASE_NAME      = var.database_name
-      DATABASE_USER      = var.database_user
+      DATABASE_NAME      = "housing"
+      DATABASE_USER      = "vizonomy_user"
       DATABASE_PASSWORD  = var.database_password
       EMBEDDING_BATCH_SIZE = "32"
       LOG_LEVEL          = var.log_level
     }
-  }
-
-  vpc_config {
-    subnet_ids         = [aws_subnet.private.id]
-    security_group_ids = [aws_security_group.lambda.id]
   }
 
   tags = {

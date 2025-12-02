@@ -95,33 +95,35 @@ async def store_chunks_with_embeddings(
     
     inserted = 0
     for chunk, embedding in zip(chunks, embeddings):
-        chunk_id = chunk.get("id")
         content = chunk.get("content", "")
         chunk_index = chunk.get("chunk_index", 0)
         page_numbers = chunk.get("page_numbers", [])
         section_title = chunk.get("section_title")
         token_count = chunk.get("token_count", 0)
         
+        # Generate a new UUID for each chunk (chunk IDs from manifest aren't UUIDs)
+        import uuid as uuid_mod
+        chunk_uuid = uuid_mod.uuid4()
+        
         if column_exists:
+            # Format embedding as pgvector string: [1.0, 2.0, ...]
+            embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            
             # Store with embedding vector
             await conn.execute("""
                 INSERT INTO chunks (
                     id, document_id, text_content, position, token_count,
                     section_path, page_number, chunk_type, embedding
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'text', $8)
-                ON CONFLICT (id) DO UPDATE SET
-                    text_content = EXCLUDED.text_content,
-                    embedding = EXCLUDED.embedding,
-                    token_count = EXCLUDED.token_count
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'text', $8::vector)
             """,
-                UUID(chunk_id) if chunk_id else None,
+                chunk_uuid,
                 UUID(document_id),
                 content,
                 chunk_index,
                 token_count,
                 [section_title] if section_title else [],
                 page_numbers[0] if page_numbers else None,
-                embedding,
+                embedding_str,
             )
         else:
             # Store without embedding (fallback)
@@ -130,11 +132,8 @@ async def store_chunks_with_embeddings(
                     id, document_id, text_content, position, token_count,
                     section_path, page_number, chunk_type
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'text')
-                ON CONFLICT (id) DO UPDATE SET
-                    text_content = EXCLUDED.text_content,
-                    token_count = EXCLUDED.token_count
             """,
-                UUID(chunk_id) if chunk_id else None,
+                chunk_uuid,
                 UUID(document_id),
                 content,
                 chunk_index,
