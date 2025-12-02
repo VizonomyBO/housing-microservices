@@ -436,6 +436,51 @@ class VisionFinding(BaseModel):
     )
 
 
+class VisionAttachmentContext(BaseModel):
+    """Attachment metadata inspected by the Vision subgraph (docs/agents/implementation.md §4.4)."""
+
+    document_id: str = Field(..., description="Document identifier that supplied the image asset.")
+    canonical_name: str | None = Field(
+        default=None, description="Human-readable title for the attachment."
+    )
+    mime_type: str | None = Field(
+        default=None,
+        description="Attachment mime type used to enforce guardrail allowlists (image/png, image/jpeg, etc.).",
+    )
+    caption: str | None = Field(
+        default=None,
+        description="Image caption or alt-text derived during retrieval (image_caption chunk).",
+    )
+    chunk_id: str | None = Field(
+        default=None,
+        description="Chunk id referencing the caption/evidence row from retrieval.",
+    )
+    figure_id: str | None = Field(
+        default=None,
+        description="Figure identifier emitted by upstream ingestion (if available).",
+    )
+    content_flags: list[str] = Field(
+        default_factory=list,
+        description="Moderation tags associated with the attachment (violence, self_harm, etc.).",
+    )
+
+
+class VisionRouterContext(BaseModel):
+    """Routing metadata emitted by VisionRouterNode so downstream nodes know which path to follow."""
+
+    mode: Literal["image_only", "multimodal"] = Field(
+        ..., description="Whether the request relied solely on images or blended text + images."
+    )
+    attachments: list[VisionAttachmentContext] = Field(
+        default_factory=list,
+        description="Image attachment metadata preserved for ImageReasonerNode.",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Any warnings encountered while preparing the vision context (missing captions, etc.).",
+    )
+
+
 class GraphSummarySection(BaseModel):
     """Single deterministic block emitted by GraphSummarizer."""
 
@@ -604,6 +649,10 @@ class AgentState(BaseModel):
     retrieval_metrics: RetrievalMetrics = Field(
         default_factory=RetrievalMetrics,
         description="Hybrid retrieval telemetry forwarded via SSE metrics (docs/agents/implementation.md §3.2).",
+    )
+    vision_context: VisionRouterContext | None = Field(
+        default=None,
+        description="Attachment routing metadata from VisionRouterNode.",
     )
     vision_findings: list[VisionFinding] = Field(
         default_factory=list,

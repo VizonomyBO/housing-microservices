@@ -35,6 +35,8 @@ class GuardrailCode(str, Enum):
     CITATION_MISMATCH = "citation_mismatch"
     NUMERICAL_SQL = "numerical_sql"
     NUMERICAL_VALIDATION = "numerical_validation"
+    VISION_MIME_TYPE = "vision_mime_type"
+    VISION_POLICY = "vision_policy"
 
 
 class GuardrailViolation(BaseModel):

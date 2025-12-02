@@ -18,6 +18,8 @@ Task 06 introduced a reusable guardrail layer for the LangGraph agent. All polic
 | `country_mismatch` | Attachment country metadata conflicts with the conversation country. |
 | `workflow_policy` | Too many workflow graphs were requested (>8) which could overload Retrieval. |
 | `compliance_policy` | Prompt references topics explicitly blocked by compliance review (e.g., "top secret"). |
+| `vision_mime_type` | Vision route detected attachments with mime types outside the approved image allowlist. |
+| `vision_policy` | Vision moderation flagged sensitive media (violence, self-harm, explicit) and requires HITL review. |
 
 Blocking violations automatically set `route = escalate` and `next_subgraph = human_gate` so Task 08 can pause execution while surfacing the violation list to HumanGate reviewers.
 

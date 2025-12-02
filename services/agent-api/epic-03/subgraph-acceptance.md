@@ -24,4 +24,8 @@ Use this file to record QA criteria per modality as tasks are completed.
 - Tests in `tests/subgraphs/numerical/` cover SQL prompt guardrails, Polars execution success/error cases, and validator → HumanGate escalation, ensuring failure paths (invalid SQL, out-of-bounds rows) are deterministic.
 
 ## Vision Subgraph (Task 11)
-- TODO: populate once Task 11 implements nodes.
+- VisionRouterNode inspects attachment metadata, computes `vision_context.mode` (image-only vs multimodal), logs warnings for missing captions, and enforces guardrail codes `vision_mime_type` + `vision_policy` before proceeding.
+- ImageReasonerNode consumes `image_caption` chunks (falling back to deterministic descriptors as needed), records warnings in `error_log`, and populates `vision_findings` with model metadata/figures referenced for downstream nodes + Guardrails.
+- MultimodalResponderNode merges visual findings with textual prompts, writes deterministic cache payloads (`CacheWriter`), annotates `answer_metadata["vision_attachments"]`, and routes to HumanGate when any blocking vision guardrails remain.
+- Tests under `tests/subgraphs/vision/test_vision_nodes.py` cover image-only vs multimodal flows, cache writes, and guardrail-triggered HITL routing.
+- SSE handoff (Task 12) should stream `vision.router.mode`, `vision.reasoner.findings`, `vision.responder.attachments`, and the `vision_attachments` list from `answer_metadata` so clients can reference figures by `figure_id`/`document_id` without schema changes.

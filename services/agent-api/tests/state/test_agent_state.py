@@ -27,7 +27,9 @@ from state.agent_state import (
     NumericalTable,
     NumericalTableColumn,
     RetrievalMetrics,
+    VisionAttachmentContext,
     VisionFinding,
+    VisionRouterContext,
     WorkflowPlan,
     WorkflowPlanStep,
     agent_state_from_persistence,
@@ -139,6 +141,21 @@ def test_agent_state_round_trip_serialization() -> None:
                 model="gpt-5-mini",
             )
         ],
+        vision_context=VisionRouterContext(
+            mode="multimodal",
+            attachments=[
+                VisionAttachmentContext(
+                    document_id="doc-1",
+                    canonical_name="Scope Doc",
+                    mime_type="image/png",
+                    caption="Chart shows upward trend",
+                    chunk_id="chunk-1",
+                    figure_id="figure-7",
+                    content_flags=["benign"],
+                )
+            ],
+            warnings=["caption trimmed"],
+        ),
         interrupt_reason="HITL clarification",
         checkpoint_id="chkpt-123",
         conversation_id="conv-003",
@@ -198,6 +215,9 @@ def test_agent_state_round_trip_serialization() -> None:
     assert rehydrated.workflow_plan.diff_summary == {"added_nodes": ["coarse.1"]}
     assert rehydrated.workflow_plan.prerequisites == ['country_code:"USA"']
     assert rehydrated.created_at == state.created_at
+    assert rehydrated.vision_context is not None
+    assert rehydrated.vision_context.mode == "multimodal"
+    assert rehydrated.vision_context.attachments[0].document_id == "doc-1"
     assert rehydrated.cache_metadata.hit is True
     assert rehydrated.normalized_input is not None
     assert rehydrated.normalized_input.scope_hash == "hash-abc"
