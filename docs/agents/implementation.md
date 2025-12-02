@@ -290,6 +290,8 @@ class AgentState(TypedDict):
 
 - **Future hooks**: TODO Task 12 wires SSE telemetry (`router_decision` event) + Prometheus counters. Guardrail docs live in `docs/security/guardrails.md` / `docs/security/prompt_policy.md`.
 
+- **Reduced scope guard**: When `settings.reduced_scope.enabled` is true (Epic 3.5), the Router automatically downgrades `numerical`/`vision` routes to `informational`, emits a `demo_mode_skipped` SSE frame, and annotates `state.reduced_scope_flags`. This keeps the orchestration graph deterministic while still preserving the downstream nodes for post-demo reactivation.
+
 #### **Retrieval Orchestrator (Subgraph)**
 This is a crucial component handling the "RAG" part.
 
@@ -434,6 +436,7 @@ Designed for safe, sandboxed data analysis with **self-correction** and **HITL**
 ##### CacheWriter & Short-Circuit Helper (Task 07)
 -   `CacheWriter` now serializes positive answers via `CacheResponsePayload` before persisting them to Valkey. The payload is versioned (`schema_version`, default `1`) and captures `answer_text`, normalized `citations[]` (`doc_id`, `chunk_id`, `snippet`, optional metadata), deduplicated `chunk_ids[]`, `workflow_plan_excerpt` (plan id/version + ordered summary steps), `workflow_plan_id`, `model_metadata` (model name, temperature, token counts, etc.), and `created_at`. Deterministic serialization (`serialize_cache_response`) enforces sorted citations/chunk identifiers so payload bytes remain identical for equivalent answers, minimizing duplicate cache entries.
 -   `CacheWriter.write` only executes when `AgentState.cache_metadata.cache_key` exists and updates `cache_metadata.written_at` while tagging a placeholder `tag_miss(..., reason="write_through")` event. The telemetry hook feeds Task 13 so cache writes automatically show up in SSE metrics/Prometheus once those integrations land; for now the events accumulate in the in-memory client for testing.
+-   Demo mode sets `CacheWriter.disable_writes=True`, which skips Valkey sockets entirely while still recording observability hooks (`record_cache_write`) so telemetry/DB state stays consistent even though cached answers are stored only in-memory.
 -   Downstream nodes call `maybe_serve_from_cache(client=..., cache_metadata=state.cache_metadata)` before expensive work. On hit, it deserializes the payload, marks `cache_metadata.hit=True`/`hit_at=now`, and returns a `CacheShortCircuitResult` containing the structured payload. On miss it tags `tag_miss(..., reason="not_found")` and leaves metadata untouched. Guards swallow Valkey errors and log warnings so LangGraph never fails due to cache unavailability.
 -   **Example usage** (router/subgraph entrypoints):
 
@@ -550,6 +553,8 @@ async def llm_node(state: AgentState):
     return {"messages": [response]}
 ```
 
+When the reduced-scope flag is enabled (`REDUCED_SCOPE_ENABLED=1`), the gateway swaps in `ReducedScopeRateLimiter`, which simply returns immediately, stamps responses with `X-RateLimit-Policy: demo-mode`, and emits `{"rate_limit_disabled": true}` inside SSE metadata so clients know Valkey/token buckets are intentionally bypassed for the demo build.
+
 ### 3.6. Status Reporting (SSE & Deterministic Templates)
 
 To keep streaming predictable (and aligned with the limiter budgets), we swapped the nano-model summarizer for deterministic templates that describe each major phase while **reusing the existing SSE contract** (`meta`, `delta`, `tool_call`, `tool_result`, `metrics`, `done`) defined in `../interfaces/api_contracts.md`.
@@ -635,7 +640,7 @@ event: telemetry_snapshot
 data: {"event":"telemetry_snapshot","timestamp":"2025-12-02T14:48:31.750Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"metrics":{"numerical.polars.execution_ms":134.2},"labels":{"table_aliases":"gdp"}}}
 ```
 
-Keep-alive comments `: keep-alive` are emitted whenever the stream is idle, satisfying the SSE spec and preventing intermediaries from closing long-lived chat sessions.
+Keep-alive comments `: keep-alive` are emitted whenever the stream is idle, satisfying the SSE spec and preventing intermediaries from closing long-lived chat sessions. When reduced-scope mode is active, the gateway also emits a single `demo_mode_skipped` event per suppressed capability and adds a `reduced_scope` object (`{"text_only_chunks": true, "allowed_chunk_types": ["text"]}`) to the `meta` frame so clients can surface demo banners consistently.
 
 #### 3.6.2. Metrics, Prometheus & Cache Observability (Task 13)
 

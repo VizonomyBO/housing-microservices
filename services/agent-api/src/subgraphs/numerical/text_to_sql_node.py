@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from state.agent_state import AgentState, NumericalTable, WorkflowPlan
 from streaming.sse_emitter import SSEEmitter
-from streaming.with_sse import add_metadata, lifecycle_span
+from streaming.with_sse import add_metadata, emit_demo_mode_event, lifecycle_span
 
 
 class TextToSQLError(RuntimeError):
@@ -111,6 +111,9 @@ class TextToSQLNode:
         if normalized is None:
             raise TextToSQLError("TextToSQL node requires normalized_input in AgentState")
         table = self._selected_table(state)
+        maybe_skip = await self._maybe_skip_for_demo(state, sse_emitter)
+        if maybe_skip is not None:
+            return maybe_skip
         async with lifecycle_span(
             emitter=sse_emitter,
             node="numerical_text_to_sql",
@@ -218,6 +221,28 @@ class TextToSQLNode:
             "error_log": error_log,
             "interrupt_reason": self.interrupt_reason,
             "next_subgraph": "human_gate",
+        }
+
+    async def _maybe_skip_for_demo(
+        self, state: AgentState, sse_emitter: SSEEmitter | None
+    ) -> dict[str, Any] | None:
+        flags = state.reduced_scope_flags
+        if not flags.should_skip_capability("numerical"):
+            return None
+        if sse_emitter is not None and flags.emit_demo_events:
+            await emit_demo_mode_event(
+                sse_emitter,
+                capability="numerical",
+                metadata={"node": "numerical_text_to_sql"},
+            )
+        metrics = dict(state.subgraph_metrics)
+        key = "numerical.demo_mode_skipped"
+        metrics[key] = metrics.get(key, 0) + 1
+        add_metadata(reduced_scope_skip=True, capability="numerical")
+        return {
+            "next_subgraph": "informational_subgraph",
+            "subgraph_metrics": metrics,
+            "guardrails_passed": True,
         }
 
 

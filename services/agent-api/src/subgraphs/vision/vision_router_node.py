@@ -9,7 +9,7 @@ from typing import Literal
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from state.agent_state import AgentState, VisionAttachmentContext, VisionRouterContext
 from streaming.sse_emitter import SSEEmitter
-from streaming.with_sse import add_metadata, lifecycle_span
+from streaming.with_sse import add_metadata, emit_demo_mode_event, lifecycle_span
 
 from .artifacts import extract_vision_attachments
 
@@ -48,6 +48,9 @@ class VisionRouterNode:
             node="vision_router",
             subgraph="vision",
         ):
+            skip = await self._maybe_skip_for_demo(state, sse_emitter)
+            if skip is not None:
+                return skip
             context = self._build_context(state)
             guardrail_findings = self._evaluate_guardrails(context, state.guardrail_findings)
             guardrails_passed = self._guardrails_passed(state.guardrails_passed, guardrail_findings)
@@ -135,6 +138,30 @@ class VisionRouterNode:
         if not current:
             return False
         return not any(violation.severity == GuardrailSeverity.ERROR for violation in findings)
+
+    async def _maybe_skip_for_demo(
+        self, state: AgentState, sse_emitter: SSEEmitter | None
+    ) -> dict[str, object] | None:
+        flags = state.reduced_scope_flags
+        if not flags.should_skip_capability("vision"):
+            return None
+        if sse_emitter is not None and flags.emit_demo_events:
+            await emit_demo_mode_event(
+                sse_emitter,
+                capability="vision",
+                metadata={"node": "vision_router"},
+            )
+        add_metadata(reduced_scope_skip=True, capability="vision")
+        metrics = dict(state.subgraph_metrics)
+        key = "vision.demo_mode_skipped"
+        metrics[key] = metrics.get(key, 0) + 1
+        return {
+            "vision_context": None,
+            "guardrail_findings": list(state.guardrail_findings),
+            "guardrails_passed": True,
+            "subgraph_metrics": metrics,
+            "next_subgraph": "informational_subgraph",
+        }
 
 
 __all__ = [

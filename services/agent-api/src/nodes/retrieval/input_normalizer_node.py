@@ -122,7 +122,10 @@ class InputNormalizerNode:
                 attachment_refs=attachment_refs,
                 scope_hash=scope_hash,
                 warnings=warnings,
+                allowed_chunk_types=self.request.constraints.allowed_chunk_types,
             )
+            if self.request.constraints.allowed_chunk_types:
+                add_metadata(allowed_chunk_types=self.request.constraints.allowed_chunk_types)
             add_metadata(language=detection.language_code)
             return {"normalized_input": normalized_input}
 

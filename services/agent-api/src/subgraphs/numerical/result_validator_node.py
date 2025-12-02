@@ -9,7 +9,7 @@ from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolati
 from hitl.human_gate_service import EventEmitter, HumanGateDecision
 from state.agent_state import AgentState, NumericalTable
 from streaming.sse_emitter import SSEEmitter
-from streaming.with_sse import add_metadata, lifecycle_span
+from streaming.with_sse import add_metadata, emit_demo_mode_event, lifecycle_span
 
 from .artifacts import build_numerical_artifacts
 
@@ -39,6 +39,9 @@ class ResultValidatorNode:
     ) -> dict[str, Any]:
         table = self._selected_table(state)
         rows = list(state.numerical_result_rows)
+        skip = await self._maybe_skip_for_demo(state, sse_emitter)
+        if skip is not None:
+            return skip
         async with lifecycle_span(
             emitter=sse_emitter,
             node="numerical_result_validator",
@@ -174,6 +177,28 @@ class ResultValidatorNode:
         if decision.paused:
             hitl_updates["checkpoint_id"] = decision.state.checkpoint_id
         return {**updates, **hitl_updates}
+
+    async def _maybe_skip_for_demo(
+        self, state: AgentState, sse_emitter: SSEEmitter | None
+    ) -> dict[str, Any] | None:
+        flags = state.reduced_scope_flags
+        if not flags.should_skip_capability("numerical"):
+            return None
+        if sse_emitter is not None and flags.emit_demo_events:
+            await emit_demo_mode_event(
+                sse_emitter,
+                capability="numerical",
+                metadata={"node": "numerical_result_validator"},
+            )
+        add_metadata(reduced_scope_skip=True, capability="numerical")
+        metrics = dict(state.subgraph_metrics)
+        key = "numerical.demo_mode_skipped"
+        metrics[key] = metrics.get(key, 0) + 1
+        return {
+            "subgraph_metrics": metrics,
+            "next_subgraph": "informational_subgraph",
+            "guardrails_passed": True,
+        }
 
 
 def _is_number(value: Any) -> bool:

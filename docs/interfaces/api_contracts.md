@@ -9,6 +9,7 @@
 | --- | --- |
 | Auth | `Authorization: Bearer <token>` issued by upstream identity provider; gateway resolves `user_id`, `roles`, `scopes`, and country defaults (no org concept). |
 | Rate limits | `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` on 429. Permits allocated via centralized limiter described in [system_architecture.md §2.2.10](../overview/system_architecture.md#2210-rate-limiting). |
+| Demo mode headers | When `REDUCED_SCOPE_ENABLED=1`, responses include `X-RateLimit-Policy: demo-mode`, `X-Cache-Mode: text-only`, and `Viz-Demo-Mode: text-only` so clients know Valkey/rate limiting are bypassed. SSE streams emit `demo_mode_skipped` events for every suppressed capability. |
 | Idempotency | Optional `Idempotency-Key` header (UUID v4, ≤36 chars). Required on `POST /v1/documents/upload` and `POST /v1/export/pdf`, optional elsewhere. |
 | Correlation IDs | Gateway injects `Viz-Request-Id` (UUID) + `Traceparent` (W3C). Downstream services must echo them back. |
 | Error envelope | All 4xx/5xx return `{"error": {"code": "...", "message": "...", "details": {...}, "request_id": "...", "retry_after_sec": <optional>}}`. Codes map to enums: `VALIDATION_ERROR`, `RATE_LIMITED`, `NOT_FOUND`, `CONFLICT`, `UPSTREAM_TIMEOUT`, `INTERNAL_ERROR`. |
@@ -115,6 +116,7 @@ Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store
 | `tool_result` | Mirror of `tool_call` with `status`, `output`, `latency_ms`. |
 | `interrupt` | `{ "type": "clarification", "prompt": "Need GDP base year" }` |
 | `metrics` | `{ "tokens_prompt": 1234, "tokens_completion": 245, "retrieval": {"hybrid_k": 10}, "document_scope": {"base": ["doc_base_LBR_macro"], "user": ["doc_user_42_budget"]} }` |
+| `demo_mode_skipped` | `{ "capability": "vision", "reason": "reduced_scope", "metadata": {"allowed_chunk_types": ["text"]} }` emitted once per suppressed capability. |
 | `done` | `{ "status": "COMPLETED", "answer": "...", "citations": [{"doc_id": "doc_a12b3", "chunk_id": "ch_9"}], "cache_hit": false }` |
 | `task_error` | `{ "code": "INTERNAL_ERROR", "message": "boom", "retryable": false }` |
 
@@ -125,7 +127,7 @@ Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store
 - Blocking responses share the same request schema but add `Cache-Control: no-store` to guarantee intermediaries do not cache transcripts.
 - The gateway emits an initial `meta` frame (thread/session/request identifiers) before LangGraph fires node-level telemetry frames, and emits `task_error` when uncaught exceptions propagate. Clients should treat `task_error` as terminal and rely on the accompanying HTTP 5xx to trigger retries.
 
-Blocking mode returns the final `done` payload plus `messages` array in a single JSON response.
+Blocking mode returns the final `done` payload plus `messages` array in a single JSON response. When reduced scope is active, the initial `meta` event (and blocking response envelope) also embed `"reduced_scope": {"text_only_chunks": true, "allowed_chunk_types": ["text"]}` so clients can surface demo-mode banners.
 
 **Errors**: Chat-specific codes include `THREAD_NOT_FOUND`, `INTERRUPT_REQUIRED`, `TOOL_FAILURE`, `CONTEXT_EXPIRED`.
 

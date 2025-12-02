@@ -52,3 +52,4 @@ Expose text-only upload, attachment, and pillar endpoints that behave synchronou
 - Provide API examples (request/response bodies) and fixture names for the synchronous endpoints for Task 03.
 - Call out any shared_data_layer changes or migrations so the next agent can reuse them when wiring the workerless runtime.
 - Document how pillar JSON payloads encode citations/metadata so frontend + Task 03 remain aligned.
+- Task 01 wired `ReducedScopeSettings` + `demo_mode_skipped` SSE events; reuse `settings.reduced_scope.allowed_chunk_types` + `ReducedScopeRateLimiter` when gating uploads/attachments.

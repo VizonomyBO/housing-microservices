@@ -10,6 +10,7 @@ from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
+from agent_api.http.rate_limit import NullRateLimiter, RateLimiterProtocol
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
 from agent_api.settings import Settings, load_settings
 from cache import InMemoryValkeyClient, ValkeyCacheClientProtocol
@@ -18,6 +19,7 @@ from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
 _STREAM_SETTINGS = StreamSettings()
 _CACHE_CLIENT_STATE: dict[str, ValkeyCacheClientProtocol | None] = {"client": None}
+_RATE_LIMITER_STATE: dict[str, RateLimiterProtocol | None] = {"limiter": None}
 
 
 async def get_request_context(request: Request) -> RequestContext:
@@ -63,7 +65,7 @@ def get_stream_settings() -> StreamSettings:
     return _STREAM_SETTINGS
 
 
-def get_cache_client(request: Request | None = None) -> ValkeyCacheClientProtocol:
+def get_cache_client(request: Request = None) -> ValkeyCacheClientProtocol:
     if request is not None and hasattr(request, "app"):
         client = getattr(request.app.state, "valkey_client", None)
         if client is not None:
@@ -77,7 +79,21 @@ def set_cache_client(client: ValkeyCacheClientProtocol) -> None:
     _CACHE_CLIENT_STATE["client"] = client
 
 
-def get_settings(request: Request | None = None) -> Settings:
+def get_rate_limiter(request: Request = None) -> RateLimiterProtocol:
+    if request is not None and hasattr(request, "app"):
+        limiter = getattr(request.app.state, "rate_limiter", None)
+        if limiter is not None:
+            return limiter
+    if _RATE_LIMITER_STATE["limiter"] is None:
+        _RATE_LIMITER_STATE["limiter"] = NullRateLimiter()
+    return _RATE_LIMITER_STATE["limiter"]
+
+
+def set_rate_limiter(limiter: RateLimiterProtocol) -> None:
+    _RATE_LIMITER_STATE["limiter"] = limiter
+
+
+def get_settings(request: Request = None) -> Settings:
     """Return the cached Settings instance stored on the app state."""
 
     if request is None or not hasattr(request, "app"):
@@ -131,10 +147,12 @@ __all__ = [
     "get_chat_runner",
     "get_db_session",
     "get_metrics_registry_dep",
+    "get_rate_limiter",
     "get_request_context",
     "get_settings",
     "get_stream_settings",
     "maybe_get_db_session",
     "set_cache_client",
     "set_chat_runner",
+    "set_rate_limiter",
 ]

@@ -13,10 +13,15 @@ from fastapi.responses import JSONResponse
 from shared_data_layer.db.session import DatabaseSessionManager
 
 from agent_api.http.errors import GatewayError, error_payload
+from agent_api.http.rate_limit import (
+    RateLimiterProtocol,
+    ReducedScopeRateLimiter,
+    ValkeyRateLimiterStub,
+)
 from agent_api.http.routes.chat import router as chat_router
 from agent_api.http.routes.metrics import router as metrics_router
 from agent_api.settings import Settings, load_settings
-from cache import InMemoryValkeyClient, ValkeyAsyncClient
+from cache import InMemoryValkeyClient, ValkeyAsyncClient, ValkeyCacheClientProtocol
 from telemetry import CacheObservability, get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -33,6 +38,8 @@ def create_app() -> FastAPI:
             metrics=registry, namespace=settings.metrics_namespace
         )
         app.state.settings = settings
+        app.state.reduced_scope = settings.reduced_scope
+        app.state.rate_limiter = _build_rate_limiter(settings)
 
         app.state.valkey_client = await _initialize_cache_client(
             settings=settings,
@@ -129,7 +136,14 @@ def create_app() -> FastAPI:
     return app
 
 
-async def _initialize_cache_client(*, settings: Settings, observability: CacheObservability):
+async def _initialize_cache_client(
+    *, settings: Settings, observability: CacheObservability
+) -> ValkeyCacheClientProtocol:
+    if settings.reduced_scope.should_disable_valkey():
+        logger.info("Reduced scope enabled; using in-memory cache stub (see docs/epics/035.md)")
+        return InMemoryValkeyClient(
+            default_ttl_seconds=settings.valkey_settings.default_ttl_seconds
+        )
     valkey_settings = settings.valkey_settings
     if not valkey_settings.enabled:
         logger.info("VALKEY_URL not set; using in-memory cache stub")
@@ -156,6 +170,12 @@ def _sanitize_url(raw: str | None) -> str:
         netloc += f":{parsed.port}"
     sanitized = parsed._replace(netloc=netloc, username=None, password=None)
     return urlunparse(sanitized)
+
+
+def _build_rate_limiter(settings: Settings) -> RateLimiterProtocol:
+    if settings.reduced_scope.should_disable_rate_limiter():
+        return ReducedScopeRateLimiter()
+    return ValkeyRateLimiterStub()
 
 
 __all__ = ["create_app"]

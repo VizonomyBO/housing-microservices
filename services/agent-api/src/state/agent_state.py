@@ -16,6 +16,7 @@ from typing import Any, Literal
 from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
+from agent_api.reduced_scope import ReducedScopeFlags
 from cache.response_serializer import CacheCitation
 from guardrails.models import GuardrailViolation, RouterRoute
 from models.retrieval import AttachmentScope, NormalizedInput
@@ -633,6 +634,10 @@ class AgentState(BaseModel):
         default=True,
         description="Indicates whether blocking guardrail violations were found.",
     )
+    reduced_scope_flags: ReducedScopeFlags = Field(
+        default_factory=ReducedScopeFlags,
+        description="Reduced-scope toggles active for this LangGraph run (Epic 3.5).",
+    )
     retry_counter: int = Field(
         default=0,
         ge=0,
@@ -737,6 +742,7 @@ __all__ = [
     "NormalizedInput",
     "NumericalTable",
     "NumericalTableColumn",
+    "ReducedScopeFlags",
     "RetrievalMetrics",
     "RouterRoute",
     "VisionFinding",

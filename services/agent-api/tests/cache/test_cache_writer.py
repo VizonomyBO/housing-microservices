@@ -122,3 +122,17 @@ async def test_maybe_serve_from_cache_tags_miss_when_missing() -> None:
         "key": metadata.cache_key,
         "reason": "not_found",
     }
+
+
+@pytest.mark.asyncio
+async def test_cache_writer_can_disable_writes_for_demo_mode() -> None:
+    client = InMemoryValkeyClient()
+    writer = CacheWriter(client=client, clock=_fixed_now, disable_writes=True)
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:demo")
+    payload = CacheResponsePayload(answer_text="demo")
+
+    result = await writer.write(payload=payload, cache_metadata=metadata)
+
+    assert result.cache_key == metadata.cache_key
+    assert result.bytes_written is None
+    assert await client.get(metadata.cache_key or "") is None

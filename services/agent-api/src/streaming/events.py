@@ -29,6 +29,7 @@ class SSEEventType(str, Enum):
     TELEMETRY_SNAPSHOT = "telemetry_snapshot"
     DONE = "done"
     TASK_ERROR = "task_error"
+    DEMO_MODE_SKIPPED = "demo_mode_skipped"
 
 
 class SSEPayload(BaseModel):
@@ -205,6 +206,21 @@ def build_envelope(
         timestamp=timestamp or datetime.now(UTC),
     )
 
+class DemoModePayload(SSEPayload):
+    """Payload describing capabilities skipped while demo mode is active."""
+
+    capability: str = Field(
+        ..., description="Capability that was suppressed (vision, numerical, etc.)"
+    )
+    reason: str = Field(
+        default="reduced_scope",
+        description="Reason code describing why the capability was disabled.",
+    )
+    metadata: Mapping[str, Any] = Field(
+        default_factory=dict,
+        description="Structured metadata (allowed chunk types, text-only flags, etc.).",
+    )
+
 
 EVENT_PAYLOAD_MODEL: dict[SSEEventType, type[SSEPayload]] = {
     SSEEventType.TASK_START: TaskLifecyclePayload,
@@ -218,4 +234,5 @@ EVENT_PAYLOAD_MODEL: dict[SSEEventType, type[SSEPayload]] = {
     SSEEventType.META: SSEPayload,
     SSEEventType.DONE: SSEPayload,
     SSEEventType.TASK_ERROR: TaskErrorPayload,
+    SSEEventType.DEMO_MODE_SKIPPED: DemoModePayload,
 }

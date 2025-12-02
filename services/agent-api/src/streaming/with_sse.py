@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from streaming.events import (
     CacheEventPayload,
+    DemoModePayload,
     SSEEventType,
     TaskLifecyclePayload,
     TelemetrySnapshotPayload,
@@ -184,6 +185,7 @@ __all__ = [
     "emit_cache_hit",
     "emit_cache_miss",
     "emit_cache_write",
+    "emit_demo_mode_event",
     "emit_telemetry_snapshot",
     "instrumented",
     "lifecycle_span",
@@ -292,6 +294,23 @@ async def _emit_cache_event(
         metric_refs=["agent_cache_events_total", "agent_cache_hit_ratio"],
     )
     await emitter.emit(event=event, payload=payload)
+
+
+async def emit_demo_mode_event(
+    emitter: SSEEmitter | None,
+    *,
+    capability: str,
+    reason: str = "reduced_scope",
+    metadata: Mapping[str, Any] | None = None,
+) -> None:
+    if emitter is None:
+        return
+    payload = DemoModePayload(
+        capability=capability,
+        reason=reason,
+        metadata=dict(metadata or {}),
+    )
+    await emitter.emit(event=SSEEventType.DEMO_MODE_SKIPPED, payload=payload)
 
 
 def _infer_namespace(cache_key: str) -> str | None:

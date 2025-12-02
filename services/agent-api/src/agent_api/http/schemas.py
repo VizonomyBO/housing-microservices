@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent_api.reduced_scope import ReducedScopeFlags
 from models.retrieval import (
     ChatConstraints,
     ChatMessagePayload,
@@ -68,20 +70,26 @@ class ChatRequestBody(BaseModel):
         owner_user_id: str | None = None,
         workspace_id: str | None = None,
         tenant_id: str | None = None,
+        allowed_chunk_types: Iterable[str] | None = None,
+        reduced_scope_flags: ReducedScopeFlags | None = None,
     ) -> ChatRequestContext:
         """Convert the HTTP payload into the internal ChatRequestContext."""
 
         message_payload = ChatMessagePayload.model_validate(self.message.model_dump())
+        constraints = self.constraints.model_copy(deep=True)
+        if allowed_chunk_types is not None:
+            constraints.allowed_chunk_types = list(allowed_chunk_types)
         return ChatRequestContext(
             conversation_id=conversation_id,
             thread_id=conversation_id,
             session_id=self.session_id,
             message=message_payload,
             hints=dict(self.hints or {}),
-            constraints=self.constraints,
+            constraints=constraints,
             owner_user_id=owner_user_id,
             workspace_id=workspace_id,
             tenant_id=tenant_id,
+            reduced_scope=reduced_scope_flags,
         )
 
 

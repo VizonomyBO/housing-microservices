@@ -11,7 +11,7 @@ from guardrails.models import GuardrailSeverity, GuardrailViolation
 from models.retrieval import AttachmentScope
 from state.agent_state import AgentState, GraphContext, VisionFinding
 from streaming.sse_emitter import SSEEmitter
-from streaming.with_sse import add_metadata, emit_cache_write, lifecycle_span
+from streaming.with_sse import add_metadata, emit_cache_write, emit_demo_mode_event, lifecycle_span
 
 from .vision_router_node import VisionRouterContextMissing
 
@@ -65,6 +65,9 @@ class MultimodalResponderNode:
             node="vision_multimodal_responder",
             subgraph="vision",
         ):
+            demo_skip = await self._maybe_skip_for_demo(state, sse_emitter)
+            if demo_skip is not None:
+                return demo_skip
             if (
                 self._has_blocking_guardrail(state.guardrail_findings)
                 or not state.guardrails_passed
@@ -136,6 +139,28 @@ class MultimodalResponderNode:
             "interrupt_reason": "guardrail_violation",
             "guardrails_passed": False,
             "subgraph_metrics": dict(state.subgraph_metrics),
+        }
+
+    async def _maybe_skip_for_demo(
+        self, state: AgentState, sse_emitter: SSEEmitter | None
+    ) -> dict[str, Any] | None:
+        flags = state.reduced_scope_flags
+        if not flags.should_skip_capability("vision"):
+            return None
+        if sse_emitter is not None and flags.emit_demo_events:
+            await emit_demo_mode_event(
+                sse_emitter,
+                capability="vision",
+                metadata={"node": "vision_multimodal_responder"},
+            )
+        add_metadata(reduced_scope_skip=True, capability="vision")
+        metrics = dict(state.subgraph_metrics)
+        key = "vision.demo_mode_skipped"
+        metrics[key] = metrics.get(key, 0) + 1
+        return {
+            "subgraph_metrics": metrics,
+            "guardrails_passed": True,
+            "next_subgraph": "informational_subgraph",
         }
 
 

@@ -52,6 +52,7 @@ class CacheWriter:
     serializer: Callable[[CacheResponsePayload], bytes] = field(default=serialize_cache_response)
     clock: Clock = field(default=_utc_now)
     observability: CacheObservability | None = None
+    disable_writes: bool = False
 
     async def write(
         self,
@@ -79,17 +80,23 @@ class CacheWriter:
         serialized = self.serializer(payload)
         ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl_seconds
 
-        try:
-            await self.client.set(key, serialized, ttl_seconds=ttl)
-            await self.client.tag_miss(key, reason="write_through")
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("CacheWriter failed to persist key %s: %s", key, exc)
-            return CacheWriteResult(
-                cache_metadata=cache_metadata,
-                cache_key=key,
-                bytes_written=None,
-                error=exc,
+        if self.disable_writes:
+            logger.info(
+                "CacheWriter running in reduced-scope mode; skipping Valkey write for %s",
+                key,
             )
+        else:
+            try:
+                await self.client.set(key, serialized, ttl_seconds=ttl)
+                await self.client.tag_miss(key, reason="write_through")
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("CacheWriter failed to persist key %s: %s", key, exc)
+                return CacheWriteResult(
+                    cache_metadata=cache_metadata,
+                    cache_key=key,
+                    bytes_written=None,
+                    error=exc,
+                )
 
         updated_metadata = cache_metadata.model_copy(
             update={"cache_key": key, "written_at": self.clock(), "hit": False}
@@ -97,7 +104,7 @@ class CacheWriter:
         result = CacheWriteResult(
             cache_metadata=updated_metadata,
             cache_key=key,
-            bytes_written=serialized,
+            bytes_written=None if self.disable_writes else serialized,
         )
         if self.observability is not None:
             resolved_route = state.route.value if state and state.route else None

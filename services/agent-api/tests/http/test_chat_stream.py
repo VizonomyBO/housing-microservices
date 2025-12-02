@@ -28,6 +28,8 @@ class _SuccessfulRunner(ChatRunnerProtocol):
         metrics,
         cache_observability,
         db_session,
+        reduced_scope,
+        rate_limiter,
     ) -> ChatRunResult:
         if sse_emitter is not None:
             payload = TaskLifecyclePayload(node="router", metadata={})
@@ -55,6 +57,8 @@ class _FailingRunner(ChatRunnerProtocol):
         metrics,
         cache_observability,
         db_session,
+        reduced_scope,
+        rate_limiter,
     ) -> ChatRunResult:
         raise GatewayError(code="INTERNAL_ERROR", message="boom", status_code=500)
 
@@ -95,6 +99,8 @@ def test_streaming_endpoint_emits_sse_frames() -> None:
     assert any("event: done" in chunk for chunk in chunks)
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["X-Accel-Buffering"] == "no"
+    assert "X-RateLimit-Policy" in response.headers
+    assert "X-Cache-Mode" in response.headers
 
 
 def test_blocking_mode_returns_json_payload() -> None:
@@ -107,6 +113,8 @@ def test_blocking_mode_returns_json_payload() -> None:
     assert response.status_code == 200
     assert data["done"]["status"] == "COMPLETED"
     assert response.headers["Cache-Control"] == "no-store"
+    assert "X-RateLimit-Policy" in response.headers
+    assert "X-Cache-Mode" in response.headers
 
 
 def test_streaming_error_emits_task_error_event() -> None:
@@ -119,3 +127,16 @@ def test_streaming_error_emits_task_error_event() -> None:
 
     assert any("event: task_error" in chunk for chunk in chunks)
     assert response.status_code == 500
+
+
+def test_reduced_scope_emits_demo_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_DISABLE_VALKEY", "1")
+    app = create_app()
+    client = TestClient(app)
+
+    with client.stream("POST", "/v1/chat", json=_payload()) as response:
+        chunks = list(response.iter_lines())
+
+    assert response.headers["X-Cache-Mode"] == "text-only"
+    assert any("event: demo_mode_skipped" in chunk for chunk in chunks)

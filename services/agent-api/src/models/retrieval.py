@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agent_api.reduced_scope import ReducedScopeFlags
+
 
 class AttachmentType(str, Enum):
     """Attachment asset categories understood by retrieval nodes."""
@@ -56,6 +58,7 @@ class ChatConstraints(BaseModel):
     country_code: str | None = None
     auto_attach_base_docs: bool = True
     max_tool_calls: int | None = None
+    allowed_chunk_types: list[str] | None = None
 
 
 class ChatRequestContext(BaseModel):
@@ -70,6 +73,7 @@ class ChatRequestContext(BaseModel):
     owner_user_id: str | None = None
     workspace_id: str | None = None
     tenant_id: str | None = None
+    reduced_scope: ReducedScopeFlags | None = None
 
 
 class TenantScope(BaseModel):
@@ -136,6 +140,10 @@ class NormalizedInput(BaseModel):
     attachment_refs: list[AttachmentReference] = Field(default_factory=list)
     scope_hash: str
     warnings: list[str] = Field(default_factory=list)
+    allowed_chunk_types: list[str] | None = Field(
+        default=None,
+        description="Chunk types permitted for retrieval when reduced scope limits apply.",
+    )
 
 
 class AttachmentDocument(BaseModel):

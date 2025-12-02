@@ -12,7 +12,7 @@ from guardrails import GuardrailContext, GuardrailEngine, RouteDecision, RouterR
 from models.retrieval import NormalizedInput
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
-from streaming.with_sse import add_metadata, lifecycle_span, set_route
+from streaming.with_sse import add_metadata, emit_demo_mode_event, lifecycle_span, set_route
 from telemetry import get_metrics_registry
 
 
@@ -105,6 +105,11 @@ class RouterNode:
                 )
             else:
                 decision = self._classify(state, normalized_input)
+                decision = await self._apply_reduced_scope_guard(
+                    state=state,
+                    decision=decision,
+                    sse_emitter=sse_emitter,
+                )
 
             set_route(decision.route)
             add_metadata(
@@ -189,6 +194,35 @@ class RouterNode:
             confidence=self.default_confidence,
             next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.INFORMATIONAL],
             reason="default",
+        )
+
+    async def _apply_reduced_scope_guard(
+        self,
+        *,
+        state: AgentState,
+        decision: RouteDecision,
+        sse_emitter: SSEEmitter | None,
+    ) -> RouteDecision:
+        flags = state.reduced_scope_flags
+        if not flags.enabled:
+            return decision
+        route = decision.route
+        if route not in {RouterRoute.NUMERICAL, RouterRoute.VISION}:
+            return decision
+        if not flags.should_skip_capability(route.value):
+            return decision
+        add_metadata(reduced_scope_skip=route.value)
+        if sse_emitter is not None and flags.emit_demo_events:
+            await emit_demo_mode_event(
+                sse_emitter,
+                capability=route.value,
+                metadata={"node": "router"},
+            )
+        return RouteDecision(
+            route=RouterRoute.INFORMATIONAL,
+            confidence=self.default_confidence,
+            next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.INFORMATIONAL],
+            reason="reduced_scope",
         )
 
     def _extract_intent_route(self, intent_tags: Iterable[str]) -> RouterRoute | None:
