@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
 from agent_api.settings import Settings, load_settings
+from cache import InMemoryValkeyClient, ValkeyCacheClientProtocol
 from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
 _STREAM_SETTINGS = StreamSettings()
+_CACHE_CLIENT_STATE: dict[str, ValkeyCacheClientProtocol | None] = {"client": None}
 
 
 async def get_request_context(request: Request) -> RequestContext:
@@ -59,6 +61,20 @@ def set_chat_runner(runner: ChatRunnerProtocol) -> None:
 
 def get_stream_settings() -> StreamSettings:
     return _STREAM_SETTINGS
+
+
+def get_cache_client(request: Request | None = None) -> ValkeyCacheClientProtocol:
+    if request is not None and hasattr(request, "app"):
+        client = getattr(request.app.state, "valkey_client", None)
+        if client is not None:
+            return client
+    if _CACHE_CLIENT_STATE["client"] is None:
+        _CACHE_CLIENT_STATE["client"] = InMemoryValkeyClient()
+    return _CACHE_CLIENT_STATE["client"]
+
+
+def set_cache_client(client: ValkeyCacheClientProtocol) -> None:
+    _CACHE_CLIENT_STATE["client"] = client
 
 
 def get_settings(request: Request | None = None) -> Settings:
@@ -110,6 +126,7 @@ async def maybe_get_db_session(request: Request) -> AsyncIterator[AsyncSession |
 
 __all__ = [
     "get_auth_context",
+    "get_cache_client",
     "get_cache_observability",
     "get_chat_runner",
     "get_db_session",
@@ -118,5 +135,6 @@ __all__ = [
     "get_settings",
     "get_stream_settings",
     "maybe_get_db_session",
+    "set_cache_client",
     "set_chat_runner",
 ]

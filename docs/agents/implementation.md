@@ -454,6 +454,18 @@ Designed for safe, sandboxed data analysis with **self-correction** and **HITL**
     Subsequent nodes may still call `CacheWriter` with enriched payloads (model metadata, workflow excerpts) to persist the latest answer.
 -   **SSE placeholder**: Router + CacheWriter will emit `metrics` events describing `cache_key`, `cache_hit`, TTL, and perceived reason (`write_through`, `not_found`, `hit`) once Task 12 wires the handler. Having deterministic payloads today means Task 12 only needs to forward these events without reshaping the schema.
 
+###### Valkey Client Configuration & Rollout (Task 16)
+
+- `ValkeyAsyncClient` (see `src/cache/valkey_async_client.py`) uses `valkey.asyncio` pools with shared retries/backoff, TLS, and Sentinel/cluster support. Settings live under `Settings.valkey_settings`, so every LangGraph entrypoint can reuse the same parsed config.
+- FastAPI lifespan now creates the cache client once, exposes it via `get_cache_client`, and tears it down on shutdown. When `VALKEY_URL` is missing (local unit tests, CI w/out Docker) we keep using `InMemoryValkeyClient`, so no other code changes are needed.
+- Supported env vars:
+  - Required to talk to production: `VALKEY_URL`, `VALKEY_USERNAME`, `VALKEY_PASSWORD` *or* `VALKEY_PASSWORD_FILE`, optional `VALKEY_DB` for single-instance deployments.
+  - Reliability + performance: `VALKEY_MAX_CONNECTIONS`, `VALKEY_SOCKET_TIMEOUT_SECONDS`, `VALKEY_CONNECT_TIMEOUT_SECONDS`, `VALKEY_HEALTHCHECK_INTERVAL_SECONDS`, `VALKEY_RETRY_*`, `VALKEY_DEFAULT_TTL_SECONDS` (feeds CacheWriter’s default TTL), `VALKEY_CLUSTER_MODE`, `VALKEY_SENTINEL_SERVICE`.
+  - TLS: `VALKEY_TLS_CA_CERT`, `VALKEY_TLS_CLIENT_CERT`, `VALKEY_TLS_CLIENT_KEY`, `VALKEY_TLS_SKIP_VERIFY`, or just supply a `valkeys://` URL when the managed cluster enforces TLS.
+- Local dev instructions: run `docker run --rm -p 6380:6379 valkey/valkey:8.0`, then export `VALKEY_URL=redis://127.0.0.1:6380/0`. Testcontainers (`tests/cache/test_valkey_client.py`) already exercises this path, so `uv run pytest -k valkey_client` is enough to validate connectivity.
+- Rollout checklist: (1) provision credentials/TLS secrets, (2) set env vars + restart the Agent API, (3) confirm logs show “Valkey client initialized” with the sanitized host, (4) watch `get_metrics_registry().cache_events` dashboards for non-zero hit/miss counts, (5) clear old cache namespaces if schema_version bumps are insufficient.
+- Failure handling: connection/timeouts raise retriable exceptions; after the configured attempts we log a warning and re-surface the exception to the caller, which causes `maybe_serve_from_cache` to degrade to a cache miss so LangGraph still executes.
+
 ### 3.3. Edges & Conditional Logic
 
 -   **`conditional_edge(Router)`**:

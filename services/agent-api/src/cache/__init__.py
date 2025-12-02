@@ -14,6 +14,7 @@ from .response_serializer import (
     deserialize_cache_response,
     serialize_cache_response,
 )
+from .valkey_async_client import ValkeyAsyncClient
 from .valkey_client import InMemoryValkeyClient, ValkeyCacheClientProtocol
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "CacheWriter",
     "InMemoryValkeyClient",
     "RetrievalCacheKeyInputs",
+    "ValkeyAsyncClient",
     "ValkeyCacheClientProtocol",
     "build_retrieval_cache_key",
     "deserialize_cache_response",

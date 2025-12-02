@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -14,7 +15,8 @@ from shared_data_layer.db.session import DatabaseSessionManager
 from agent_api.http.errors import GatewayError, error_payload
 from agent_api.http.routes.chat import router as chat_router
 from agent_api.http.routes.metrics import router as metrics_router
-from agent_api.settings import load_settings
+from agent_api.settings import Settings, load_settings
+from cache import InMemoryValkeyClient, ValkeyAsyncClient
 from telemetry import CacheObservability, get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,11 @@ def create_app() -> FastAPI:
         )
         app.state.settings = settings
 
+        app.state.valkey_client = await _initialize_cache_client(
+            settings=settings,
+            observability=app.state.cache_observability,
+        )
+
         db_initialized = False
         if settings.database_url:
             DatabaseSessionManager.init(settings.database_url)
@@ -45,6 +52,9 @@ def create_app() -> FastAPI:
         finally:
             if db_initialized:
                 await DatabaseSessionManager.dispose()
+            cache_client = getattr(app.state, "valkey_client", None)
+            if isinstance(cache_client, ValkeyAsyncClient):
+                await cache_client.close()
 
     app = FastAPI(
         title="Agent API",
@@ -117,6 +127,35 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
+async def _initialize_cache_client(*, settings: Settings, observability: CacheObservability):
+    valkey_settings = settings.valkey_settings
+    if not valkey_settings.enabled:
+        logger.info("VALKEY_URL not set; using in-memory cache stub")
+        return InMemoryValkeyClient(default_ttl_seconds=valkey_settings.default_ttl_seconds)
+    try:
+        client = ValkeyAsyncClient.from_settings(
+            valkey_settings,
+            observability=observability,
+        )
+        sanitized = _sanitize_url(valkey_settings.url)
+        logger.info("Valkey client initialized for %s", sanitized)
+        return client
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning("Falling back to in-memory cache because Valkey init failed: %s", exc)
+        return InMemoryValkeyClient(default_ttl_seconds=valkey_settings.default_ttl_seconds)
+
+
+def _sanitize_url(raw: str | None) -> str:
+    if not raw:
+        return "<unset>"
+    parsed = urlparse(raw)
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    sanitized = parsed._replace(netloc=netloc, username=None, password=None)
+    return urlunparse(sanitized)
 
 
 __all__ = ["create_app"]

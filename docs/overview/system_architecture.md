@@ -693,6 +693,29 @@ flowchart LR
 - **Gateway wiring**: `services/agent-api/src/agent_api/http/app.py` instantiates the registry + `CacheObservability` during startup, while `src/agent_api/http/deps.py` exposes dependency helpers (`get_metrics_registry_dep`, `get_cache_observability`, `maybe_get_db_session`) so `/v1/chat` passes the singletons and a shared `AsyncSession` into every LangGraph runner call.
 - **Secure scraping**: `src/agent_api/http/routes/metrics.py` exposes `GET /metrics` with `Content-Type: text/plain; version=0.0.4; charset=utf-8`, `Cache-Control: no-store`, and `X-Accel-Buffering: no`. Scrapers must provide `Authorization: Bearer ${METRICS_AUTH_TOKEN}` (override header/scheme via `METRICS_AUTH_HEADER`/`METRICS_AUTH_SCHEME`). Requests without the token return 401/403 to keep internal metrics private.
 - **Scraping & replay**: Mount a FastAPI `/metrics` route that calls `MetricsRegistry.render_prometheus()` for Prometheus to scrape. In staging, run `uv run pytest tests/telemetry` or call `CacheObservability.record_cache_write(..., session=db_session)` to backfill telemetry rows and confirm dashboards before promoting a change.
+
+### 3.6. Valkey Client & Cache Deployment
+
+- `services/agent-api/src/cache/valkey_async_client.py` uses the official `valkey.asyncio` client to create a pooled connection (cluster and sentinel aware) with bounded retries/backoff, TLS hooks, and best-effort telemetry when `tag_hit/tag_miss` fire. When `VALKEY_URL` is not configured we automatically fall back to `InMemoryValkeyClient` so unit tests/local dev stay deterministic.
+- FastAPI wiring (`agent_api/http/app.py` + `agent_api/http/deps.py`) instantiates the production client during lifespan startup, exposes it via `get_cache_client`, and closes the pool on shutdown. LangGraph runners can inject the dependency directly, so CacheWriter/maybe_serve_from_cache now talk to the real cluster without custom plumbing.
+- Core environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VALKEY_URL` | _(unset)_ | `redis://`, `valkeys://`, or `sentinel://host1:26379,host2:26379/0` endpoint. When unset we keep the stub. |
+| `VALKEY_USERNAME` / `VALKEY_PASSWORD` / `VALKEY_PASSWORD_FILE` | _(unset)_ | Credentials for managed Valkey. `_FILE` lets us mount secrets without echoing them in envs. |
+| `VALKEY_DB` | `None` | Database index for single-instance deployments. |
+| `VALKEY_DEFAULT_TTL_SECONDS` | `172800` | CacheWriter TTL (48h per §3.3). |
+| `VALKEY_MAX_CONNECTIONS` | `64` | Pool ceiling before the client starts queueing. |
+| `VALKEY_SOCKET_TIMEOUT_SECONDS` / `VALKEY_CONNECT_TIMEOUT_SECONDS` | `3.0` / `1.0` | Command + connect timeouts forwarded to the pool. |
+| `VALKEY_HEALTHCHECK_INTERVAL_SECONDS` | `30` | Background health probes so idle pools recover gracefully. |
+| `VALKEY_RETRY_ATTEMPTS` / `VALKEY_RETRY_BACKOFF_SECONDS` / `VALKEY_RETRY_MAX_BACKOFF_SECONDS` / `VALKEY_RETRY_JITTER_SECONDS` | `3` / `0.05` / `0.5` / `0.01` | Bounded exponential backoff for transient errors. |
+| `VALKEY_SENTINEL_SERVICE` | _(unset)_ | Enable async Sentinel discovery when paired with a `sentinel://` URL. |
+| `VALKEY_CLUSTER_MODE` | `false` | Switches to `valkey.asyncio.RedisCluster` for shared clusters. |
+| `VALKEY_TLS_CA_CERT`, `VALKEY_TLS_CLIENT_CERT`, `VALKEY_TLS_CLIENT_KEY`, `VALKEY_TLS_SKIP_VERIFY` | _(unset)_ | Supply CA/client material for mTLS. Setting `valkeys://` also forces TLS. |
+
+- Local development: `docker run --rm -p 6380:6379 --name valkey-dev valkey/valkey:8.0` then export `VALKEY_URL=redis://127.0.0.1:6380/0`. Integration tests (`tests/cache/test_valkey_client.py`) spin up the same image via Testcontainers, so CI verifies real get/set/TTL paths without managing external infrastructure.
+- Rollout: set `VALKEY_URL`, credentials, and TLS values, then restart the gateway. The service logs a sanitized Valkey host when the pool comes up; if initialization fails we log a warning and reuse the stub so requests keep flowing. To rotate cache schemas bump `CacheResponsePayload.schema_version` and/or `VALKEY_DEFAULT_TTL_SECONDS`—existing keys age out automatically.
 ## 4. Interface Design
 
 ### 4.1. API Design

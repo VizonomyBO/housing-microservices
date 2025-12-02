@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from config import ValkeySettings, load_valkey_settings
+
 
 @dataclass(slots=True)
 class Settings:
@@ -16,6 +18,7 @@ class Settings:
     metrics_auth_token: str | None
     metrics_auth_header: str
     metrics_auth_scheme: str
+    valkey_settings: ValkeySettings
 
 
 def load_settings() -> Settings:
@@ -28,6 +31,7 @@ def load_settings() -> Settings:
         metrics_auth_token=os.getenv("METRICS_AUTH_TOKEN"),
         metrics_auth_header=os.getenv("METRICS_AUTH_HEADER", "Authorization"),
         metrics_auth_scheme=os.getenv("METRICS_AUTH_SCHEME", "Bearer"),
+        valkey_settings=load_valkey_settings(),
     )
 
 
