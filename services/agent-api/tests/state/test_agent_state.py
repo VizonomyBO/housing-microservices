@@ -21,6 +21,7 @@ from state.agent_state import (
     CacheMetadata,
     GraphContext,
     GraphEntitySummary,
+    HitlTranscriptEntry,
     MessageSnapshot,
     RetrievalMetrics,
     VisionFinding,
@@ -164,6 +165,33 @@ def test_agent_state_round_trip_serialization() -> None:
     assert rehydrated.normalized_input.scope_hash == "hash-abc"
     assert rehydrated.attachment_scope is not None
     assert rehydrated.attachment_scope.documents[0].document_id == "doc-1"
+
+
+def test_hitl_transcript_round_trip() -> None:
+    entry = HitlTranscriptEntry(
+        event="pause",
+        reason="guardrail_violation",
+        resume_token="resume-1",
+        guardrail_codes=["prompt_injection"],
+        confidence=0.3,
+        checkpoint_id="chk-1",
+        metadata={"operator_hint": "legal_review"},
+    )
+    state = AgentState(
+        messages=[_sample_snapshot()],
+        conversation_id="conv-hitl",
+        hitl_transcript=[entry],
+        created_at=datetime.now(UTC),
+    )
+
+    payload = agent_state_to_persistence(state)
+    rehydrated = agent_state_from_persistence(payload)
+
+    assert len(rehydrated.hitl_transcript) == 1
+    restored = rehydrated.hitl_transcript[0]
+    assert restored.event == "pause"
+    assert restored.resume_token == "resume-1"
+    assert restored.guardrail_codes == ["prompt_injection"]
 
 
 def test_agent_state_from_persistence_validates_required_fields() -> None:

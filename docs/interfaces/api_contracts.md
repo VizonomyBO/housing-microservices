@@ -420,5 +420,23 @@ When LangGraph raises an interrupt, it emits:
 ```
 Gateway surfaces this via SSE `interrupt` event. Client responses must POST `/v1/chat` with the same `thread_id`, include `interrupt_token` issued in the event, and optionally `clarification_response`. LangGraph resumes from the serialized node state, guaranteeing idempotent continuation.
 
+**HITL SSE payloads** (Task 12 will stream these verbatim):
+
+```json
+{
+  "event": "hitl_pause",
+  "conversation_id": "conv_123",
+  "checkpoint_id": "chk_9f8b",
+  "resume_token": "f3d4c8...",
+  "reason": "low_confidence",
+  "route": "informational",
+  "confidence": 0.32,
+  "guardrail_codes": [],
+  "timestamp": "2025-12-02T17:04:22.123Z"
+}
+```
+
+On resume, the same schema is reused with `event="hitl_resume"`, `reason="hitl_resume"`, and `resume_token` set to the consumed token so clients can correlate transcripts.
+
 ---
 These contracts establish the concrete wire formats needed to implement the FastAPI gateway, ingestion workflow, and LangGraph orchestration without ambiguity, while leaving headroom for future routes (gRPC, webhooks) to reuse the same envelope patterns.

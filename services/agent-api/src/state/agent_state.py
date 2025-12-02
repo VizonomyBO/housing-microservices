@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
@@ -68,6 +68,45 @@ class MessageSnapshot(BaseModel):
         data = handler(self)
         data["message"] = message_to_dict(self.message)
         return data
+
+
+class HitlTranscriptEntry(BaseModel):
+    """Record describing a HITL pause/resume event for transcripts."""
+
+    event: Literal["pause", "resume"] = Field(
+        ..., description="Whether the entry marks a HITL pause or a resume event."
+    )
+    reason: str = Field(
+        ..., description="HumanGate reason code (low_confidence, guardrail_violation)."
+    )
+    resume_token: str | None = Field(
+        default=None,
+        description="Resume token issued during the pause; echoed on resume for auditing.",
+    )
+    route: RouterRoute | None = Field(
+        default=None,
+        description="Route active when the HITL event occurred, if known.",
+    )
+    guardrail_codes: list[str] = Field(
+        default_factory=list,
+        description="Guardrail violation codes contributing to the pause (if any).",
+    )
+    confidence: float | None = Field(
+        default=None,
+        description="Router confidence captured when the pause decision was made.",
+    )
+    checkpoint_id: str | None = Field(
+        default=None,
+        description="Checkpoint identifier persisted for the pause/resume event.",
+    )
+    timestamp: datetime = Field(
+        default_factory=_utc_now,
+        description="When the HITL event was recorded (UTC).",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional structured metadata surfaced to transcripts/SSE.",
+    )
 
 
 class GraphEntitySummary(BaseModel):
@@ -378,6 +417,10 @@ class AgentState(BaseModel):
         default=True,
         description="Indicates whether blocking guardrail violations were found.",
     )
+    hitl_transcript: list[HitlTranscriptEntry] = Field(
+        default_factory=list,
+        description="Chronological record of HITL pause/resume metadata for transcripts/SSE.",
+    )
     retrieval_metrics: RetrievalMetrics = Field(
         default_factory=RetrievalMetrics,
         description="Hybrid retrieval telemetry forwarded via SSE metrics (docs/agents/implementation.md §3.2).",
@@ -456,6 +499,7 @@ __all__ = [
     "GraphSummary",
     "GraphSummarySection",
     "GuardrailViolation",
+    "HitlTranscriptEntry",
     "MessageSnapshot",
     "NormalizedInput",
     "RetrievalMetrics",

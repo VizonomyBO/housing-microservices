@@ -472,6 +472,7 @@ flowchart TB
 
 - **Interrupts**: Nodes raise interrupts for clarification/disambiguation  
 - **Resume**: Continues from same node with injected input; nodes should be idempotent
+- **HumanGateService** (`services/agent-api/src/hitl/human_gate_service.py`) evaluates Router output and guardrail findings against per-route confidence thresholds before raising an interrupt. It persists checkpoints via `CheckpointService.pause_for_hitl`, records the resume token + reason into `AgentState.hitl_transcript`, and issues placeholder `hitl_pause` SSE payloads so Task 12 can simply forward them. Resuming through `resume_from_hitl` appends a matching transcript entry and emits `hitl_resume`, ensuring the LangGraph timeline and gateway transcript stay in sync even when operators inject new context.
 
 #### 2.2.9. Error Handling
 
