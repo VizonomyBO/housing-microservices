@@ -12,7 +12,9 @@ class StubHumanGate:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def evaluate(self, state: AgentState) -> HumanGateDecision:  # type: ignore[override]
+    async def evaluate(
+        self, state: AgentState, *, event_emitter=None  # type: ignore[unused-argument]
+    ) -> HumanGateDecision:
         self.calls += 1
         return HumanGateDecision(paused=False, state=state)
 

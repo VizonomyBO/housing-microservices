@@ -59,7 +59,9 @@ class HumanGateService:
     event_emitter: EventEmitter | None = None
     clock: Clock = _utc_now
 
-    async def evaluate(self, state: AgentState) -> HumanGateDecision:
+    async def evaluate(
+        self, state: AgentState, *, event_emitter: EventEmitter | None = None
+    ) -> HumanGateDecision:
         """Return updated state and pause metadata if HITL is required."""
 
         reason = self._resolve_reason(state)
@@ -96,7 +98,7 @@ class HumanGateService:
             "confidence": persisted_state.route_confidence,
             "timestamp": self.clock().isoformat(),
         }
-        await self._emit(payload)
+        await self._emit(payload, override=event_emitter)
         return HumanGateDecision(
             paused=True,
             state=persisted_state,
@@ -106,7 +108,11 @@ class HumanGateService:
         )
 
     async def resume_from_hitl(
-        self, conversation_id: str, resume_token: str
+        self,
+        conversation_id: str,
+        resume_token: str,
+        *,
+        event_emitter: EventEmitter | None = None,
     ) -> HumanGateResumeResult:
         """Hydrate a paused checkpoint, append transcript metadata, and emit resume event."""
 
@@ -129,7 +135,7 @@ class HumanGateService:
             "resume_token": checkpoint.metadata.consumed_resume_token,
             "timestamp": self.clock().isoformat(),
         }
-        await self._emit(payload)
+        await self._emit(payload, override=event_emitter)
         return HumanGateResumeResult(state=state, checkpoint=checkpoint)
 
     def _resolve_reason(self, state: AgentState) -> str | None:
@@ -199,7 +205,10 @@ class HumanGateService:
     def _generate_resume_token(self) -> str:
         return uuid4().hex
 
-    async def _emit(self, payload: Mapping[str, Any]) -> None:
-        if self.event_emitter is None:
+    async def _emit(
+        self, payload: Mapping[str, Any], *, override: EventEmitter | None = None
+    ) -> None:
+        emitter = override or self.event_emitter
+        if emitter is None:
             return
-        await self.event_emitter(payload["event"], payload)
+        await emitter(payload["event"], payload)

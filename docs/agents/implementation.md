@@ -590,6 +590,42 @@ async for event in agent.astream_events(inputs, version="v1"):
 # - optional status_text describing current phase
 ```
 
+#### 3.6.1. SSE Event Reference (Task 12)
+
+Task 12 introduces a first-class streaming helper stack located under `services/agent-api/src/streaming`. `events.py` codifies the envelopes from `docs/interfaces/api_contracts.md` §3, `sse_emitter.py` exposes an async iterator that formats `event:`/`data:` frames (plus comment-based keep-alives), and `with_sse.py` provides `lifecycle_span()` + cache/telemetry helpers so LangGraph nodes can emit events without bespoke plumbing.
+
+Every node now executes inside `lifecycle_span()` (Router, HumanGate, Retrieval pipeline, Informational/Analyst/Numerical/Vision subgraphs). The span emits `task_start` before user logic, tracks metadata via `streaming.with_sse.add_metadata()`, and emits `task_end` with `status=success|error`. `SSEEmitter.as_event_emitter()` plugs into `HumanGateService.evaluate/resume_from_hitl`, so HITL `pause`/`resume` payloads match §3.4 exactly.
+
+| Event | Trigger | Payload Snapshot |
+| --- | --- | --- |
+| `task_start` | `lifecycle_span()` entry for any LangGraph node | `TaskLifecyclePayload` → `{node, subgraph, route?, sequence?, metadata={"status":"running", ...}}` |
+| `task_end` | `lifecycle_span()` exit | same payload with `metadata.status="success"` or `"error"` plus accumulated keys (`attachments`, `execution_ms`, etc.) |
+| `cache_hit` | `maybe_serve_from_cache` returns a value | `CacheEventPayload` → `{cache_key, namespace, hit:true, latency_ms?, payload_hash?}` |
+| `cache_miss` | cache lookup misses while a key exists | `{cache_key, namespace, hit:false, metadata.reason}` |
+| `cache_write` | `CacheWriter.write` persists an answer | `{cache_key, namespace, ttl_seconds, payload_hash?}` |
+| `hitl_pause` | `HumanGateService.pause_for_hitl` | `HitlEventPayload` → `{conversation_id, checkpoint_id, resume_token, reason, route, confidence, guardrail_codes}` |
+| `hitl_resume` | `resume_from_hitl` rehydrates a checkpoint | same schema with `reason="hitl_resume"` and consumed token |
+| `telemetry_snapshot` | Nodes publish structured metrics (graph cache ratios, Polars execution time, etc.) | `TelemetrySnapshotPayload` → `{metrics:{...}, labels:{...}, window_ms?}` |
+
+**Sample stream excerpt**
+
+```
+event: task_start
+data: {"event":"task_start","timestamp":"2025-12-02T14:48:31.201Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"node":"router","subgraph":"control","route":null,"sequence":null,"metadata":{"status":"running","normalized_scope":"scope-f3"}}}
+
+event: cache_miss
+data: {"event":"cache_miss","timestamp":"2025-12-02T14:48:31.205Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"cache_key":"agent-api:retrieval:thr_92aa2:v1","namespace":"agent-api","hit":false,"source":"valkey","latency_ms":1.2,"metadata":{"reason":"not_found"}}}
+
+event: task_end
+data: {"event":"task_end","timestamp":"2025-12-02T14:48:31.506Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"node":"router","subgraph":"control","route":"informational","sequence":null,"metadata":{"status":"success","router_reason":"numerical_signal","route_confidence":0.82}}}
+
+event: telemetry_snapshot
+data: {"event":"telemetry_snapshot","timestamp":"2025-12-02T14:48:31.750Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"metrics":{"numerical.polars.execution_ms":134.2},"labels":{"table_aliases":"gdp"}}}
+```
+
+Keep-alive comments `: keep-alive` are emitted whenever the stream is idle, satisfying the SSE spec and preventing intermediaries from closing long-lived chat sessions.
+
+
 ### 3.7. Service Interface (FastAPI + LangServe)
 
 The FastAPI gateway and the LangGraph executor now live in the same ASGI process, exposed through **FastAPI** augmented with **LangServe**.

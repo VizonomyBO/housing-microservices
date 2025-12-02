@@ -24,6 +24,8 @@ from repositories.conversation_scope_repository import (
     ConversationScopePort,
 )
 from state.agent_state import AgentState
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 @dataclass(slots=True)
@@ -36,7 +38,7 @@ class InputNormalizerNode:
     max_prompt_chars: int = 20000
 
     async def __call__(
-        self, state: AgentState
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
     ) -> dict[str, Any]:  # pragma: no cover - exercised via tests
         conversation_id = state.conversation_id
         if not conversation_id:
@@ -60,48 +62,69 @@ class InputNormalizerNode:
 
         detection = self.language_detector.detect(normalized_prompt)
         tenant_scope = self._build_tenant_scope(state)
-        conversation_docs = await self.scope_repository.list_conversation_documents(conversation_id)
-        doc_map = {record.document_id: record for record in conversation_docs}
+        metadata = {
+            "country_code": tenant_scope.country_code,
+            "auto_attach": self.request.constraints.auto_attach_base_docs,
+        }
 
-        auto_attached_ids = await self._auto_attach_base_docs(
-            tenant_scope, doc_map, conversation_id
-        )
-        attachment_refs, warnings = self._materialize_attachment_refs(doc_map, auto_attached_ids)
-        if auto_attached_ids:
-            warnings.append(
-                f"Auto-attached {len(auto_attached_ids)} base document(s) for {tenant_scope.country_code}"
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="input_normalizer",
+            subgraph="retrieval",
+            metadata=metadata,
+        ):
+            conversation_docs = await self.scope_repository.list_conversation_documents(
+                conversation_id
+            )
+            doc_map = {record.document_id: record for record in conversation_docs}
+
+            auto_attached_ids = await self._auto_attach_base_docs(
+                tenant_scope, doc_map, conversation_id
+            )
+            attachment_refs, warnings = self._materialize_attachment_refs(
+                doc_map, auto_attached_ids
+            )
+            if auto_attached_ids:
+                warnings.append(
+                    f"Auto-attached {len(auto_attached_ids)} base document(s) for {tenant_scope.country_code}"
+                )
+
+            workflow_refs = [
+                AttachmentReference(
+                    asset_type=AttachmentType.WORKFLOW,
+                    asset_id=attachment.workflow_id or "",
+                    workflow_id=attachment.workflow_id,
+                    attach_source=attachment.attach_source or "user_request",
+                    provided_in_request=True,
+                )
+                for attachment in self.request.message.attachments
+                if attachment.type == "workflow_reference"
+            ]
+            attachment_refs.extend(workflow_refs)
+            add_metadata(
+                attachment_count=len(attachment_refs),
+                workflow_refs=len(workflow_refs),
+                auto_attached=len(auto_attached_ids),
             )
 
-        workflow_refs = [
-            AttachmentReference(
-                asset_type=AttachmentType.WORKFLOW,
-                asset_id=attachment.workflow_id or "",
-                workflow_id=attachment.workflow_id,
-                attach_source=attachment.attach_source or "user_request",
-                provided_in_request=True,
+            scope_hash_entries = [
+                f"{ref.asset_type}:{ref.asset_id}:{ref.visibility}" for ref in attachment_refs
+            ]
+            scope_hash = compute_scope_hash(scope_hash_entries)
+
+            normalized_input = NormalizedInput(
+                normalized_prompt=normalized_prompt,
+                raw_prompt=self.request.message.content,
+                language_code=detection.language_code,
+                language_confidence=detection.confidence,
+                intent_tags=_flatten_intent_hints(self.request),
+                tenant_scope=tenant_scope,
+                attachment_refs=attachment_refs,
+                scope_hash=scope_hash,
+                warnings=warnings,
             )
-            for attachment in self.request.message.attachments
-            if attachment.type == "workflow_reference"
-        ]
-        attachment_refs.extend(workflow_refs)
-
-        scope_hash_entries = [
-            f"{ref.asset_type}:{ref.asset_id}:{ref.visibility}" for ref in attachment_refs
-        ]
-        scope_hash = compute_scope_hash(scope_hash_entries)
-
-        normalized_input = NormalizedInput(
-            normalized_prompt=normalized_prompt,
-            raw_prompt=self.request.message.content,
-            language_code=detection.language_code,
-            language_confidence=detection.confidence,
-            intent_tags=_flatten_intent_hints(self.request),
-            tenant_scope=tenant_scope,
-            attachment_refs=attachment_refs,
-            scope_hash=scope_hash,
-            warnings=warnings,
-        )
-        return {"normalized_input": normalized_input}
+            add_metadata(language=detection.language_code)
+            return {"normalized_input": normalized_input}
 
     def _build_tenant_scope(self, state: AgentState) -> TenantScope:
         return TenantScope(

@@ -7,6 +7,8 @@ from typing import Any
 
 from hitl import HumanGateDecision, HumanGateResumeResult, HumanGateService
 from state.agent_state import AgentState
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 class HumanGateNodeError(RuntimeError):
@@ -19,18 +21,35 @@ class HumanGateNode:
 
     service: HumanGateService
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         if not state.conversation_id:
             raise HumanGateNodeError("HumanGate requires conversation_id in AgentState")
 
-        decision = await self.service.evaluate(state)
-        return self._serialize_state_updates(decision)
+        event_emitter = sse_emitter.as_event_emitter() if sse_emitter else None
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="human_gate",
+            subgraph="control",
+            metadata={"phase": "hitl"},
+        ):
+            decision = await self.service.evaluate(state, event_emitter=event_emitter)
+            add_metadata(paused=decision.paused, reason=decision.reason)
+            return self._serialize_state_updates(decision)
 
-    async def resume_from_hitl(self, conversation_id: str, resume_token: str) -> AgentState:
+    async def resume_from_hitl(
+        self,
+        conversation_id: str,
+        resume_token: str,
+        *,
+        sse_emitter: SSEEmitter | None = None,
+    ) -> AgentState:
         """Expose service resume flow so controllers/tests can hydrate paused runs."""
 
+        event_emitter = sse_emitter.as_event_emitter() if sse_emitter else None
         result: HumanGateResumeResult = await self.service.resume_from_hitl(
-            conversation_id, resume_token
+            conversation_id, resume_token, event_emitter=event_emitter
         )
         return result.state
 
@@ -46,5 +65,4 @@ class HumanGateNode:
                     "resume_token": decision.resume_token,
                 }
             )
-        # TODO(Task 12): forward decision.payload to SSE emitter once streaming hooks land.
         return updates

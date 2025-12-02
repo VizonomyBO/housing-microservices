@@ -7,8 +7,10 @@ from typing import Any, Protocol
 
 from cache.response_serializer import CacheCitation
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
-from hitl.human_gate_service import HumanGateDecision
+from hitl.human_gate_service import EventEmitter, HumanGateDecision
 from state.agent_state import AgentState, GraphContext, WorkflowPlan
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 class CitationVerificationError(RuntimeError):
@@ -44,7 +46,9 @@ class CitationValidatorProtocol(Protocol):
 class HumanGateEvaluator(Protocol):
     """Subset of HumanGateService used by this node."""
 
-    async def evaluate(self, state: AgentState) -> HumanGateDecision: ...
+    async def evaluate(
+        self, state: AgentState, *, event_emitter: EventEmitter | None = None
+    ) -> HumanGateDecision: ...
 
 
 @dataclass(slots=True)
@@ -55,7 +59,9 @@ class CitationVerifierNode:
     human_gate: HumanGateEvaluator | None = None
     interrupt_reason: str = "invalid_citation"
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         if not state.answer:
             raise CitationVerificationError("CitationVerifier requires an answer to inspect")
         context = CitationValidationContext(
@@ -64,16 +70,29 @@ class CitationVerifierNode:
             graph_context=state.graph_context,
             workflow_plan=state.workflow_plan,
         )
-        verdict = await self.validator.validate(context)
-        if verdict.is_valid:
-            return {
-                "guardrails_passed": True,
-                "guardrail_findings": state.guardrail_findings,
-            }
-        return await self._handle_invalid_citations(state, verdict)
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="informational_citation_verifier",
+            subgraph="informational",
+        ):
+            verdict = await self.validator.validate(context)
+            add_metadata(
+                citations=len(state.citations),
+                invalid_citations=len(verdict.invalid_citations),
+                verdict_valid=verdict.is_valid,
+            )
+            if verdict.is_valid:
+                return {
+                    "guardrails_passed": True,
+                    "guardrail_findings": state.guardrail_findings,
+                }
+            return await self._handle_invalid_citations(state, verdict, sse_emitter)
 
     async def _handle_invalid_citations(
-        self, state: AgentState, verdict: CitationValidationResult
+        self,
+        state: AgentState,
+        verdict: CitationValidationResult,
+        sse_emitter: SSEEmitter | None,
     ) -> dict[str, Any]:
         violation = GuardrailViolation(
             code=GuardrailCode.CITATION_MISMATCH,
@@ -100,7 +119,8 @@ class CitationVerifierNode:
         annotated_state = state.model_copy(update=updates)
         if self.human_gate is None:
             return updates
-        decision = await self.human_gate.evaluate(annotated_state)
+        emitter = sse_emitter.as_event_emitter() if sse_emitter else None
+        decision = await self.human_gate.evaluate(annotated_state, event_emitter=emitter)
         hitl_updates: dict[str, Any] = {
             "interrupt_reason": decision.state.interrupt_reason,
             "hitl_transcript": decision.state.hitl_transcript,

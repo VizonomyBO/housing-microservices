@@ -8,6 +8,8 @@ from typing import Literal
 
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from state.agent_state import AgentState, VisionAttachmentContext, VisionRouterContext
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 from .artifacts import extract_vision_attachments
 
@@ -38,20 +40,33 @@ class VisionRouterNode:
         default_factory=lambda: {"explicit", "self_harm", "violence"}
     )
 
-    async def __call__(self, state: AgentState) -> dict[str, object]:
-        context = self._build_context(state)
-        guardrail_findings = self._evaluate_guardrails(context, state.guardrail_findings)
-        guardrails_passed = self._guardrails_passed(state.guardrails_passed, guardrail_findings)
-        metrics = dict(state.subgraph_metrics)
-        metrics["vision.router.attachments"] = len(context.attachments)
-        metrics["vision.router.mode"] = context.mode
-        metrics["vision.router.warnings"] = len(context.warnings)
-        return {
-            "vision_context": context,
-            "guardrail_findings": guardrail_findings,
-            "guardrails_passed": guardrails_passed,
-            "subgraph_metrics": metrics,
-        }
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, object]:
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="vision_router",
+            subgraph="vision",
+        ):
+            context = self._build_context(state)
+            guardrail_findings = self._evaluate_guardrails(context, state.guardrail_findings)
+            guardrails_passed = self._guardrails_passed(state.guardrails_passed, guardrail_findings)
+            metrics = dict(state.subgraph_metrics)
+            metrics["vision.router.attachments"] = len(context.attachments)
+            metrics["vision.router.mode"] = context.mode
+            metrics["vision.router.warnings"] = len(context.warnings)
+            add_metadata(
+                attachment_count=len(context.attachments),
+                mode=context.mode,
+                warnings=len(context.warnings),
+                guardrail_violation_count=len(guardrail_findings) - len(state.guardrail_findings),
+            )
+            return {
+                "vision_context": context,
+                "guardrail_findings": guardrail_findings,
+                "guardrails_passed": guardrails_passed,
+                "subgraph_metrics": metrics,
+            }
 
     def _build_context(self, state: AgentState) -> VisionRouterContext:
         artifacts = extract_vision_attachments(state.attachment_scope)

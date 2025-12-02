@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from state.agent_state import AgentState, NumericalTable, WorkflowPlan
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 class TextToSQLError(RuntimeError):
@@ -102,42 +104,53 @@ class TextToSQLNode:
     prompt_builder: NumericalPromptBuilder = field(default_factory=NumericalPromptBuilder)
     interrupt_reason: str = "numerical_sql_guardrail"
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         normalized = state.normalized_input
         if normalized is None:
             raise TextToSQLError("TextToSQL node requires normalized_input in AgentState")
         table = self._selected_table(state)
-        prompt = self.prompt_builder.build(
-            normalized_prompt=normalized.normalized_prompt,
-            table=table,
-            workflow_plan=state.workflow_plan,
-            previous_error=self._previous_error(state),
-        )
-        request = SqlGenerationRequest(
-            prompt=prompt,
-            normalized_prompt=normalized.normalized_prompt,
-            table=table,
-            workflow_plan=state.workflow_plan,
-            retry_counter=state.retry_counter,
-            previous_error=self._previous_error(state),
-        )
-        result = await self.generator.generate(request)
-        guardrail_message = self._validate_result(table, result)
-        if guardrail_message:
-            return self._serialize_guardrail(state, guardrail_message, result)
-        metrics = dict(state.subgraph_metrics)
-        metrics.update(
-            {
-                "numerical.text_to_sql.prompt_chars": len(prompt),
-                "numerical.text_to_sql.retry": state.retry_counter,
-                "numerical.text_to_sql.tables": len(result.tables),
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="numerical_text_to_sql",
+            subgraph="numerical",
+            metadata={"table": table.alias},
+        ):
+            prompt = self.prompt_builder.build(
+                normalized_prompt=normalized.normalized_prompt,
+                table=table,
+                workflow_plan=state.workflow_plan,
+                previous_error=self._previous_error(state),
+            )
+            request = SqlGenerationRequest(
+                prompt=prompt,
+                normalized_prompt=normalized.normalized_prompt,
+                table=table,
+                workflow_plan=state.workflow_plan,
+                retry_counter=state.retry_counter,
+                previous_error=self._previous_error(state),
+            )
+            result = await self.generator.generate(request)
+            guardrail_message = self._validate_result(table, result)
+            add_metadata(prompt_chars=len(prompt), retry_counter=state.retry_counter)
+            if guardrail_message:
+                add_metadata(guardrail_triggered=True, guardrail_reason=guardrail_message)
+                return self._serialize_guardrail(state, guardrail_message, result)
+            metrics = dict(state.subgraph_metrics)
+            metrics.update(
+                {
+                    "numerical.text_to_sql.prompt_chars": len(prompt),
+                    "numerical.text_to_sql.retry": state.retry_counter,
+                    "numerical.text_to_sql.tables": len(result.tables),
+                }
+            )
+            add_metadata(guardrail_triggered=False, table_count=len(result.tables))
+            return {
+                "numerical_sql": result.sql.strip(),
+                "numerical_sql_reasoning": result.reasoning,
+                "subgraph_metrics": metrics,
             }
-        )
-        return {
-            "numerical_sql": result.sql.strip(),
-            "numerical_sql_reasoning": result.reasoning,
-            "subgraph_metrics": metrics,
-        }
 
     def _selected_table(self, state: AgentState) -> NumericalTable:
         alias = state.numerical_selected_table

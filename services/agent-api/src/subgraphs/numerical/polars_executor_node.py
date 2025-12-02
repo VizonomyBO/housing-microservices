@@ -12,6 +12,12 @@ from typing import Any, cast
 import polars as pl
 
 from state.agent_state import AgentState
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import (
+    add_metadata,
+    emit_telemetry_snapshot,
+    lifecycle_span,
+)
 
 LazyFrameMap = Mapping[str, pl.LazyFrame]
 TableResolver = Callable[[AgentState], LazyFrameMap | Awaitable[LazyFrameMap]]
@@ -28,7 +34,9 @@ class PolarsExecutorNode:
     table_resolver: TableResolver
     interrupt_reason: str = "numerical_polars_error"
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         query = (state.numerical_sql or "").strip()
         if not query:
             raise PolarsExecutionError("PolarsExecutor requires numerical_sql in state")
@@ -38,34 +46,46 @@ class PolarsExecutorNode:
             tables = {selected_alias: tables[selected_alias]}
         if not tables:
             raise PolarsExecutionError("No tables available for Polars execution")
-        start = perf_counter()
-        try:
-            rows = await asyncio.to_thread(self._execute_query, query, tables)
-        except Exception as exc:  # pragma: no cover - polars internal errors
-            message = f"Polars SQL execution failed: {exc}"
-            raise PolarsExecutionError(message) from exc
-        duration_ms = (perf_counter() - start) * 1000
-        row_count = len(rows)
-        metrics = dict(state.subgraph_metrics)
-        metrics.update(
-            {
-                "numerical.polars.execution_ms": round(duration_ms, 3),
-                "numerical.polars.row_count": row_count,
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="numerical_polars_executor",
+            subgraph="numerical",
+            metadata={"table_aliases": list(tables.keys())},
+        ):
+            start = perf_counter()
+            try:
+                rows = await asyncio.to_thread(self._execute_query, query, tables)
+            except Exception as exc:  # pragma: no cover - polars internal errors
+                message = f"Polars SQL execution failed: {exc}"
+                raise PolarsExecutionError(message) from exc
+            duration_ms = (perf_counter() - start) * 1000
+            row_count = len(rows)
+            metrics = dict(state.subgraph_metrics)
+            metrics.update(
+                {
+                    "numerical.polars.execution_ms": round(duration_ms, 3),
+                    "numerical.polars.row_count": row_count,
+                }
+            )
+            result_metrics = dict(state.numerical_result_metrics)
+            result_metrics.update(
+                {
+                    "execution_ms": round(duration_ms, 3),
+                    "row_count": row_count,
+                    "table_aliases": list(tables.keys()),
+                }
+            )
+            add_metadata(execution_ms=round(duration_ms, 3), row_count=row_count)
+            await emit_telemetry_snapshot(
+                sse_emitter,
+                metrics={"numerical.polars.execution_ms": round(duration_ms, 3)},
+                labels={"table_aliases": ",".join(sorted(tables.keys()))},
+            )
+            return {
+                "numerical_result_rows": rows,
+                "numerical_result_metrics": result_metrics,
+                "subgraph_metrics": metrics,
             }
-        )
-        result_metrics = dict(state.numerical_result_metrics)
-        result_metrics.update(
-            {
-                "execution_ms": round(duration_ms, 3),
-                "row_count": row_count,
-                "table_aliases": list(tables.keys()),
-            }
-        )
-        return {
-            "numerical_result_rows": rows,
-            "numerical_result_metrics": result_metrics,
-            "subgraph_metrics": metrics,
-        }
 
     async def _resolve_tables(self, state: AgentState) -> LazyFrameMap:
         mapping = self.table_resolver(state)

@@ -13,5 +13,5 @@ Complete tasks sequentially. Each agent should mark the checkbox upon finishing 
 9. - [x] [Task 09 — Informational & Analyst Subgraphs](tasks/task-09-informational-analyst.md) — Implemented Informational/Analyst nodes, AgentState contracts, tests, and acceptance doc updates (2025-12-02).
 10. - [x] [Task 10 — Numerical Subgraph (Text-to-SQL + Validators)](tasks/task-10-numerical.md) — Added numerical state contracts, TextToSQL/Polars/validator nodes, artifacts, tests, and acceptance notes (2025-12-02).
 11. - [x] [Task 11 — Vision Subgraph & Multimodal Responses](tasks/task-11-vision.md) — Added vision router/reasoner/responder nodes, guardrail codes, docs, and tests (`tests/subgraphs/vision/test_vision_nodes.py`) (2025-12-02).
-12. - [ ] [Task 12 — SSE Streaming Contract & Event Emitters](tasks/task-12-sse-contract.md)
+12. - [x] [Task 12 — SSE Streaming Contract & Event Emitters](tasks/task-12-sse-contract.md) — Added streaming event models/emitter/decorator, instrumented LangGraph nodes + cache/HITL hooks, docs/tests updated (2025-12-02).
 13. - [ ] [Task 13 — Metrics, Cache Observability & Shared Data Layer Writers](tasks/task-13-telemetry-cache-observability.md)

@@ -24,6 +24,8 @@ from state.agent_state import (
     WorkflowPlan,
     WorkflowPlanStep,
 )
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 CacheKeyBuilder = Callable[[RetrievalCacheKeyInputs], str]
 
@@ -83,7 +85,9 @@ class WorkflowPlannerNode:
     workflow_catalog: WorkflowPlanCatalogProtocol
     build_cache_key: CacheKeyBuilder = field(default=build_retrieval_cache_key)
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         normalized_input = state.normalized_input
         if normalized_input is None:
             raise InputNormalizationError(
@@ -103,40 +107,47 @@ class WorkflowPlannerNode:
                 message="At least one workflow attachment is required before planning",
             )
 
-        plan_source = await self.workflow_catalog.fetch_plan_source(workflow.workflow_id)
-        if plan_source is None:
-            raise WorkflowPlanningError(
-                code="WORKFLOW_PLAN_NOT_FOUND",
-                message="Workflow graph not found or missing versions",
-                details={"workflow_id": workflow.workflow_id},
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="workflow_planner",
+            subgraph="retrieval",
+            metadata={"workflow_id": workflow.workflow_id},
+        ):
+            plan_source = await self.workflow_catalog.fetch_plan_source(workflow.workflow_id)
+            if plan_source is None:
+                raise WorkflowPlanningError(
+                    code="WORKFLOW_PLAN_NOT_FOUND",
+                    message="Workflow graph not found or missing versions",
+                    details={"workflow_id": workflow.workflow_id},
+                )
+
+            steps = _order_nodes(plan_source)
+            plan = WorkflowPlan(
+                plan_id=plan_source.graph_id,
+                version=plan_source.version,
+                steps=steps,
+                diff_summary=plan_source.diff_summary or plan_source.change_log,
+                prerequisites=_collect_prerequisites(steps),
+            )
+            add_metadata(plan_version=plan.version, step_count=len(plan.steps))
+
+            document_hashes = _collect_document_hashes(attachment_scope)
+            cache_key = self.build_cache_key(
+                RetrievalCacheKeyInputs(
+                    conversation_id=state.conversation_id,
+                    intent=_intent_component(normalized_input.intent_tags),
+                    workflow_version=plan.version,
+                    document_hashes=document_hashes,
+                )
             )
 
-        steps = _order_nodes(plan_source)
-        plan = WorkflowPlan(
-            plan_id=plan_source.graph_id,
-            version=plan_source.version,
-            steps=steps,
-            diff_summary=plan_source.diff_summary or plan_source.change_log,
-            prerequisites=_collect_prerequisites(steps),
-        )
-
-        document_hashes = _collect_document_hashes(attachment_scope)
-        cache_key = self.build_cache_key(
-            RetrievalCacheKeyInputs(
-                conversation_id=state.conversation_id,
-                intent=_intent_component(normalized_input.intent_tags),
-                workflow_version=plan.version,
-                document_hashes=document_hashes,
-            )
-        )
-
-        cache_metadata = _update_cache_metadata(state.cache_metadata, cache_key)
-        graph_context = _update_graph_context(state.graph_context, plan.version)
-        return {
-            "workflow_plan": plan,
-            "graph_context": graph_context,
-            "cache_metadata": cache_metadata,
-        }
+            cache_metadata = _update_cache_metadata(state.cache_metadata, cache_key)
+            graph_context = _update_graph_context(state.graph_context, plan.version)
+            return {
+                "workflow_plan": plan,
+                "graph_context": graph_context,
+                "cache_metadata": cache_metadata,
+            }
 
     def _select_workflow(self, scope: AttachmentScope):
         if not scope.workflows:

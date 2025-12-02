@@ -8,6 +8,8 @@ from typing import Any
 
 from nodes.retrieval.graph.config import GraphSummarySettings
 from state.agent_state import AgentState, GraphSummary, GraphSummarySection
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 def _estimate_tokens(text: str) -> int:
@@ -22,33 +24,50 @@ class GraphSummarizerNode:
     settings: GraphSummarySettings = field(default_factory=GraphSummarySettings)
     token_estimator: Callable[[str], int] = field(default=_estimate_tokens)
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         graph_context = state.graph_context
-        if not graph_context or (not graph_context.clusters and not graph_context.relations):
-            summary = self._fallback_summary(graph_context)
-            return {"graph_summary": summary}
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="graph_summarizer",
+            subgraph="retrieval",
+            metadata={"scope_hash": getattr(graph_context, "scope_hash", None)},
+        ):
+            if not graph_context or (not graph_context.clusters and not graph_context.relations):
+                summary = self._fallback_summary(graph_context)
+                add_metadata(fallback=True)
+                return {"graph_summary": summary}
 
-        entity_section = self._build_entity_section(graph_context)
-        relation_section = self._build_relation_section(graph_context)
-        sections = [
-            section for section in [entity_section, relation_section] if section and section.body
-        ]
-        total_tokens = sum(section.tokens for section in sections)
-        sections, total_tokens = self._enforce_budget(sections, total_tokens)
-        if not sections:
-            summary = self._fallback_summary(graph_context)
-            return {"graph_summary": summary}
+            entity_section = self._build_entity_section(graph_context)
+            relation_section = self._build_relation_section(graph_context)
+            sections = [
+                section
+                for section in [entity_section, relation_section]
+                if section and section.body
+            ]
+            total_tokens = sum(section.tokens for section in sections)
+            sections, total_tokens = self._enforce_budget(sections, total_tokens)
+            if not sections:
+                summary = self._fallback_summary(graph_context)
+                add_metadata(fallback=True)
+                return {"graph_summary": summary}
 
-        headline = self._build_headline(graph_context)
-        summary = GraphSummary(
-            headline=headline,
-            sections=sections,
-            total_tokens=total_tokens,
-            budget_tokens=self.settings.max_total_tokens,
-            fallback_used=False,
-            scope_hash=graph_context.scope_hash,
-        )
-        return {"graph_summary": summary}
+            headline = self._build_headline(graph_context)
+            summary = GraphSummary(
+                headline=headline,
+                sections=sections,
+                total_tokens=total_tokens,
+                budget_tokens=self.settings.max_total_tokens,
+                fallback_used=False,
+                scope_hash=graph_context.scope_hash,
+            )
+            add_metadata(
+                sections=len(sections),
+                total_tokens=total_tokens,
+                budget=self.settings.max_total_tokens,
+            )
+            return {"graph_summary": summary}
 
     def _build_entity_section(self, graph_context) -> GraphSummarySection | None:
         if not graph_context.clusters:

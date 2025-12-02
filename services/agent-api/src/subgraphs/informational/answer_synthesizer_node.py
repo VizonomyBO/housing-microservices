@@ -10,6 +10,8 @@ from cache.response_serializer import CacheCitation, CacheWorkflowPlanExcerpt
 from cache.valkey_client import ValkeyCacheClientProtocol
 from models.retrieval import AttachmentScope
 from state.agent_state import AgentState, GraphContext, GraphSummary, WorkflowPlan
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, emit_cache_hit, emit_cache_miss, lifecycle_span
 
 
 class AnswerSynthesisError(RuntimeError):
@@ -52,35 +54,56 @@ class AnswerSynthesizerNode:
     composer: AnswerComposerProtocol
     cache_client: ValkeyCacheClientProtocol
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         normalized_input = state.normalized_input
         if normalized_input is None:
             raise AnswerSynthesisError("AnswerSynthesizer requires normalized_input in AgentState")
 
-        cache_result = await maybe_serve_from_cache(
-            client=self.cache_client,
-            cache_metadata=state.cache_metadata,
-        )
-        if cache_result.hit and cache_result.payload is not None:
-            return self._serialize_cache_hit(state, cache_result)
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="informational_answer_synthesizer",
+            subgraph="informational",
+        ):
+            cache_result = await maybe_serve_from_cache(
+                client=self.cache_client,
+                cache_metadata=state.cache_metadata,
+            )
+            if cache_result.cache_key:
+                if cache_result.hit:
+                    await emit_cache_hit(
+                        sse_emitter,
+                        cache_key=cache_result.cache_key,
+                    )
+                else:
+                    await emit_cache_miss(
+                        sse_emitter,
+                        cache_key=cache_result.cache_key,
+                        reason="not_found",
+                    )
+                add_metadata(cache_key=cache_result.cache_key, cache_hit=cache_result.hit)
+            if cache_result.hit and cache_result.payload is not None:
+                return self._serialize_cache_hit(state, cache_result)
 
-        context = AnswerSynthesisContext(
-            normalized_prompt=normalized_input.normalized_prompt,
-            graph_summary=state.graph_summary,
-            graph_context=state.graph_context,
-            workflow_plan=state.workflow_plan,
-            attachment_scope=state.attachment_scope,
-        )
-        result = await self.composer.compose(context)
-        metadata = cache_result.cache_metadata
-        return {
-            "answer": result.answer_text,
-            "citations": result.citations,
-            "answer_chunk_ids": list(result.chunk_ids),
-            "answer_metadata": result.model_metadata or {},
-            "quality_score": result.quality_score,
-            "cache_metadata": metadata,
-        }
+            context = AnswerSynthesisContext(
+                normalized_prompt=normalized_input.normalized_prompt,
+                graph_summary=state.graph_summary,
+                graph_context=state.graph_context,
+                workflow_plan=state.workflow_plan,
+                attachment_scope=state.attachment_scope,
+            )
+            result = await self.composer.compose(context)
+            metadata = cache_result.cache_metadata
+            add_metadata(cache_hit=False)
+            return {
+                "answer": result.answer_text,
+                "citations": result.citations,
+                "answer_chunk_ids": list(result.chunk_ids),
+                "answer_metadata": result.model_metadata or {},
+                "quality_score": result.quality_score,
+                "cache_metadata": metadata,
+            }
 
     def _serialize_cache_hit(
         self, state: AgentState, cache_result: CacheShortCircuitResult

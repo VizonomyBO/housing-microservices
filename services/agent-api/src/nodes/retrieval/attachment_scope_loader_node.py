@@ -16,6 +16,8 @@ from models.retrieval import (
 from nodes.retrieval.exceptions import InputNormalizationError
 from repositories.conversation_scope_repository import ConversationScopePort, DocumentSummary
 from state.agent_state import AgentState
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 
 class WorkflowRepositoryProtocol(Protocol):
@@ -29,7 +31,9 @@ class AttachmentScopeLoaderNode:
     scope_repository: ConversationScopePort
     workflow_repository: WorkflowRepositoryProtocol | None = None
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         normalized_input = state.normalized_input
         if normalized_input is None:
             raise InputNormalizationError(
@@ -48,24 +52,38 @@ class AttachmentScopeLoaderNode:
             if ref.asset_type == AttachmentType.WORKFLOW
         ]
 
-        documents_lookup = await self.scope_repository.hydrate_documents(
-            [ref.document_id for ref in document_refs if ref.document_id]
-        )
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="attachment_scope_loader",
+            subgraph="retrieval",
+            metadata={
+                "document_refs": len(document_refs),
+                "workflow_refs": len(workflow_refs),
+            },
+        ):
+            documents_lookup = await self.scope_repository.hydrate_documents(
+                [ref.document_id for ref in document_refs if ref.document_id]
+            )
 
-        warnings = list(normalized_input.warnings)
-        missing_assets: list[str] = []
-        documents = self._build_document_scope(
-            document_refs, documents_lookup, warnings, missing_assets
-        )
-        workflows = await self._build_workflow_scope(workflow_refs, warnings, missing_assets)
+            warnings = list(normalized_input.warnings)
+            missing_assets: list[str] = []
+            documents = self._build_document_scope(
+                document_refs, documents_lookup, warnings, missing_assets
+            )
+            workflows = await self._build_workflow_scope(workflow_refs, warnings, missing_assets)
+            add_metadata(
+                hydrated_documents=len(documents),
+                hydrated_workflows=len(workflows),
+                missing_assets=len(missing_assets),
+            )
 
-        scope = AttachmentScope(
-            documents=sorted(documents, key=lambda doc: doc.document_id),
-            workflows=sorted(workflows, key=lambda wf: wf.workflow_id),
-            warnings=warnings,
-            missing_assets=missing_assets,
-        )
-        return {"attachment_scope": scope}
+            scope = AttachmentScope(
+                documents=sorted(documents, key=lambda doc: doc.document_id),
+                workflows=sorted(workflows, key=lambda wf: wf.workflow_id),
+                warnings=warnings,
+                missing_assets=missing_assets,
+            )
+            return {"attachment_scope": scope}
 
     def _build_document_scope(
         self,

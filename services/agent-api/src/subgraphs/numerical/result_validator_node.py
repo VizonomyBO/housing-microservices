@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
-from hitl.human_gate_service import HumanGateDecision
+from hitl.human_gate_service import EventEmitter, HumanGateDecision
 from state.agent_state import AgentState, NumericalTable
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 from .artifacts import build_numerical_artifacts
 
@@ -19,7 +21,9 @@ class NumericalValidationError(RuntimeError):
 class HumanGateEvaluator(Protocol):
     """Subset of HumanGateService used by this node."""
 
-    async def evaluate(self, state: AgentState) -> HumanGateDecision: ...
+    async def evaluate(
+        self, state: AgentState, *, event_emitter: EventEmitter | None = None
+    ) -> HumanGateDecision: ...
 
 
 @dataclass(slots=True)
@@ -30,35 +34,47 @@ class ResultValidatorNode:
     interrupt_reason: str = "numerical_validation"
     table_preview_rows: int = 20
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, Any]:
         table = self._selected_table(state)
         rows = list(state.numerical_result_rows)
-        if not rows:
-            return await self._escalate(
-                state,
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="numerical_result_validator",
+            subgraph="numerical",
+            metadata={"table_alias": table.alias},
+        ):
+            if not rows:
+                add_metadata(validation="no_rows")
+                return await self._escalate(
+                    state,
+                    table,
+                    "Numerical execution returned no rows to validate",
+                    sse_emitter=sse_emitter,
+                )
+            violations = self._validate_rows(rows, table)
+            if violations:
+                add_metadata(validation="violations", violation_count=len(violations))
+                return await self._escalate(state, table, violations, sse_emitter=sse_emitter)
+            artifacts = build_numerical_artifacts(
                 table,
-                "Numerical execution returned no rows to validate",
+                rows,
+                table_preview_rows=self.table_preview_rows,
             )
-        violations = self._validate_rows(rows, table)
-        if violations:
-            return await self._escalate(state, table, violations)
-        artifacts = build_numerical_artifacts(
-            table,
-            rows,
-            table_preview_rows=self.table_preview_rows,
-        )
-        metrics = dict(state.subgraph_metrics)
-        metrics.update(
-            {
-                "numerical.validation.rows": len(rows),
-                "numerical.validation.columns": len(table.columns),
+            metrics = dict(state.subgraph_metrics)
+            metrics.update(
+                {
+                    "numerical.validation.rows": len(rows),
+                    "numerical.validation.columns": len(table.columns),
+                }
+            )
+            add_metadata(validation="passed", row_count=len(rows))
+            return {
+                "guardrails_passed": True,
+                "numerical_artifacts": artifacts,
+                "subgraph_metrics": metrics,
             }
-        )
-        return {
-            "guardrails_passed": True,
-            "numerical_artifacts": artifacts,
-            "subgraph_metrics": metrics,
-        }
 
     def _selected_table(self, state: AgentState) -> NumericalTable:
         alias = state.numerical_selected_table
@@ -119,6 +135,8 @@ class ResultValidatorNode:
         state: AgentState,
         table: NumericalTable,
         violations: str | list[dict[str, Any]],
+        *,
+        sse_emitter: SSEEmitter | None = None,
     ) -> dict[str, Any]:
         details: list[dict[str, Any]]
         if isinstance(violations, str):
@@ -147,7 +165,8 @@ class ResultValidatorNode:
         annotated_state = state.model_copy(update=updates)
         if self.human_gate is None:
             return updates
-        decision = await self.human_gate.evaluate(annotated_state)
+        emitter = sse_emitter.as_event_emitter() if sse_emitter else None
+        decision = await self.human_gate.evaluate(annotated_state, event_emitter=emitter)
         hitl_updates: dict[str, Any] = {
             "interrupt_reason": decision.state.interrupt_reason,
             "hitl_transcript": decision.state.hitl_transcript,

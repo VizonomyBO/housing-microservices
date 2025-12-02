@@ -11,6 +11,8 @@ from typing import Any
 from guardrails import GuardrailContext, GuardrailEngine, RouteDecision, RouterRoute
 from models.retrieval import NormalizedInput
 from state.agent_state import AgentState
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span, set_route
 
 
 class RouterNodeError(RuntimeError):
@@ -63,39 +65,59 @@ class RouterNode:
     strong_signal_confidence: float = 0.75
 
     async def __call__(
-        self, state: AgentState
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
     ) -> dict[str, Any]:  # pragma: no cover - exercised via tests
         normalized_input = state.normalized_input
         if normalized_input is None:
             raise RouterNodeError("Router requires normalized_input in AgentState")
 
+        metadata = {
+            "node": "router",
+            "normalized_scope": getattr(normalized_input, "scope_hash", None),
+        }
         guardrail_result = self.guardrail_engine.evaluate(
             GuardrailContext(
                 normalized_input=normalized_input, attachment_scope=state.attachment_scope
             )
         )
-
-        if not guardrail_result.passed:
-            decision = RouteDecision(
-                route=RouterRoute.ESCALATE,
-                confidence=0.0,
-                next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.ESCALATE],
-                reason="guardrail_violation",
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="router",
+            subgraph="control",
+            metadata=metadata,
+            route=state.route.value if state.route else None,
+        ):
+            add_metadata(
+                guardrails_passed=guardrail_result.passed,
+                guardrail_violation_count=len(guardrail_result.violations),
             )
-        else:
-            decision = self._classify(state, normalized_input)
 
-        # TODO(Task 12): emit router SSE/telemetry event once observability hooks arrive.
+            if not guardrail_result.passed:
+                decision = RouteDecision(
+                    route=RouterRoute.ESCALATE,
+                    confidence=0.0,
+                    next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.ESCALATE],
+                    reason="guardrail_violation",
+                )
+            else:
+                decision = self._classify(state, normalized_input)
 
-        return {
-            "route": decision.route,
-            "route_confidence": decision.confidence,
-            "next_subgraph": decision.next_subgraph,
-            "router_reason": decision.reason,
-            "guardrail_findings": guardrail_result.violations,
-            "guardrails_passed": guardrail_result.passed,
-            "cache_metadata": state.cache_metadata,
-        }
+            set_route(decision.route)
+            add_metadata(
+                router_reason=decision.reason,
+                route_confidence=decision.confidence,
+                next_subgraph=decision.next_subgraph,
+            )
+
+            return {
+                "route": decision.route,
+                "route_confidence": decision.confidence,
+                "next_subgraph": decision.next_subgraph,
+                "router_reason": decision.reason,
+                "guardrail_findings": guardrail_result.violations,
+                "guardrails_passed": guardrail_result.passed,
+                "cache_metadata": state.cache_metadata,
+            }
 
     def _classify(self, state: AgentState, normalized_input: NormalizedInput) -> RouteDecision:
         prompt = normalized_input.normalized_prompt.lower()

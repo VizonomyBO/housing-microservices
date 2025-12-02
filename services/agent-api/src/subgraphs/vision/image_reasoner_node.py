@@ -12,6 +12,8 @@ from state.agent_state import (
     VisionFinding,
     VisionRouterContext,
 )
+from streaming.sse_emitter import SSEEmitter
+from streaming.with_sse import add_metadata, lifecycle_span
 
 from .vision_router_node import VisionRouterContextMissing
 
@@ -63,36 +65,48 @@ class ImageReasonerNode:
 
     analyzer: VisionAnalyzerProtocol
 
-    async def __call__(self, state: AgentState) -> dict[str, object]:
+    async def __call__(
+        self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
+    ) -> dict[str, object]:
         context = self._ensure_context(state.vision_context)
-        normalized_prompt = (
-            state.normalized_input.normalized_prompt if state.normalized_input else ""
-        )
-        warnings = list(context.warnings)
-        analysis_context = VisionAnalysisContext(
-            prompt=normalized_prompt or "Describe the provided visual attachments.",
-            mode=context.mode,
-            attachments=self._build_prompts(context, warnings),
-            warnings=warnings,
-        )
-        result = await self.analyzer.analyze(analysis_context)
-        error_log = list(state.error_log)
-        error_log.extend(analysis_context.warnings)
-        error_log.extend(result.warnings)
-        guardrail_findings = list(state.guardrail_findings)
-        guardrail_findings.extend(result.guardrail_violations)
-        guardrails_passed = self._guardrails_passed(state.guardrails_passed, guardrail_findings)
-        metrics = dict(state.subgraph_metrics)
-        metrics["vision.reasoner.findings"] = len(result.findings)
-        if result.model_metadata:
-            metrics["vision.reasoner.model"] = result.model_metadata.get("model")
-        return {
-            "vision_findings": result.findings,
-            "guardrail_findings": guardrail_findings,
-            "guardrails_passed": guardrails_passed,
-            "error_log": error_log,
-            "subgraph_metrics": metrics,
-        }
+        async with lifecycle_span(
+            emitter=sse_emitter,
+            node="vision_image_reasoner",
+            subgraph="vision",
+            metadata={"mode": context.mode, "attachments": len(context.attachments)},
+        ):
+            normalized_prompt = (
+                state.normalized_input.normalized_prompt if state.normalized_input else ""
+            )
+            warnings = list(context.warnings)
+            analysis_context = VisionAnalysisContext(
+                prompt=normalized_prompt or "Describe the provided visual attachments.",
+                mode=context.mode,
+                attachments=self._build_prompts(context, warnings),
+                warnings=warnings,
+            )
+            result = await self.analyzer.analyze(analysis_context)
+            error_log = list(state.error_log)
+            error_log.extend(analysis_context.warnings)
+            error_log.extend(result.warnings)
+            guardrail_findings = list(state.guardrail_findings)
+            guardrail_findings.extend(result.guardrail_violations)
+            guardrails_passed = self._guardrails_passed(state.guardrails_passed, guardrail_findings)
+            metrics = dict(state.subgraph_metrics)
+            metrics["vision.reasoner.findings"] = len(result.findings)
+            if result.model_metadata:
+                metrics["vision.reasoner.model"] = result.model_metadata.get("model")
+            add_metadata(
+                findings=len(result.findings),
+                guardrail_violation_count=len(result.guardrail_violations),
+            )
+            return {
+                "vision_findings": result.findings,
+                "guardrail_findings": guardrail_findings,
+                "guardrails_passed": guardrails_passed,
+                "error_log": error_log,
+                "subgraph_metrics": metrics,
+            }
 
     def _ensure_context(self, context: VisionRouterContext | None) -> VisionRouterContext:
         if context is None:
