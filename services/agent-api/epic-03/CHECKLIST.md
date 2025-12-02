@@ -10,7 +10,7 @@ Complete tasks sequentially. Each agent should mark the checkbox upon finishing 
 6. - [x] [Task 06 — Router Classification & Guardrail Policies](tasks/task-06-router-guardrails.md) — Added `src/guardrails/*`, router node/tests, and docs for policy codes + routing sample (2025-12-01).
 7. - [x] [Task 07 — CacheWriter & Response Serialization](tasks/task-07-cache-writer.md) — CacheWriter + response serializer + docs/tests (2025-12-02)
 8. - [x] [Task 08 — HumanGate Pause/Resume Node](tasks/task-08-human-gate.md) — Added HumanGate service/node, transcript metadata, docs, and tests (2025-12-02)
-9. - [ ] [Task 09 — Informational & Analyst Subgraphs](tasks/task-09-informational-analyst.md)
+9. - [x] [Task 09 — Informational & Analyst Subgraphs](tasks/task-09-informational-analyst.md) — Implemented Informational/Analyst nodes, AgentState contracts, tests, and acceptance doc updates (2025-12-02).
 10. - [ ] [Task 10 — Numerical Subgraph (Text-to-SQL + Validators)](tasks/task-10-numerical.md)
 11. - [ ] [Task 11 — Vision Subgraph & Multimodal Responses](tasks/task-11-vision.md)
 12. - [ ] [Task 12 — SSE Streaming Contract & Event Emitters](tasks/task-12-sse-contract.md)

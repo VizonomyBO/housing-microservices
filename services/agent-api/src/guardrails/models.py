@@ -32,6 +32,7 @@ class GuardrailCode(str, Enum):
     COUNTRY_MISMATCH = "country_mismatch"
     WORKFLOW_POLICY = "workflow_policy"
     COMPLIANCE_POLICY = "compliance_policy"
+    CITATION_MISMATCH = "citation_mismatch"
 
 
 class GuardrailViolation(BaseModel):

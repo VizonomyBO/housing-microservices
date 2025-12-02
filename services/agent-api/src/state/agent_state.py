@@ -16,6 +16,7 @@ from typing import Any, Literal
 from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
+from cache.response_serializer import CacheCitation
 from guardrails.models import GuardrailViolation, RouterRoute
 from models.retrieval import AttachmentScope, NormalizedInput
 
@@ -253,6 +254,73 @@ class WorkflowPlan(BaseModel):
     )
 
 
+class AnalystPlanStep(BaseModel):
+    """Actionable analyst step derived from workflow plans."""
+
+    key: str = Field(..., description="Stable identifier referencing the workflow node.")
+    description: str = Field(..., description="Plain-language action for the analyst route.")
+    required_context: list[str] = Field(
+        default_factory=list,
+        description="References to documents, graph clusters, or workflow prerequisites.",
+    )
+    expected_outputs: list[str] = Field(
+        default_factory=list,
+        description="Artifacts or answers the step should emit (tables, comparisons, summaries).",
+    )
+    workflow_ref: str | None = Field(
+        default=None, description="Original workflow_plan step key for traceability."
+    )
+
+
+class AnalystPlan(BaseModel):
+    """Structured plan produced by AnalystPlanner."""
+
+    plan_id: str = Field(..., description="Workflow graph id anchoring the plan.")
+    summary: str = Field(..., description="Short overview of the analysis strategy.")
+    steps: list[AnalystPlanStep] = Field(
+        default_factory=list, description="Ordered analyst steps used for synthesis."
+    )
+    complexity_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Normalized complexity score used for telemetry placeholders.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional plan metadata (prerequisites, plan_version, workflow diffs).",
+    )
+
+
+class ComparisonAttachment(BaseModel):
+    """Attachment payload serialized by Analyst comparison responses."""
+
+    attachment_type: Literal["text", "table", "chart", "workflow", "document"] = Field(
+        ..., description="Semantic type used by the streaming API for rendering."
+    )
+    label: str = Field(..., description="Short user-facing description for the attachment.")
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured data (tables, chart configs) streamed to clients.",
+    )
+
+
+class AnalystComparison(BaseModel):
+    """Final analyst synthesis output containing attachments/highlights."""
+
+    conclusion: str = Field(
+        ..., description="Narrative conclusion referencing comparisons and plan context."
+    )
+    attachments: list[ComparisonAttachment] = Field(
+        default_factory=list,
+        description="Serialized attachments (tables/charts/workflow excerpts) for streaming.",
+    )
+    highlights: list[str] = Field(
+        default_factory=list,
+        description="Bullet summaries or key deltas surfaced alongside the answer.",
+    )
+
+
 class CacheMetadata(BaseModel):
     """Metadata around cache lookups/writes (docs/overview/system_architecture.md §3)."""
 
@@ -387,9 +455,43 @@ class AgentState(BaseModel):
         default=None,
         description="WorkflowPlanner output reused by downstream subgraphs (docs/agents/implementation.md §3.2).",
     )
+    analyst_plan: AnalystPlan | None = Field(
+        default=None,
+        description="Structured analyst plan derived from workflow_plan (Task 09).",
+    )
+    analyst_comparison: AnalystComparison | None = Field(
+        default=None,
+        description="Latest analyst comparison result including attachments (Task 09).",
+    )
     cache_metadata: CacheMetadata = Field(
         default_factory=CacheMetadata,
         description="Valkey interaction metadata used for observability (docs/overview/system_architecture.md §3).",
+    )
+    answer: str | None = Field(
+        default=None,
+        description="Latest drafted answer text emitted by Informational/Analyst subgraphs.",
+    )
+    citations: list[CacheCitation] = Field(
+        default_factory=list,
+        description="Normalized citations tied to the current answer.",
+    )
+    answer_chunk_ids: list[str] = Field(
+        default_factory=list,
+        description="Chunk identifiers referenced by the answer/citations.",
+    )
+    answer_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Model metadata + telemetry captured during answer synthesis.",
+    )
+    quality_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence/quality estimate for the drafted answer.",
+    )
+    subgraph_metrics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Placeholder for telemetry emitted by modality subgraphs prior to SSE wiring.",
     )
     route: RouterRoute | None = Field(
         default=None,
@@ -416,6 +518,15 @@ class AgentState(BaseModel):
     guardrails_passed: bool = Field(
         default=True,
         description="Indicates whether blocking guardrail violations were found.",
+    )
+    retry_counter: int = Field(
+        default=0,
+        ge=0,
+        description="Number of retry loops attempted within the current subgraph.",
+    )
+    error_log: list[str] = Field(
+        default_factory=list,
+        description="Chronological log of issues encountered during the run.",
     )
     hitl_transcript: list[HitlTranscriptEntry] = Field(
         default_factory=list,
@@ -491,8 +602,12 @@ def agent_state_from_persistence(payload: Mapping[str, Any]) -> AgentState:
 
 __all__ = [
     "AgentState",
+    "AnalystComparison",
+    "AnalystPlan",
+    "AnalystPlanStep",
     "AttachmentScope",
     "CacheMetadata",
+    "ComparisonAttachment",
     "GraphContext",
     "GraphEntitySummary",
     "GraphRelationSummary",
