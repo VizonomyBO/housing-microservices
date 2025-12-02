@@ -2,18 +2,57 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from shared_data_layer.db.session import DatabaseSessionManager
 
 from agent_api.http.errors import GatewayError, error_payload
 from agent_api.http.routes.chat import router as chat_router
+from agent_api.http.routes.metrics import router as metrics_router
+from agent_api.settings import load_settings
+from telemetry import CacheObservability, get_metrics_registry
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Agent API", version="0.1.0", docs_url=None, redoc_url=None)
+    settings = load_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        registry = get_metrics_registry()
+        app.state.metrics_registry = registry
+        app.state.cache_observability = CacheObservability(
+            metrics=registry, namespace=settings.metrics_namespace
+        )
+        app.state.settings = settings
+
+        db_initialized = False
+        if settings.database_url:
+            DatabaseSessionManager.init(settings.database_url)
+            db_initialized = True
+        else:  # pragma: no cover - configuration edge case
+            logger.warning("DATABASE_URL not configured; telemetry DB writes are disabled")
+        app.state.db_initialized = db_initialized
+
+        try:
+            yield
+        finally:
+            if db_initialized:
+                await DatabaseSessionManager.dispose()
+
+    app = FastAPI(
+        title="Agent API",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
 
     @app.middleware("http")
     async def inject_request_id(request: Request, call_next):
@@ -24,6 +63,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(chat_router)
+    app.include_router(metrics_router)
 
     @app.exception_handler(GatewayError)
     async def handle_gateway_error(request: Request, exc: GatewayError) -> JSONResponse:

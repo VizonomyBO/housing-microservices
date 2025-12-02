@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("METRICS_AUTH_TOKEN", "test-metrics-token")
 
 pytest_plugins = ["shared_data_layer.testing.conftest"]
 

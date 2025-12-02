@@ -25,6 +25,7 @@ from telemetry.metrics_registry import MetricsRegistry
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
+
 async def _create_document_with_chunk(db_session):
     document = Document(
         owner_user_id=uuid4(),

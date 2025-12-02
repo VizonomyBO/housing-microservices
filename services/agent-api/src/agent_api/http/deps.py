@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
+from shared_data_layer.db.session import DatabaseSessionManager
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
+from agent_api.settings import Settings, load_settings
+from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
 _STREAM_SETTINGS = StreamSettings()
@@ -56,10 +61,62 @@ def get_stream_settings() -> StreamSettings:
     return _STREAM_SETTINGS
 
 
+def get_settings(request: Request | None = None) -> Settings:
+    """Return the cached Settings instance stored on the app state."""
+
+    if request is None or not hasattr(request, "app"):
+        # Fallback primarily used in tests that bypass FastAPI state.
+        return load_settings()
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        settings = load_settings()
+        request.app.state.settings = settings
+    return settings
+
+
+def get_metrics_registry_dep(request: Request) -> MetricsRegistry:
+    registry = getattr(request.app.state, "metrics_registry", None)
+    if registry is None:
+        registry = get_metrics_registry()
+        request.app.state.metrics_registry = registry
+    return registry
+
+
+def get_cache_observability(request: Request) -> CacheObservability:
+    observability = getattr(request.app.state, "cache_observability", None)
+    if observability is None:
+        observability = CacheObservability(metrics=get_metrics_registry_dep(request))
+        request.app.state.cache_observability = observability
+    return observability
+
+
+async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
+    if not getattr(request.app.state, "db_initialized", False):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database session manager is not configured",
+        )
+    async with DatabaseSessionManager.session() as session:
+        yield session
+
+
+async def maybe_get_db_session(request: Request) -> AsyncIterator[AsyncSession | None]:
+    if not getattr(request.app.state, "db_initialized", False):
+        yield None
+        return
+    async with DatabaseSessionManager.session() as session:
+        yield session
+
+
 __all__ = [
     "get_auth_context",
+    "get_cache_observability",
     "get_chat_runner",
+    "get_db_session",
+    "get_metrics_registry_dep",
     "get_request_context",
+    "get_settings",
     "get_stream_settings",
+    "maybe_get_db_session",
     "set_chat_runner",
 ]

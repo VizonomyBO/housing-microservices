@@ -6,13 +6,17 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
+    get_cache_observability,
     get_chat_runner,
+    get_metrics_registry_dep,
     get_request_context,
     get_stream_settings,
+    maybe_get_db_session,
 )
 from agent_api.http.schemas import ChatRequestBody, ResponseMode
 from agent_api.http.streaming import (
@@ -22,6 +26,7 @@ from agent_api.http.streaming import (
     run_blocking_chat,
 )
 from models.retrieval import ChatRequestContext
+from telemetry import CacheObservability, MetricsRegistry
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
@@ -33,6 +38,9 @@ async def post_chat(
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     stream_settings: Annotated[StreamSettings, Depends(get_stream_settings)],
+    metrics_registry: Annotated[MetricsRegistry, Depends(get_metrics_registry_dep)],
+    cache_observability: Annotated[CacheObservability, Depends(get_cache_observability)],
+    db_session: Annotated[AsyncSession | None, Depends(maybe_get_db_session)],
 ):
     thread_id = payload.thread_id or _generate_thread_id()
     chat_request = _build_request_context(payload, thread_id, auth_context)
@@ -49,6 +57,9 @@ async def post_chat(
             hints=hints,
             prompt_overrides=prompt_overrides,
             stream_settings=stream_settings,
+            metrics=metrics_registry,
+            cache_observability=cache_observability,
+            db_session=db_session,
         )
 
     return await run_blocking_chat(
@@ -59,6 +70,9 @@ async def post_chat(
         hints=hints,
         prompt_overrides=prompt_overrides,
         stream_settings=stream_settings,
+        metrics=metrics_registry,
+        cache_observability=cache_observability,
+        db_session=db_session,
     )
 
 

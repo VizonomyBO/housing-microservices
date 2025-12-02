@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.errors import GatewayError
@@ -16,6 +17,7 @@ from agent_api.http.schemas import BlockingChatResponse, ResponseMode
 from models.retrieval import ChatRequestContext
 from streaming.events import SSEEventType, TaskErrorPayload
 from streaming.sse_emitter import SSEEmitter
+from telemetry import CacheObservability, MetricsRegistry
 
 
 @dataclass(slots=True)
@@ -39,6 +41,9 @@ class ChatRunnerProtocol(Protocol):
         prompt_overrides: dict[str, Any],
         hints: dict[str, Any],
         response_mode: ResponseMode,
+        metrics: MetricsRegistry,
+        cache_observability: CacheObservability,
+        db_session: AsyncSession | None,
     ) -> ChatRunResult: ...
 
 
@@ -76,6 +81,9 @@ class UnconfiguredChatRunner(ChatRunnerProtocol):
         prompt_overrides: dict[str, Any],
         hints: dict[str, Any],
         response_mode: ResponseMode,
+        metrics: MetricsRegistry,
+        cache_observability: CacheObservability,
+        db_session: AsyncSession | None,
     ) -> ChatRunResult:
         raise GatewayError(
             code="NOT_IMPLEMENTED",
@@ -93,6 +101,9 @@ async def build_streaming_response(
     hints: dict[str, Any],
     prompt_overrides: dict[str, Any],
     stream_settings: StreamSettings,
+    metrics: MetricsRegistry,
+    cache_observability: CacheObservability,
+    db_session: AsyncSession | None,
 ) -> StreamingResponse:
     """Kick off the LangGraph run and expose its SSE iterator as a StreamingResponse."""
 
@@ -111,6 +122,9 @@ async def build_streaming_response(
             response_mode=ResponseMode.STREAM,
             emitter=emitter,
             outcome=outcome,
+            metrics=metrics,
+            cache_observability=cache_observability,
+            db_session=db_session,
         )
     )
 
@@ -138,6 +152,9 @@ async def run_blocking_chat(
     hints: dict[str, Any],
     prompt_overrides: dict[str, Any],
     stream_settings: StreamSettings,
+    metrics: MetricsRegistry,
+    cache_observability: CacheObservability,
+    db_session: AsyncSession | None,
 ) -> JSONResponse:
     """Execute the LangGraph runner and return the canonical blocking response."""
 
@@ -156,6 +173,9 @@ async def run_blocking_chat(
             response_mode=ResponseMode.BLOCKING,
             emitter=emitter,
             outcome=outcome,
+            metrics=metrics,
+            cache_observability=cache_observability,
+            db_session=db_session,
         )
     )
     drain_task = asyncio.create_task(_drain_emitter(emitter))
@@ -190,6 +210,9 @@ async def _invoke_runner(
     response_mode: ResponseMode,
     emitter: SSEEmitter,
     outcome: _StreamOutcome,
+    metrics: MetricsRegistry,
+    cache_observability: CacheObservability,
+    db_session: AsyncSession | None,
 ) -> None:
     try:
         result = await runner.run_chat(
@@ -200,6 +223,9 @@ async def _invoke_runner(
             prompt_overrides=dict(prompt_overrides),
             hints=dict(hints),
             response_mode=response_mode,
+            metrics=metrics,
+            cache_observability=cache_observability,
+            db_session=db_session,
         )
         if result is None:
             raise GatewayError(

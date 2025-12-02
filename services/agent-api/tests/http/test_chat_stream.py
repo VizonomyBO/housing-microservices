@@ -25,6 +25,9 @@ class _SuccessfulRunner(ChatRunnerProtocol):
         prompt_overrides,
         hints,
         response_mode: ResponseMode,
+        metrics,
+        cache_observability,
+        db_session,
     ) -> ChatRunResult:
         if sse_emitter is not None:
             payload = TaskLifecyclePayload(node="router", metadata={})
@@ -49,6 +52,9 @@ class _FailingRunner(ChatRunnerProtocol):
         prompt_overrides,
         hints,
         response_mode: ResponseMode,
+        metrics,
+        cache_observability,
+        db_session,
     ) -> ChatRunResult:
         raise GatewayError(code="INTERNAL_ERROR", message="boom", status_code=500)
 
