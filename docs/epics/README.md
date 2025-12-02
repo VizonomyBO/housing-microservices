@@ -33,3 +33,8 @@ This directory contains the Epics required to build the Vizonomy system.
 ### Phase 6: Production Launch (Week 8)
 
 - **Execute remaining [Epic 6: Infrastructure](06.md) tasks**
+
+### Phase 7: Authentication Enhancements (Week 8-9)
+
+- **Execute [Epic 7: Authentication Email Service](07.md)**
+    - **Why**: Enable email verification (confirm registration), password recovery, and password change notifications. Requires SES infrastructure (Terraform) and auth-service integration. Can be executed in parallel with Phase 6.

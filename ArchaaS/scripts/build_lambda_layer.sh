@@ -20,9 +20,17 @@ rm -rf layer_package layer.zip
 echo "Creating layer package directory..."
 mkdir -p layer_package/python
 
+echo "Combining all Lambda requirements..."
+cat > /tmp/combined_requirements.txt << 'EOF'
+aioboto3>=12.0.0
+pydantic>=2.0.0
+python-magic>=0.4.27
+pdfplumber>=0.10.0
+EOF
+
 echo "Building dependencies in Docker (Lambda Python 3.12 runtime)..."
 docker run --rm \
-  -v "$LAMBDAS_DIR/document_upload/requirements.txt:/requirements.txt:ro" \
+  -v "/tmp/combined_requirements.txt:/requirements.txt:ro" \
   -v "$LAMBDAS_DIR/layer_package/python:/output" \
   --entrypoint pip \
   public.ecr.aws/lambda/python:3.12 \

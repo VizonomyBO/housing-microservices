@@ -104,22 +104,13 @@ resource "aws_security_group" "ec2_microservices" {
     description = "HTTPS"
   }
 
-  # PostgreSQL from Lambda
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.lambda.id]
-    description     = "PostgreSQL access from Lambda"
-  }
-
-  # PostgreSQL from VPC (for other services)
+  # PostgreSQL from Lambda (Lambda not in VPC, so needs public access)
   ingress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = var.vpc_cidr_blocks
-    description = "PostgreSQL access from VPC"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "PostgreSQL access from Lambda and VPC"
   }
 
   # Auth Service

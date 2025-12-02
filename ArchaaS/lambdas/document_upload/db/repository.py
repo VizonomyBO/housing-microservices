@@ -15,10 +15,17 @@ from core.logging import get_logger
 logger = get_logger(__name__)
 
 # Database configuration from environment
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://vizonomy_user:postgres@localhost:5432/housing"
-)
+def _get_database_url() -> str:
+    if url := os.environ.get("DATABASE_URL"):
+        return url
+    host = os.environ.get("DATABASE_HOST", "localhost")
+    port = os.environ.get("DATABASE_PORT", "5432")
+    user = os.environ.get("DATABASE_USER", "vizonomy_user")
+    password = os.environ.get("DATABASE_PASSWORD", "postgres")
+    db = os.environ.get("DATABASE_NAME", "housing")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+DATABASE_URL = _get_database_url()
 
 
 class DocumentRepository:
