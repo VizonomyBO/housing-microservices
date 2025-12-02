@@ -143,7 +143,7 @@ select_task_files() {
   local selected=()
   for identifier in "${TASK_SELECTION[@]}"; do
     if [[ -f "${identifier}" ]]; then
-      selected+=("$(cd "$(dirname "${identifier}")" && pwd)/$(basename "${identifier}"))"
+      selected+=("$(cd "$(dirname "${identifier}")" && pwd)/$(basename "${identifier}")")
       continue
     fi
 
