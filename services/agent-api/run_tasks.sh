@@ -3,33 +3,40 @@ set -euo pipefail
 
 # Runs Codex tasks sequentially using the prompt template + AGENTS instructions.
 # Usage:
-#   ./run_tasks.sh [--dry-run] [--template FILE] [task_number...]
-# - If no template is supplied, defaults to ./prompt_template.txt.
-# - Without task numbers, every task file in epic-03/tasks is processed.
+#   ./run_tasks.sh --epic <EPIC_DIR> [--dry-run] [--template FILE] [task_number...]
 
 usage() {
   cat <<'EOF'
-Usage: ./run_tasks.sh [options] [task_number...]
+Usage: ./run_tasks.sh --epic <EPIC_DIR> [options] [task_number...]
 
 Options:
+  --epic <DIR>        Path to the epic directory (containing 'tasks' subdir).
   --dry-run           Render prompts and log actions without calling Codex
                       or running git commands.
   --template <FILE>   Use a specific prompt template (defaults to ./prompt_template.txt)
   --help              Show this message.
 
 Examples:
-  ./run_tasks.sh --dry-run               # preview all tasks with default template
-  ./run_tasks.sh 03 04                   # run tasks 03 and 04 (real Codex run)
-  ./run_tasks.sh --template custom.txt 05 --dry-run
+  ./run_tasks.sh --epic epic-035 --dry-run
+  ./run_tasks.sh --epic epic-035 01 02
 EOF
 }
 
 DRY_RUN=0
 PROMPT_TEMPLATE=""
+EPIC_DIR=""
 TASK_SELECTION=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --epic)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "❌ --epic requires a directory path" >&2
+        exit 1
+      fi
+      EPIC_DIR="$1"
+      ;;
     --dry-run)
       DRY_RUN=1
       ;;
@@ -74,8 +81,20 @@ if ! REPO_ROOT="$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/nul
   echo "❌ Unable to locate git repository root from ${SCRIPT_DIR}" >&2
   exit 1
 fi
-TASKS_DIR="${SCRIPT_DIR}/epic-03/tasks"
-CHECKLIST_FILE="${SCRIPT_DIR}/epic-03/CHECKLIST.md"
+
+if [[ -z "${EPIC_DIR}" ]]; then
+  echo "❌ --epic <DIR> is required." >&2
+  usage
+  exit 1
+fi
+
+# Resolve EPIC_DIR relative to SCRIPT_DIR if it's not absolute
+if [[ ! "$EPIC_DIR" = /* ]]; then
+  EPIC_DIR="${SCRIPT_DIR}/${EPIC_DIR}"
+fi
+
+TASKS_DIR="${EPIC_DIR}/tasks"
+CHECKLIST_FILE="${EPIC_DIR}/CHECKLIST.md"
 AGENT_GUIDE="${SCRIPT_DIR}/AGENTS.md"
 UV_BIN="${UV_BIN:-uv}"
 
@@ -124,7 +143,7 @@ select_task_files() {
   local selected=()
   for identifier in "${TASK_SELECTION[@]}"; do
     if [[ -f "${identifier}" ]]; then
-      selected+=("$(cd "$(dirname "${identifier}")" && pwd)/$(basename "${identifier}")")
+      selected+=("$(cd "$(dirname "${identifier}")" && pwd)/$(basename "${identifier}"))"
       continue
     fi
 
