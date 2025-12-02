@@ -8,4 +8,4 @@ Complete tasks sequentially.
 4. - [ ] [Task 04 — Reduced Scope Docker Compose Deployment](tasks/task-04-reduced-scope-deployment.md) — Ship a Dockerfile + Compose profile for FastAPI + Postgres demo runs and document the manual runbook.
 5. - [ ] [Task 05 — Auth & Notification Fallback](tasks/task-05-auth-notification-fallback.md) — Provide logging email provider, minimal rate-limiters for auth endpoints, and admin overrides so onboarding works without SES/Valkey.
 98. - [x] [Task 98 — Dummy Validation Entry A](tasks/task-98-dummy-validation-entry.md) — Added `## Task 98` log entry (2025-12-02T22:23:27Z UTC) under `epic-035/dummy_runs/validation_log.md`.
-99. - [x] [Task 99 — Dummy Validation Entry B](tasks/task-99-dummy-validation-entry.md) — Added Task 99 log bullets and created `dummy_runs/summary.md` for dummy validation breadcrumbs.
+99. - [ ] [Task 99 — Dummy Validation Entry B](tasks/task-99-dummy-validation-entry.md) — Extend the validation log and add `dummy_runs/summary.md`.
