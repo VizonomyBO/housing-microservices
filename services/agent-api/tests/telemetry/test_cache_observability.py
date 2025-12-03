@@ -55,6 +55,22 @@ async def _create_document_with_chunk(db_session):
 
 async def test_cache_observability_persists_shared_data_layer_writes(db_session) -> None:
     document, chunk = await _create_document_with_chunk(db_session)
+    # Pre-seed a published pillar answer to mirror reduced-scope demo data and
+    # ensure the telemetry assertions remain deterministic even when the table
+    # contains multiple rows.
+    db_session.add(
+        PillarAnswer(
+            owner_user_id=document.owner_user_id,
+            document_id=document.id,
+            country_code=document.country_code or "USA",
+            pillar_name="seeded",
+            content_hash=uuid4().hex,
+            summary_markdown="Seeded answer",
+            answer_json={"answer": "seeded"},
+            status="published",
+        )
+    )
+    await db_session.flush()
     cache_obs = CacheObservability(metrics=MetricsRegistry(registry=CollectorRegistry()))
     normalized_input = NormalizedInput(
         normalized_prompt="Summarize findings",
@@ -138,8 +154,18 @@ async def test_cache_observability_persists_shared_data_layer_writes(db_session)
     assert chunk_metric.chunk_id == chunk.id
     assert chunk_metric.retrieval_count == 1
 
-    pillar_answer = (await db_session.execute(select(PillarAnswer))).scalars().one()
+    pillar_answer_stmt = (
+        select(PillarAnswer)
+        .where(PillarAnswer.document_id == document.id)
+        .where(PillarAnswer.owner_user_id == document.owner_user_id)
+        .where(PillarAnswer.pillar_name == (state.route.value if state.route else None))
+        .where(PillarAnswer.summary_markdown == payload.answer_text)
+    )
+    pillar_answer = (await db_session.execute(pillar_answer_stmt)).scalars().one()
     assert pillar_answer.summary_markdown == "Final answer"
-    sources = (await db_session.execute(select(PillarAnswerSource))).scalars().all()
+    sources_stmt = select(PillarAnswerSource).where(
+        PillarAnswerSource.pillar_answer_id == pillar_answer.id
+    )
+    sources = (await db_session.execute(sources_stmt)).scalars().all()
     assert len(sources) == 1
     assert sources[0].chunk_id == chunk.id
