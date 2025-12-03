@@ -76,6 +76,10 @@ services:
       USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
       LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}
       LOCALSTACK_EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
     networks:
       - microservices-net
       - localstack-net
@@ -201,10 +205,13 @@ services:
     environment:
       RAW_DOCUMENTS_BUCKET: ${RAW_DOCUMENTS_BUCKET:-vizonomy-raw-docs-dev}
       PROCESSED_BUCKET: ${PROCESSED_BUCKET:-vizonomy-processed-dev}
+      USE_LOCALSTACK: ${USE_LOCALSTACK:-1}
+      LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}
+      LOCALSTACK_EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:
       - microservices-net
@@ -217,6 +224,8 @@ services:
     profiles:
       - aws-mock
       - full
+      - agent-api
+      - default
     ports:
       - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
     environment:

@@ -9,12 +9,13 @@ import logging
 from typing import Optional
 from uuid import uuid4
 
-import boto3
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 import openai
+
+from aws_runtime import AWSRuntimeConfig, build_client, describe_runtime, load_runtime_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,13 @@ models = None
 S3_RAW_BUCKET = os.environ.get("RAW_DOCUMENTS_BUCKET", "vizonomy-raw-docs-dev")
 S3_PROCESSED_BUCKET = os.environ.get("PROCESSED_BUCKET", "vizonomy-processed-dev")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+AWS_RUNTIME: AWSRuntimeConfig = load_runtime_config()
+logger.info("Using AWS runtime: %s", describe_runtime(AWS_RUNTIME))
+
+
+def _create_s3_client():
+    return build_client("s3", runtime=AWS_RUNTIME)
 
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
@@ -85,7 +93,7 @@ async def convert_document(request: ConversionRequest):
     if models is None:
         raise HTTPException(status_code=503, detail="Models not loaded yet")
     
-    s3 = boto3.client("s3")
+    s3 = _create_s3_client()
     
     try:
         # Download PDF from S3
@@ -198,4 +206,3 @@ async def add_ai_footnotes(markdown: str, document_id: str) -> str:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8004)
-

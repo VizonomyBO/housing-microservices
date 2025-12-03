@@ -50,19 +50,32 @@ def load_settings() -> Settings:
     stack_profile = (_env_str("STACK_PROFILE", default="reduced") or "reduced").lower()
     service_mode = (_env_str("SERVICE_MODE", default=stack_profile) or stack_profile).lower()
 
+    localstack_host = _env_str("LOCALSTACK_HOST", default="localstack") or "localstack"
+    localstack_edge_port = _env_int("LOCALSTACK_EDGE_PORT", default=4566)
+    use_localstack = _env_flag("USE_LOCALSTACK", default=True)
+
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "agent_api"),
         stack_profile=stack_profile,
         service_mode=service_mode,
         http_port=_env_int("AGENT_API_PORT", default=8000),
         database_url=os.getenv("DATABASE_URL"),
-        use_localstack=_env_flag("USE_LOCALSTACK", default=True),
-        localstack_host=_env_str("LOCALSTACK_HOST", default="localstack") or "localstack",
-        localstack_edge_port=_env_int("LOCALSTACK_EDGE_PORT", default=4566),
+        use_localstack=use_localstack,
+        localstack_host=localstack_host,
+        localstack_edge_port=localstack_edge_port,
         aws_region=_env_str("AWS_REGION", default="us-east-1") or "us-east-1",
-        aws_endpoint_url=_env_str("AWS_ENDPOINT_URL"),
-        aws_access_key_id=_env_str("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=_env_str("AWS_SECRET_ACCESS_KEY"),
+        aws_endpoint_url=_resolve_aws_endpoint_url(
+            explicit=_env_str("AWS_ENDPOINT_URL"),
+            use_localstack=use_localstack,
+            host=localstack_host,
+            edge_port=localstack_edge_port,
+        ),
+        aws_access_key_id=_coalesce_localstack_default(
+            _env_str("AWS_ACCESS_KEY_ID"), use_localstack=use_localstack
+        ),
+        aws_secret_access_key=_coalesce_localstack_default(
+            _env_str("AWS_SECRET_ACCESS_KEY"), use_localstack=use_localstack
+        ),
         metrics_namespace=os.getenv("METRICS_NAMESPACE", "agent-api"),
         metrics_auth_token=os.getenv("METRICS_AUTH_TOKEN"),
         metrics_auth_header=os.getenv("METRICS_AUTH_HEADER", "Authorization"),
@@ -93,6 +106,24 @@ def _env_str(name: str, default: str | None = None) -> str | None:
         return default
     value = raw.strip()
     return value or default
+
+
+def _resolve_aws_endpoint_url(
+    *, explicit: str | None, use_localstack: bool, host: str, edge_port: int
+) -> str | None:
+    if explicit:
+        return explicit
+    if use_localstack:
+        return f"http://{host}:{edge_port}"
+    return None
+
+
+def _coalesce_localstack_default(value: str | None, *, use_localstack: bool) -> str | None:
+    if value:
+        return value
+    if use_localstack:
+        return "localstack"
+    return None
 
 
 __all__ = ["Settings", "load_settings"]
