@@ -15,10 +15,7 @@ from shared_data_layer.db.models.retrieval import Chunk
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.ingestion_job_service import (
-    IngestionJobSummary,
-    ReducedScopeIngestionJobService,
-)
+from services.ingestion_job_service import IngestionJobSummary
 
 
 class DocumentUploadStatus(str, Enum):
@@ -60,12 +57,10 @@ class DocumentUploadService:
     def __init__(
         self,
         session: AsyncSession,
-        ingestion_service: ReducedScopeIngestionJobService,
         *,
         allowed_chunk_types: Sequence[str] | None = None,
     ) -> None:
         self._session = session
-        self._ingestion = ingestion_service
         normalized = tuple(ct.lower() for ct in (allowed_chunk_types or ("text",)))
         self._allowed_chunk_types = normalized or ("text",)
 
@@ -114,16 +109,10 @@ class DocumentUploadService:
             content_hash=content_hash,
             content=payload.content,
         )
-        ingestion_summary = await self._ingestion.auto_complete(
-            document_id=document.id,
-            chunk_type=chunk_type,
-            metadata={"source": "document_upload"},
-        )
         return DocumentUploadResult(
             status=DocumentUploadStatus.COMPLETED,
             content_hash=content_hash,
             document=document,
-            ingestion_job=ingestion_summary,
         )
 
     def _validate_scope(

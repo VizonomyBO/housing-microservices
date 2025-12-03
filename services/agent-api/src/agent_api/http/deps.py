@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,11 @@ from agent_api.http.rate_limit import NullRateLimiter, RateLimiterProtocol
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
 from agent_api.settings import Settings, load_settings
 from cache import InMemoryValkeyClient, ValkeyCacheClientProtocol
+from services import (
+    PillarService,
+    ReducedScopeIngestionJobService,
+    ReducedScopeWorkerRuntime,
+)
 from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
@@ -139,6 +145,26 @@ async def maybe_get_db_session(request: Request) -> AsyncIterator[AsyncSession |
         yield session
 
 
+async def get_reduced_scope_runtime(
+    settings: Annotated[Settings, Depends(get_settings)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ReducedScopeWorkerRuntime:
+    ingestion_service = ReducedScopeIngestionJobService(
+        db_session,
+        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
+    )
+    pillar_service = PillarService(
+        db_session,
+        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
+    )
+    return ReducedScopeWorkerRuntime(
+        session=db_session,
+        ingestion_service=ingestion_service,
+        pillar_service=pillar_service,
+        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
+    )
+
+
 __all__ = [
     "get_auth_context",
     "get_cache_client",
@@ -147,6 +173,7 @@ __all__ = [
     "get_db_session",
     "get_metrics_registry_dep",
     "get_rate_limiter",
+    "get_reduced_scope_runtime",
     "get_request_context",
     "get_settings",
     "get_stream_settings",

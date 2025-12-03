@@ -50,3 +50,6 @@ Introduce a `ReducedScopeWorkerRuntime` module (and CLI hooks) that executes ing
 - Note where ReducedScopeWorkerRuntime is instantiated (files + dependency names) so Task 04 can reference them when building Docker images.
 - Capture any assumptions about local Postgres/Testcontainers required for the runtime so ops docs stay accurate.
 - List follow-up items for re-enabling SQS (env vars, modules, doc sections) to keep future reactivation simple.
+- Runtime wiring lives in `agent_api/http/deps.py#get_reduced_scope_runtime`; FastAPI routes consume it via `Depends`, and the Typer CLI entry point (`agent_runtime` / `agent_api/cli.py`) exercises the same helpers (`run-ingestion`, `generate-pillars`, `generate-artifact`).
+- Local runs still rely on the shared data layer fixtures/Testcontainers; the runtime only assumes `DATABASE_URL` points at the same Postgres instance as FastAPI. No Valkey/Testcontainers changes were required beyond those already documented in Task 02.
+- To re-enable queues, flip `REDUCED_SCOPE_ENABLED=0`, restore the `services/agent-worker` processes plus SQS/SFN wiring described in `docs/infrastructure/async_jobs.md`, and remove the reduced-scope guards added to the HTTP routes/CLI so ingestion + pillar requests enqueue jobs again.

@@ -12,6 +12,7 @@ from agent_api.http.context import RequestContext
 from agent_api.http.deps import (
     get_db_session,
     get_rate_limiter,
+    get_reduced_scope_runtime,
     get_request_context,
     get_settings,
 )
@@ -24,7 +25,7 @@ from agent_api.http.schemas import (
 )
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
-from services import PillarAnswerDTO, PillarService, PillarSourceDTO
+from services import PillarAnswerDTO, PillarService, PillarSourceDTO, ReducedScopeWorkerRuntime
 
 router = APIRouter(prefix="/v1", tags=["pillars"])
 
@@ -36,7 +37,9 @@ async def get_country_pillars(
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    runtime: Annotated[ReducedScopeWorkerRuntime, Depends(get_reduced_scope_runtime)],
 ) -> JSONResponse:  # pragma: no cover - exercised via HTTP tests
+    await runtime.generate_pillar_answers(country_code=country_code)
     service = PillarService(
         db_session,
         allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
@@ -66,12 +69,14 @@ async def get_conversation_pillars(
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    runtime: Annotated[ReducedScopeWorkerRuntime, Depends(get_reduced_scope_runtime)],
 ) -> JSONResponse:
     service = PillarService(
         db_session,
         allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
     )
     try:
+        await runtime.generate_pillar_answers(conversation_id=conversation_id)
         convo_result = await service.list_for_conversation(conversation_id)
     except LookupError as exc:
         raise GatewayError(

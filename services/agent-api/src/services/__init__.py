@@ -19,8 +19,15 @@ from .pillar_service import (
     PillarService,
     PillarSourceDTO,
 )
+from .reduced_scope_runtime import (
+    ArtifactGenerationRequest,
+    IngestionCompletionPayload,
+    PillarGenerationRequest,
+    ReducedScopeWorkerRuntime,
+)
 
 __all__ = [
+    "ArtifactGenerationRequest",
     "AttachmentResult",
     "AttachmentService",
     "AttachmentStatus",
@@ -30,10 +37,13 @@ __all__ = [
     "DocumentUploadResult",
     "DocumentUploadService",
     "DocumentUploadStatus",
+    "IngestionCompletionPayload",
     "IngestionJobSummary",
     "PillarAnswerDTO",
+    "PillarGenerationRequest",
     "PillarService",
     "PillarSourceDTO",
     "ReducedScopeCapabilityError",
     "ReducedScopeIngestionJobService",
+    "ReducedScopeWorkerRuntime",
 ]

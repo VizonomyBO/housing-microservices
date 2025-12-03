@@ -13,6 +13,8 @@ from shared_data_layer.testing.factories.documents import DocumentFactory
 
 from agent_api.http import create_app
 
+pytestmark = pytest.mark.asyncio(loop_scope="session")
+
 
 @asynccontextmanager
 async def _lifespan(app):
@@ -106,7 +108,6 @@ async def pillar_dataset(session_factory):
         }
 
 
-@pytest.mark.asyncio
 async def test_country_pillars_filter_to_text_sources(
     api_client: AsyncClient, pillar_dataset
 ) -> None:
@@ -119,7 +120,6 @@ async def test_country_pillars_filter_to_text_sources(
     assert sources[0]["chunk_type"] == "text"
 
 
-@pytest.mark.asyncio
 async def test_conversation_pillars_respects_scope(api_client: AsyncClient, pillar_dataset) -> None:
     conversation = pillar_dataset["conversation"]
     response = await api_client.get(f"/v1/conversations/{conversation.id}/pillars")
@@ -127,3 +127,25 @@ async def test_conversation_pillars_respects_scope(api_client: AsyncClient, pill
     data = response.json()
     assert data["conversation_id"] == str(conversation.id)
     assert len(data["pillars"]) == 1
+
+
+async def test_country_pillars_generate_answers_inline(
+    api_client: AsyncClient, session_factory
+) -> None:
+    async with session_factory() as db_session:
+        await db_session.begin()
+        try:
+            await DocumentFactory.create_async(
+                session=db_session,
+                chunk_count=1,
+                access_scope="base",
+                owner_user_id=None,
+                country_code="LBR",
+            )
+            await db_session.commit()
+        finally:
+            await db_session.rollback()
+    response = await api_client.get("/v1/pillars/LBR")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pillars"], data

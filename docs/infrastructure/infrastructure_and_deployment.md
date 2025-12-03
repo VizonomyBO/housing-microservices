@@ -33,6 +33,9 @@ This document defines the infrastructure architecture and deployment strategy fo
 - **Container**: Docker image containing FastAPI + LangGraph runtime, deployed via systemd service.
 - **Load Balancer**: Application Load Balancer (ALB) distributing traffic across EC2 instances.
 
+#### Reduced Scope Demo Mode
+Task 3.5.3 introduces a workerless runtime so FastAPI can finish ingestion/pillar/export work inline. When `REDUCED_SCOPE_ENABLED=1`, the API skips Valkey and queues, instantiates `ReducedScopeWorkerRuntime`, and exposes Typer commands (`uv run python -m agent_api.cli ...`) for ops to run the same helpers out-of-band. Rolling back to the full architecture requires flipping the flag, re-enabling the worker ASGs/SQS endpoints, and updating runbooks so the CLI once again triggers queue jobs instead of inline DB writes.
+
 #### Autoscaling Policy
 - **Type**: Target Tracking
 - **Metrics**:

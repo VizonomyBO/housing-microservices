@@ -15,6 +15,7 @@ from agent_api.http.deps import (
     get_auth_context,
     get_db_session,
     get_rate_limiter,
+    get_reduced_scope_runtime,
     get_request_context,
     get_settings,
 )
@@ -29,8 +30,9 @@ from services import (
     DocumentUploadService,
     DocumentUploadStatus,
     ReducedScopeCapabilityError,
-    ReducedScopeIngestionJobService,
+    ReducedScopeWorkerRuntime,
 )
+from services.reduced_scope_runtime import IngestionCompletionPayload
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    runtime: Annotated[ReducedScopeWorkerRuntime, Depends(get_reduced_scope_runtime)],
 ) -> JSONResponse:
     await rate_limiter.acquire(
         bucket="documents_upload",
@@ -52,13 +55,8 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
         route="documents.upload",
         metadata={"demo_mode": settings.reduced_scope.text_only_mode()},
     )
-    ingestion_helper = ReducedScopeIngestionJobService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
     upload_service = DocumentUploadService(
         session=db_session,
-        ingestion_service=ingestion_helper,
         allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
     )
     owner_user_id = _resolve_owner_user_id(
@@ -115,6 +113,16 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
             content=response,
             headers=headers,
         )
+
+    if result.status == DocumentUploadStatus.COMPLETED and result.document is not None:
+        ingestion_summary = await runtime.complete_ingestion_job(
+            result.document.id,
+            payload=IngestionCompletionPayload(
+                chunk_type=payload.chunk_type,
+                metadata={"source": "document_upload"},
+            ),
+        )
+        result.ingestion_job = ingestion_summary
 
     await db_session.commit()
     response = _serialize_response(

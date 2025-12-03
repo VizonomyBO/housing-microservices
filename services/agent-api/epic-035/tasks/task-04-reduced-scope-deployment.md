@@ -54,3 +54,4 @@ Provide a local/demo deployment story focused on FastAPI + Postgres: ship a Dock
 - List the Docker image name/tag and Compose profile/filename so ops can reference it quickly.
 - Note outstanding infra tasks (e.g., TLS, metrics scraping) deferred until after demo.
 - Include guidance on where `.env.reduced` lives and which env vars must be overridden when returning to full mode.
+- Runtime context from Task 03: instantiate `ReducedScopeWorkerRuntime` via `agent_api.http.deps.get_reduced_scope_runtime`; CLI commands live under `agent_api/cli.py` with entry point `agent-runtime`. Pillar/document routes now await the runtime before responding, so containerization must preserve those dependencies.
