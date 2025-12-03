@@ -1,0 +1,131 @@
+{
+  "scenario": "reduced_e2e",
+  "version": "2025-12-03",
+  "defaults": {
+    "country_code": "USA",
+    "language": "en",
+    "tags": ["reduced_e2e", "demo"],
+    "access_scope": "user_shared"
+  },
+  "documents": [
+    {
+      "alias": "DOC_POLICY",
+      "slug": "doc_policy",
+      "canonical_name": "Metro Housing Continuity Memo – Q2 FY25",
+      "filename": "doc_policy.md",
+      "doc_type": "policy_memo",
+      "description": "Narrative memo describing voucher expansion guardrails and reporting cadence.",
+      "expected_citations": ["Voucher Expansion", "Rent Guardrails"],
+      "metadata": {
+        "scenario": "reduced_e2e",
+        "document_alias": "DOC_POLICY"
+      }
+    },
+    {
+      "alias": "DOC_LEDGER",
+      "slug": "doc_ledger",
+      "canonical_name": "FY25 Rental Assistance Ledger (Q2 extract)",
+      "filename": "doc_ledger.md",
+      "doc_type": "ledger_markdown",
+      "description": "Markdown table enumerating six assistance programs totalling $7.35M this quarter.",
+      "expected_citations": ["Ledger Table"],
+      "metadata": {
+        "scenario": "reduced_e2e",
+        "document_alias": "DOC_LEDGER"
+      },
+      "numerical_expectations": {
+        "total_usd": 7350000,
+        "highlight_city": "District 9",
+        "highlight_amount_usd": 1800000
+      }
+    },
+    {
+      "alias": "DOC_KPI",
+      "slug": "doc_kpi",
+      "canonical_name": "Metro KPI Snapshot – April 2025",
+      "filename": "doc_kpi.md",
+      "doc_type": "kpi_table",
+      "description": "KPI dashboard table for Harbor City, Lakeview, and Southridge.",
+      "expected_citations": ["Observations"],
+      "metadata": {
+        "scenario": "reduced_e2e",
+        "document_alias": "DOC_KPI"
+      },
+      "kpi_expectations": {
+        "cities": ["Harbor City", "Lakeview", "Southridge"],
+        "highlight_threshold": 80,
+        "highest_city": "Harbor City",
+        "highest_value": 87
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "id": "Q_SIMPLE_QA",
+      "question": "What two guardrails did the latest housing memo add for voucher expansion?",
+      "capability": "simple_qa",
+      "document_aliases": ["DOC_POLICY"],
+      "expected_traits": ["mentions five districts", "notes 32% rent cap"],
+      "validation_rules": [
+        {
+          "type": "regex",
+          "pattern": "five\\s+districts"
+        },
+        {
+          "type": "regex",
+          "pattern": "32%"
+        }
+      ]
+    },
+    {
+      "id": "Q_REASON",
+      "question": "Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters.",
+      "capability": "cross_doc_reasoning",
+      "document_aliases": ["DOC_POLICY", "DOC_LEDGER"],
+      "expected_traits": ["references District 9", "cites both documents", "includes two action items"],
+      "validation_rules": [
+        {
+          "type": "keyword",
+          "values": ["District 9", "voucher", "ledger"]
+        }
+      ]
+    },
+    {
+      "id": "Q_AGGREGATE",
+      "question": "Sum the total rental assistance disbursed this quarter and highlight the highest-funded city.",
+      "capability": "numerical_aggregate",
+      "document_aliases": ["DOC_LEDGER"],
+      "expected_traits": ["total equals $7.35M", "highlights District 9 $1.8M"],
+      "validation_rules": [
+        {
+          "type": "numeric_total",
+          "field": "total_usd",
+          "tolerance": 1000
+        },
+        {
+          "type": "keyword",
+          "values": ["District 9", "1.8"]
+        }
+      ]
+    },
+    {
+      "id": "Q_SQL",
+      "question": "Group KPI values by city and call out whoever exceeds 80.",
+      "capability": "table_reasoning",
+      "document_aliases": ["DOC_KPI"],
+      "expected_traits": ["mentions Harbor City 87", "lists every city once"],
+      "validation_rules": [
+          {
+            "type": "keyword",
+            "values": ["Harbor City", "87", "Lakeview", "Southridge"]
+          },
+          {
+            "type": "threshold",
+            "field": "highest_value",
+            "comparison": ">=",
+            "value": 80
+          }
+      ]
+    }
+  ]
+}

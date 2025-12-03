@@ -47,3 +47,4 @@ Create reusable fixtures for the reduced E2E smoke scenario and helper modules t
 
 ## Handoff Notes
 - If you modify the scenario relative to Task 01, update `docs/testing/reduced_e2e_smoke_plan.md` and mention the change in the checklist so Task 03 can rely on the new truth.
+- 2025-12-03: Fixtures + manifest now live under `tests/data/reduced_e2e/`, and `scripts/reduced_e2e_fixtures.py` exposes Pydantic models plus hashing helpers. Task 03 should import `FixtureLoader` instead of re-reading YAML/markdown manually; scenario contents still match `docs/testing/reduced_e2e_smoke_plan.md`.
