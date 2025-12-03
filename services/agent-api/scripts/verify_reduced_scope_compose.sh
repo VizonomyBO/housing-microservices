@@ -2,15 +2,16 @@
 set -euo pipefail
 
 SERVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)
-COMPOSE_FILE="$SERVICE_DIR/docker-compose.reduced.yml"
+REPO_ROOT=$(cd "$SERVICE_DIR/../.." && pwd)
+COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   echo "Compose file not found: $COMPOSE_FILE" >&2
   exit 1
 fi
 
-echo "Validating docker compose config"
-docker compose -f "$COMPOSE_FILE" config >/dev/null
+echo "Validating root docker compose config (reduced profile)"
+(cd "$REPO_ROOT" && docker compose --profile reduced -f "$COMPOSE_FILE" config >/dev/null)
 
 echo "Running reduced-scope smoke tests"
 cd "$SERVICE_DIR"

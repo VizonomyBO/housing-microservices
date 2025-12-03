@@ -56,3 +56,8 @@ Establish a single source of truth for environment variables and runtime profile
 - `docker-compose.yml` successfully loads `.env` (tested via `docker compose config`), and switching `STACK_PROFILE` or `REDUCED_SCOPE_ENABLED` in `.env` affects Compose/service behavior.
 - The old scattered env templates are either deleted or updated to point back to the root `.env`.
 - Task 03 checkbox is ticked in `CHECKLIST.md`, and logs reflect the commands executed.
+
+## Handoff Notes
+- 2025-12-02: Root `docker-compose.yml` now loads `.env` for every service; copy `env.example` → `.env` before running Compose commands to avoid missing-file errors until Task 03 finalizes templates.
+- `scripts/init-databases.sh` provisions the `agent_reduced` database/user via `AGENT_API_DB*` envs—ensure the new `.env.example` keeps those values in sync.
+- Reduced/full profiles exist as `profiles: ["reduced", "full"]` on `agent-api`, `db-init`, etc. Task 03 should document how toggles like `SERVICE_MODE` and `USE_LOCALSTACK` relate to `COMPOSE_PROFILES`.
