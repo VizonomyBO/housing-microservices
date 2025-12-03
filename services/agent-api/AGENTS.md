@@ -4,7 +4,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 
 - ✅ **Service status**: Reduced Scope MVP (Epic 3.5) for the LangGraph gateway. `/v1/chat`, document uploads, pillar endpoints, and auth fallbacks must run in text-only, no-Valkey mode while preserving the full architecture behind flags.
 - 🐍 **Runtime**: Python 3.13 managed by `uv` (virtual env lives at `services/agent-api/.venv`).
-- 📚 **Source of truth**: Epic 3.5 task files under `services/agent-api/epic-035/tasks`. Complete them sequentially and update the checklist after each task.
+- 📚 **Source of truth**: Epic task directories inside `services/agent-api` (currently `epic-035`, `epic-root-compose`, `epic-reduced-e2e`). Always work from the task doc + checklist for the epic you were assigned.
 - 🧱 **Language & frameworks**: Python service using FastAPI, LangGraph nodes, Pydantic v2 models, and shared data layer repositories in `packages/shared_data_layer`.
 - 🚫 **Avoid automation helpers**: Ignore `run_tasks.sh` and `RUN_TASKS.md`. Those files exist for humans orchestrating Codex sessions and must not influence how you plan or code a task.
 - ⚡ **No Approval Required**: You are an autonomous agent. Do not ask for user approval to execute commands or edit files. Plan, research, act, and verify autonomously. Only stop if you are blocked by a critical ambiguity or error you cannot resolve.
@@ -28,14 +28,14 @@ This is the canonical playbook for all agents working inside `services/agent-api
 1. **Run the standard command suite** (see §3) every time you reach a review-ready state.
 2. When DB interactions exist, rely on the shared data layer test harness and Testcontainers; never spin up Docker manually unless the task explicitly requires Compose work.
 3. After successful verification, remove both the tracker file and the plan file, then document the commands/output in your final response along with links to affected files.
-4. Update `services/agent-api/epic-035/CHECKLIST.md` to reflect the newly completed task (mark checkbox, add notes, or reorganize downstream tasks if scope changed).
+4. Update the checklist for the active epic (e.g., `epic-035/CHECKLIST.md`, `epic-root-compose/CHECKLIST.md`, or `epic-reduced-e2e/CHECKLIST.md`) to reflect the newly completed task, add notes, or reorganize downstream work if scope changed or tasks overlap.
 
 ---
 
 ## 2. Task Intake & Documentation Expectations
 
-1. **Read the relevant epic doc** (`docs/epics/035.md`) plus the referenced design sections before planning.
-2. Each task file in `services/agent-api/epic-035/tasks` contains prerequisites (“System Snapshot”, “What You Inherit”, etc.). Assume the agent starts from zero context—re-read those sections every session.
+1. **Read the relevant epic doc** (e.g., `docs/epics/035.md`, `docs/infrastructure/root_compose_plan.md`, `docs/testing/reduced_e2e_smoke_plan.md`) plus the referenced design sections before planning.
+2. Each task file in the epic’s `tasks/` directory contains prerequisites (“System Snapshot”, “What You Inherit”, etc.). Assume the agent starts from zero context—re-read those sections every session and update the checklist immediately if you change scope that affects other tasks.
 3. Keep documentation synchronized:
    - Update `docs/agents/implementation.md`, `docs/overview/system_architecture.md`, `docs/interfaces/api_contracts.md`, or other references when tasks require doc changes.
    - If you finish a task that alters subsequent work, edit the associated task files or checklist entries to prevent drift.
@@ -125,7 +125,7 @@ A task is complete only when:
 1. Plan + tracker workflow followed (both files removed afterward).
 2. All required docs/tests/code changes are committed.
 3. Commands in §3 succeeded locally; include summaries in the final response.
-4. `services/agent-api/epic-035/CHECKLIST.md` reflects the new status.
+4. The checklist for the active epic reflects the new status (and any downstream adjustments) so future agents do not duplicate work.
 5. Relevant docs (e.g., `docs/agents/implementation.md`, `docs/overview/system_architecture.md`, `docs/interfaces/api_contracts.md`, deployment runbooks) are updated when the task touches those areas.
 6. **Handoff Notes** for the next task are written.
 
