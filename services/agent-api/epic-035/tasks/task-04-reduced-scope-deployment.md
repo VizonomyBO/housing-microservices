@@ -55,3 +55,9 @@ Provide a local/demo deployment story focused on FastAPI + Postgres: ship a Dock
 - Note outstanding infra tasks (e.g., TLS, metrics scraping) deferred until after demo.
 - Include guidance on where `.env.reduced` lives and which env vars must be overridden when returning to full mode.
 - Runtime context from Task 03: instantiate `ReducedScopeWorkerRuntime` via `agent_api.http.deps.get_reduced_scope_runtime`; CLI commands live under `agent_api/cli.py` with entry point `agent-runtime`. Pillar/document routes now await the runtime before responding, so containerization must preserve those dependencies.
+
+### Current Handoff Summary
+- **Image / Compose assets**: `services/agent-api/Dockerfile.reduced` builds the `agent-api-reduced-agent-api` image via `docker compose -f services/agent-api/docker-compose.reduced.yml ...`. The stack name defaults to `agent-api-reduced`. `db-init` reuses the same image for Alembic + seed runs, and `db-shell` provides a `psql` utility under the optional `admin` profile.
+- **Seeding & fixtures**: `services/agent-api/scripts/seed_reduced_scope_data.py` inserts USA markitdown text + pillar answers and can be re-run with `--force`. Compose ties it to migrations automatically; docs/runbook show manual execution.
+- **Env management**: copy `.env.reduced.example` to `.env.reduced` (alongside root `env.example` additions) before running Compose. Override `AGENT_API_DB_PASSWORD`, `DATABASE_URL`, and `REDUCED_SCOPE_*` flags when switching between demo and production.
+- **Outstanding infra gaps**: TLS termination, Prometheus scraping, GitHub Actions deploy jobs, and Valkey/SES/SQS infrastructure stay disabled until Task 05+ reopen the full topology.

@@ -124,7 +124,17 @@ async def test_cache_observability_persists_shared_data_layer_writes(db_session)
     assert len(items) == 1
     assert items[0].chunk_id == chunk.id
 
-    chunk_metric = (await db_session.execute(select(ChunkMetrics))).scalars().one()
+    chunk_metric = (
+        (
+            await db_session.execute(
+                select(ChunkMetrics)
+                .where(ChunkMetrics.chunk_id == chunk.id)
+                .where(ChunkMetrics.chunk_country_code == chunk.country_code)
+            )
+        )
+        .scalars()
+        .one()
+    )
     assert chunk_metric.chunk_id == chunk.id
     assert chunk_metric.retrieval_count == 1
 

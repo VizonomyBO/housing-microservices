@@ -102,6 +102,23 @@ This will start:
 - **📊 System Status**: http://localhost:3000/api/status
 - **🔐 Account API**: http://localhost:5000
 
+## 🧪 Reduced Scope Agent API Demo (Epic 3.5)
+
+FastAPI + Postgres can now be run in a “text-only, no-Valkey” mode for Epic 3.5 demos.
+
+1. Copy the template env file: `cp services/agent-api/.env.reduced.example services/agent-api/.env.reduced` and update passwords/secrets.
+2. (Optional) Validate assets via `services/agent-api/scripts/verify_reduced_scope_compose.sh` (runs `docker compose config` + smoke tests).
+3. Launch the stack:
+   ```bash
+   docker compose -f services/agent-api/docker-compose.reduced.yml up --build
+   ```
+   - `postgres` exposes `${AGENT_API_DB_PORT:-5434}` and enables `pgvector` via init SQL.
+   - `db-init` runs Alembic migrations and `scripts/seed_reduced_scope_data.py --if-empty` so `/v1/chat`, `/v1/documents/upload`, and pillar routes have markitdown text immediately.
+4. Access FastAPI on `http://localhost:${AGENT_API_PORT:-8000}`; SSE + LangGraph streaming remain available while Valkey/queues stay disabled.
+5. Follow `docs/runbooks/reduced_scope_demo.md` for CLI usage, manual seeding, teardown, and instructions to revert to the full AWS deployment.
+
+> Need to return to the production topology? Flip `REDUCED_SCOPE_ENABLED=0`, reintroduce Valkey/SES containers, and follow the AWS deployment steps in `docs/infrastructure/infrastructure_and_deployment.md`.
+
 ## 📖 API Documentation
 
 ### Account Service Endpoints
@@ -496,4 +513,3 @@ For issues and questions, please open an issue on GitHub.
 ---
 
 **Built with ❤️ using Flask, TypeScript, Docker, and PostgreSQL**
-

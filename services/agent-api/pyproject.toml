@@ -49,6 +49,9 @@ addopts = "-q"
 xfail_strict = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+markers = [
+  "reduced_scope_smoke: Validates reduced-scope Docker/seed assets",
+]
 
 [tool.ruff]
 line-length = 100

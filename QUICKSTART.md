@@ -87,6 +87,15 @@ curl -X POST http://localhost:5000/auth/login \
 - View detailed metrics at http://localhost:3000/health/metrics
 - Read the full README.md for advanced features
 
+## Reduced Scope Agent API Demo (FastAPI + Postgres)
+
+Need the LangGraph gateway without Valkey/queues? Run the reduced-scope stack that powers Epic 3.5:
+
+1. `cp services/agent-api/.env.reduced.example services/agent-api/.env.reduced` and update DB credentials.
+2. (Optional) `services/agent-api/scripts/verify_reduced_scope_compose.sh` to lint the Compose file and smoke tests.
+3. `docker compose -f services/agent-api/docker-compose.reduced.yml up --build` to launch FastAPI + pgvector with markitdown seed data.
+4. Follow the runbook at `docs/runbooks/reduced_scope_demo.md` for seeding, CLI helpers, and teardown/reversion steps.
+
 ### Useful Commands
 
 ```bash
@@ -169,4 +178,3 @@ docker-compose exec postgres psql -U account_user -d account_db
 ---
 
 Happy coding! 🚀
-
