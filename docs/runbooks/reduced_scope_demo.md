@@ -1,6 +1,6 @@
 # Reduced Scope Demo Runbook
 
-This runbook walks through the Epic 3.5 “text-only, no-Valkey” experience using the root `docker-compose.yml`. The reduced profile launches just enough infrastructure for FastAPI + Postgres while keeping the production architecture (LangGraph nodes, seed scripts, LocalStack) behind feature flags.
+This runbook walks through the Epic 3.5 “text-only, no-Valkey” experience using the root `docker-compose.yml`. The reduced profile launches just enough infrastructure for FastAPI + Postgres while keeping the production architecture (LangGraph nodes, seed scripts, LocalStack) behind feature flags. For the automation/CLI view, pair this document with `docs/testing/reduced_e2e_smoke.md`.
 
 ## 1. Prerequisites
 - Docker 25.x with Compose V2 (`docker compose`).

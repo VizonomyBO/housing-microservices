@@ -113,7 +113,42 @@ The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which 
   4. Restart any containers that talk to AWS (`docker compose restart agent-api marker-service`).
 - LocalStack data lives in the `localstack_data` volume. Remove it with `docker volume rm housing-microservices_localstack_data` or `docker compose down -v` if you need a clean slate.
 
-## 7. Troubleshooting Cheatsheet
+## 7. Production Mode with Compose
+Use this workflow when you need the full stack with production-like settings, real secrets, and optional AWS access.
+
+1. **Prep environment files**
+   ```bash
+   cp env.example .env
+   cp env.example .env.production  # optional reference copy
+   ```
+   Edit `.env` (or `.env.production` + `source` it) with production-grade secrets:
+   - Non-default JWT/signing secrets, database passwords, and API keys (`AGENT_OPENAI_API_KEY`, `EMAIL_PROVIDER_API_KEY`, etc.).
+   - `STACK_PROFILE=full` and `COMPOSE_PROFILES=full,ops` so Compose launches every service plus helper containers.
+   - `SERVICE_MODE=full` to turn on Valkey and pillar fallbacks.
+
+2. **Decide on LocalStack vs AWS**
+   - Keep `USE_LOCALSTACK=1` to emulate AWS. Ensure `AWS_ENDPOINT_URL=http://localstack:4566` (containers) or `http://localhost.localstack.cloud:4566` (host tooling), and reuse the default credentials baked into `env.example`.
+   - Set `USE_LOCALSTACK=0` when you want the stack to talk to real AWS. Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN` plus the target region. Clear `AWS_ENDPOINT_URL` so SDKs auto-discover AWS endpoints and restart affected services (`docker compose restart agent-api marker-service`).
+
+3. **Launch the full profile**
+   ```bash
+   STACK_PROFILE=full \
+   COMPOSE_PROFILES=full,ops \
+     docker compose --profile full up --build
+   ```
+   - The `ops` profile pulls in `db-shell` for manual SQL inspections.
+   - Expect longer start times; keep `docker compose logs -f agent-api marker-service localstack` streaming in another terminal.
+
+4. **Run smoke/validation hooks**
+   - Execute `make reduced-e2e-smoke` from the repo root to run the reduced-profile automation against the same secrets before rolling out changes. Override `KEEP_STACK=1` if you want the reduced stack to stay up for debugging.
+   - For full-stack-only checks, run `docker compose --profile full exec agent-api uv run python scripts/run_reduced_e2e_smoke.py run --database-url "$DATABASE_URL" --report-path /app/logs/reduced_e2e_smoke.json` so the CLI interacts with live services without tearing them down.
+   - See `docs/testing/reduced_e2e_smoke.md` for detailed CLI/Make usage and troubleshooting tips.
+
+5. **Handoff reminders**
+   - Regenerate `.env` secrets when onboarding new environments; never commit the edited file.
+   - Document any production-only overrides inside `docs/runbooks/full_stack_compose.md` or the new reduced E2E smoke guide so future operators know which toggles you touched.
+
+## 8. Troubleshooting Cheatsheet
 | Symptom | Fix |
 | --- | --- |
 | Ports already in use | `lsof -i :8000`, stop conflicting process, then re-run Compose. |
@@ -122,7 +157,7 @@ The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which 
 | Services stuck in `starting` | Run `docker compose ps`, inspect `docker compose logs <service>`, verify `.env` copied from `env.example`. |
 | Need a clean database | `docker compose down -v`, then start the stack again so `db-init` reseeds from scratch. |
 
-## 8. Additional References
+## 9. Additional References
 - `docs/runbooks/reduced_scope_demo.md` — detailed walkthrough of the reduced-profile workflow.
 - `docs/runbooks/full_stack_compose.md` — full-stack LocalStack runbook (new in Task 05).
 - `docs/infrastructure/root_compose_plan.md` — architectural decisions behind the root Compose stack.
