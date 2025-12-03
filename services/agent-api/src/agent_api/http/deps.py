@@ -20,6 +20,7 @@ from services import (
     ReducedScopeIngestionJobService,
     ReducedScopeWorkerRuntime,
 )
+from services.ingestion_pipeline import VoyageIngestionPipeline
 from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
@@ -165,12 +166,19 @@ async def get_reduced_scope_runtime(
     )
 
 
+def get_document_ingestion_pipeline(request: Request) -> VoyageIngestionPipeline | None:
+    if not hasattr(request, "app"):
+        return None
+    return getattr(request.app.state, "ingestion_pipeline", None)
+
+
 __all__ = [
     "get_auth_context",
     "get_cache_client",
     "get_cache_observability",
     "get_chat_runner",
     "get_db_session",
+    "get_document_ingestion_pipeline",
     "get_metrics_registry_dep",
     "get_rate_limiter",
     "get_reduced_scope_runtime",

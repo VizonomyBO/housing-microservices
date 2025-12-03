@@ -67,6 +67,8 @@ class DocumentUploadService:
     async def upload_markdown(
         self,
         payload: DocumentUploadData,
+        *,
+        text_only: bool = True,
     ) -> DocumentUploadResult:
         content_hash = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
         chunk_type = payload.chunk_type.lower()
@@ -101,14 +103,16 @@ class DocumentUploadService:
             owner_uuid=owner_uuid,
             country_code=country_code,
             content_hash=content_hash,
+            text_only=text_only,
         )
-        await self._create_chunk(
-            document=document,
-            owner_uuid=owner_uuid,
-            country_code=country_code,
-            content_hash=content_hash,
-            content=payload.content,
-        )
+        if text_only:
+            await self._create_chunk(
+                document=document,
+                owner_uuid=owner_uuid,
+                country_code=country_code,
+                content_hash=content_hash,
+                content=payload.content,
+            )
         return DocumentUploadResult(
             status=DocumentUploadStatus.COMPLETED,
             content_hash=content_hash,
@@ -138,9 +142,10 @@ class DocumentUploadService:
         owner_uuid: UUID | None,
         country_code: str | None,
         content_hash: str,
+        text_only: bool,
     ) -> Document:
         now = datetime.now(UTC)
-        metadata = self._build_document_metadata(payload.metadata)
+        metadata = self._build_document_metadata(payload.metadata, text_only=text_only)
         document = Document(
             owner_user_id=owner_uuid,
             access_scope=payload.access_scope,
@@ -205,10 +210,12 @@ class DocumentUploadService:
         row = await self._session.execute(stmt.limit(1))
         return row.scalar_one_or_none()
 
-    def _build_document_metadata(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+    def _build_document_metadata(
+        self, metadata: dict[str, Any] | None, *, text_only: bool
+    ) -> dict[str, Any]:
         payload = dict(metadata or {})
         reduced_scope_meta = payload.setdefault("reduced_scope", {})
-        reduced_scope_meta["text_only"] = True
+        reduced_scope_meta["text_only"] = text_only
         payload.setdefault("source", "markitdown_inline")
         return payload
 

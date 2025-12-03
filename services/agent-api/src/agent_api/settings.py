@@ -33,6 +33,8 @@ class Settings:
     reduced_scope: ReducedScopeSettings
     openai_api_key: str | None
     voyage_api_key: str | None
+    openai_chat_model: str
+    voyage_embedding_model: str
 
 
 def load_settings() -> Settings:
@@ -52,6 +54,10 @@ def load_settings() -> Settings:
 
     openai_api_key = _env_str("OPENAI_API_KEY")
     voyage_api_key = _env_str("VOYAGE_API_KEY")
+    openai_chat_model = _env_str("OPENAI_CHAT_MODEL", default="gpt-4o-mini") or "gpt-4o-mini"
+    voyage_embedding_model = (
+        _env_str("VOYAGE_EMBEDDING_MODEL", default="voyage-3-lite") or "voyage-3-lite"
+    )
 
     _validate_real_tooling_requirements(
         reduced_scope=reduced_scope,
@@ -98,6 +104,8 @@ def load_settings() -> Settings:
         reduced_scope=reduced_scope,
         openai_api_key=openai_api_key,
         voyage_api_key=voyage_api_key,
+        openai_chat_model=openai_chat_model,
+        voyage_embedding_model=voyage_embedding_model,
     )
 
 

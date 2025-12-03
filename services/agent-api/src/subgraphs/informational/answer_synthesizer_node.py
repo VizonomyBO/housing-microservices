@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from agent_api.reduced_scope import ReducedScopeFlags
 from cache.cache_writer import CacheShortCircuitResult, maybe_serve_from_cache
 from cache.response_serializer import CacheCitation, CacheWorkflowPlanExcerpt
 from cache.valkey_client import ValkeyCacheClientProtocol
@@ -28,6 +29,7 @@ class AnswerSynthesisContext:
     graph_context: GraphContext
     workflow_plan: WorkflowPlan | None
     attachment_scope: AttachmentScope | None
+    reduced_scope_flags: ReducedScopeFlags | None = None
 
 
 @dataclass(slots=True)
@@ -96,6 +98,7 @@ class AnswerSynthesizerNode:
                 graph_context=state.graph_context,
                 workflow_plan=state.workflow_plan,
                 attachment_scope=state.attachment_scope,
+                reduced_scope_flags=state.reduced_scope_flags,
             )
             result = await self.composer.compose(context)
             metadata = cache_result.cache_metadata

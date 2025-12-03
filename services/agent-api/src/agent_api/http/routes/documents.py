@@ -15,6 +15,7 @@ from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
     get_db_session,
+    get_document_ingestion_pipeline,
     get_rate_limiter,
     get_reduced_scope_runtime,
     get_request_context,
@@ -42,6 +43,7 @@ from services import (
     ReducedScopeCapabilityError,
     ReducedScopeWorkerRuntime,
 )
+from services.ingestion_pipeline import VoyageIngestionPipeline
 from services.reduced_scope_runtime import IngestionCompletionPayload
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,9 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     runtime: Annotated[ReducedScopeWorkerRuntime, Depends(get_reduced_scope_runtime)],
+    ingestion_pipeline: Annotated[
+        VoyageIngestionPipeline | None, Depends(get_document_ingestion_pipeline)
+    ],
 ) -> JSONResponse:
     await rate_limiter.acquire(
         bucket="documents_upload",
@@ -142,7 +147,11 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
     )
 
     try:
-        result = await upload_service.upload_markdown(upload_data)
+        use_real_tools = settings.reduced_scope.real_tooling_mode()
+        result = await upload_service.upload_markdown(
+            upload_data,
+            text_only=not use_real_tools,
+        )
     except ValueError as exc:
         await db_session.rollback()
         raise GatewayError(
@@ -175,7 +184,26 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
             headers=headers,
         )
 
-    if result.status == DocumentUploadStatus.COMPLETED and result.document is not None:
+    use_real_tools = settings.reduced_scope.real_tooling_mode()
+    if (
+        use_real_tools
+        and result.status == DocumentUploadStatus.COMPLETED
+        and result.document is not None
+        and result.created
+    ):
+        if ingestion_pipeline is None:
+            raise GatewayError(
+                code="INGESTION_DISABLED",
+                message="Real-tool ingestion pipeline is not configured",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        ingestion_summary = await ingestion_pipeline.ingest_document(
+            document=result.document,
+            upload_payload=upload_data,
+            session=db_session,
+        )
+        result.ingestion_job = ingestion_summary
+    elif result.status == DocumentUploadStatus.COMPLETED and result.document is not None:
         ingestion_summary = await runtime.complete_ingestion_job(
             result.document.id,
             payload=IngestionCompletionPayload(

@@ -12,6 +12,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from shared_data_layer.db.session import DatabaseSessionManager
 
+from agent_api.http.deps import (
+    UnconfiguredChatRunner,
+    get_chat_runner,
+    set_chat_runner,
+)
 from agent_api.http.errors import GatewayError, error_payload
 from agent_api.http.rate_limit import (
     RateLimiterProtocol,
@@ -27,6 +32,10 @@ from agent_api.http.routes.metrics import router as metrics_router
 from agent_api.http.routes.pillars import router as pillars_router
 from agent_api.settings import Settings, load_settings
 from cache import InMemoryValkeyClient, ValkeyAsyncClient, ValkeyCacheClientProtocol
+from nodes.retrieval.utils.language import LinguaLanguageDetector, StubLanguageDetector
+from services.ingestion_pipeline import MarkdownChunker, VoyageIngestionPipeline
+from services.langgraph_runner import LangGraphChatRunner
+from services.model_clients import OpenAIChatClient, VoyageEmbeddingClient
 from telemetry import CacheObservability, get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -56,6 +65,35 @@ def create_app() -> FastAPI:
             settings=settings,
             observability=app.state.cache_observability,
         )
+
+        language_detector = _build_language_detector()
+        openai_client = None
+        if settings.openai_api_key:
+            openai_client = OpenAIChatClient(
+                api_key=settings.openai_api_key,
+                model=settings.openai_chat_model,
+            )
+        ingestion_pipeline = None
+        if settings.reduced_scope.real_tooling_mode() and settings.voyage_api_key:
+            voyage_client = VoyageEmbeddingClient(
+                api_key=settings.voyage_api_key,
+                model=settings.voyage_embedding_model,
+            )
+            ingestion_pipeline = VoyageIngestionPipeline(
+                voyage_client=voyage_client,
+                chunker=MarkdownChunker(),
+            )
+        app.state.ingestion_pipeline = ingestion_pipeline
+
+        runner = LangGraphChatRunner(
+            cache_client=app.state.valkey_client,
+            cache_observability=app.state.cache_observability,
+            language_detector=language_detector,
+            openai_client=openai_client,
+            metrics=registry,
+        )
+        if isinstance(get_chat_runner(), UnconfiguredChatRunner):
+            set_chat_runner(runner)
 
         db_initialized = False
         if settings.database_url:
@@ -192,6 +230,14 @@ def _build_rate_limiter(settings: Settings) -> RateLimiterProtocol:
     if settings.reduced_scope.should_disable_rate_limiter():
         return ReducedScopeRateLimiter()
     return ValkeyRateLimiterStub()
+
+
+def _build_language_detector():
+    try:
+        return LinguaLanguageDetector()
+    except RuntimeError:
+        logger.warning("Lingua language detector unavailable; using stub")
+        return StubLanguageDetector(language_code="en", confidence=1.0)
 
 
 __all__ = ["create_app"]
