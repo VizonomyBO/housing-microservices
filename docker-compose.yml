@@ -104,7 +104,8 @@ services:
     <<: *service-defaults
     build:
       <<: *monorepo-build
-      dockerfile: services/auth-service/Dockerfile
+      context: ./services/auth-service
+      dockerfile: Dockerfile
     container_name: auth-service
     ports:
       - "${AUTH_SERVICE_PORT:-5001}:5000"
@@ -132,7 +133,8 @@ services:
     <<: *service-defaults
     build:
       <<: *monorepo-build
-      dockerfile: services/user-service/Dockerfile
+      context: ./services/user-service
+      dockerfile: Dockerfile
     container_name: user-service
     ports:
       - "${USER_SERVICE_PORT:-5002}:5001"
@@ -192,7 +194,8 @@ services:
     <<: *service-defaults
     build:
       <<: *monorepo-build
-      dockerfile: services/marker-service/Dockerfile
+      context: ./services/marker-service
+      dockerfile: Dockerfile
     profiles:
       - full
     ports:
