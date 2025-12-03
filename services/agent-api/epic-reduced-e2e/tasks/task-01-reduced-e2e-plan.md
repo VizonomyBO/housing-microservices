@@ -48,3 +48,4 @@ Capture all of this in a new planning doc so future tasks can implement without 
 
 ## Handoff Notes
 - Future tasks must follow the data + prompt specs from the new plan; if changes become necessary, update the plan and this checklist immediately to prevent duplicate or conflicting work.
+- 2025-12-03: `docs/testing/reduced_e2e_smoke_plan.md` now defines three markdown documents (policy memo, ledger, KPI table), four prompt families, deterministic conversation UUID logic, and LocalStack health probes. Task 02 must implement fixtures/helpers that match those specs (including conversation bootstrap helper); update this file + checklist if you add/remove documents or prompt categories.

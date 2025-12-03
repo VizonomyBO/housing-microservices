@@ -9,7 +9,7 @@ _Automated loop available:_ `./run_epic_loop.sh --epic epic-reduced-e2e` re-read
 ## Important
 > Since the new code you'll write will be located at `services/agent-api/scripts/`, create a new uv venv with python 3.13 and manage all dependencies for the scripts there in all the tasks of this checklist.
 
-1. - [ ] [Task 01 — Reduced Stack E2E Test Plan](tasks/task-01-reduced-e2e-plan.md)
+1. - [x] [Task 01 — Reduced Stack E2E Test Plan](tasks/task-01-reduced-e2e-plan.md) *(2025-12-03: Auth+doc scenario plan documented in `docs/testing/reduced_e2e_smoke_plan.md`; follow that spec before tackling Task 02.)*
 2. - [ ] [Task 02 — Scenario Fixtures & Helper Modules](tasks/task-02-fixtures-and-helpers.md)
 3. - [ ] [Task 03 — Reduced E2E CLI Automation](tasks/task-03-e2e-cli.md)
 4. - [ ] [Task 04 — Compose Wrapper & CI Integration](tasks/task-04-compose-wrapper.md)
