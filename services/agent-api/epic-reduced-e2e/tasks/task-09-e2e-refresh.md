@@ -44,3 +44,5 @@ Update the reduced E2E automation (code + docs) to exclusively use public HTTP e
 ## Handoff Notes
 - If further improvements (e.g., UI scaffolding) are needed, document them here for future epics.
 - Call out any new environment variables or flags introduced while removing the DB bootstrapper.
+- Demo reset endpoints require a known conversation ID today, so the CLI still creates/reuses the deterministic conversation via HTTP before invoking `/v1/demo/reset-conversation`. Revisit this order only if the API adds a user-scoped reset payload.
+- `REDUCED_E2E_RESEED_DOCS` and `REDUCED_E2E_CLEANUP_ONLY` env vars mirror the Typer flags so CI/Make wrappers can toggle demo cleanup without editing command lines.

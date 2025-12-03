@@ -37,6 +37,8 @@ cd services/agent-api
 ```
 This wraps `docker compose --profile reduced config` for linting and executes `pytest -k reduced_scope_smoke` to ensure demo endpoints stay healthy.
 
+> Heads-up: the reduced smoke CLI now provisions conversations/resets demo data exclusively via HTTP (`/v1/conversations`, `/v1/demo/*`). You no longer need to expose `DATABASE_URL` to the CLI; instead toggle cleanup stages with `REDUCED_E2E_RESEED_DOCS=1` or `REDUCED_E2E_CLEANUP_ONLY=1` when invoking the wrapper/Make target.
+
 ## 4. Interacting With the Stack
 | Action | Command / URL |
 | --- | --- |

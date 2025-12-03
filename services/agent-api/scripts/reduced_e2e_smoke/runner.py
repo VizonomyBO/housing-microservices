@@ -52,7 +52,6 @@ class SmokeRunConfig:
     tags: tuple[str, ...] = ("reduced_e2e", "demo")
     timeout_seconds: float = 30.0
     stream_capabilities: set[str] = field(default_factory=lambda: {"cross_doc_reasoning"})
-    database_url: str | None = None
     localstack_url: str | None = None
     skip_pillars: bool = False
     conversation_provider: ConversationBootstrapper | None = None

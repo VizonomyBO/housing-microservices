@@ -3,7 +3,7 @@
 This guide describes how to run the reduced-profile end-to-end smoke automation that ships with Epic 3.5. Pair it with the scenario plan in `docs/testing/reduced_e2e_smoke_plan.md` whenever you need deeper context on fixtures, prompts, and validation criteria.
 
 ## Overview
-- **Purpose**: Verify that registration, authentication, deterministic conversation bootstrap, document ingestion, attachment, prompt validation, pillars, and LocalStack health checks all succeed when the stack runs with `STACK_PROFILE=reduced`.
+- **Purpose**: Verify that registration, authentication, deterministic HTTP conversation bootstrap, document ingestion, attachment, prompt validation, pillars, and LocalStack health checks all succeed when the stack runs with `STACK_PROFILE=reduced` (no direct DB writes from the CLI).
 - **Entrypoints**: Typer CLI (`scripts/run_reduced_e2e_smoke.py`) and the Compose wrapper (`scripts/run_reduced_e2e_compose.sh`, surfaced as `make reduced-e2e-smoke`).
 - **Outputs**: Structured JSON summary at `services/agent-api/logs/reduced_e2e_smoke.json` (or `/app/logs/reduced_e2e_smoke.json` when running inside the container) plus mirrored console output in `services/agent-api/logs/task_04/codex.log` when using the wrapper.
 - **Inventory checkpoints**: The CLI now surfaces `/v1/conversations` and `/v1/documents` listings before and after uploads so you can prove that document counts and hashes match what the API exposes (no manual SQL needed).
@@ -17,7 +17,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    touch .env.local && chmod 600 .env.local  # optional developer overrides
    ```
    - Define `STACK_PROFILE=reduced`, `COMPOSE_PROFILES=reduced`, `SERVICE_MODE=reduced`, and `USE_LOCALSTACK=1` (default) for the smoke workflow.
-   - Provide connection strings required by the CLI (`DATABASE_URL=postgresql+asyncpg://agent_api:...@localhost:5432/agent_reduced`).
+   - No direct database connection is required for the smoke CLI anymore; all bootstrap/reset steps use public HTTP endpoints.
 3. **LocalStack vs AWS**:
    - When `USE_LOCALSTACK=1`, export `AWS_ENDPOINT_URL=http://localhost.localstack.cloud:4566` so the automation validates mock AWS endpoints.
    - When targeting AWS, set `USE_LOCALSTACK=0`, clear `AWS_ENDPOINT_URL`, and supply `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` via `.env.local`.
@@ -47,7 +47,6 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    ```bash
    cd services/agent-api
    uv run python scripts/run_reduced_e2e_smoke.py run \
-     --database-url "$DATABASE_URL" \
      --localstack-url "${AWS_ENDPOINT_URL:-http://localhost.localstack.cloud:4566}" \
      --report-path logs/reduced_e2e_smoke.json \
      --reseed-docs
@@ -72,11 +71,13 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    | `ARGS="--timeout-seconds 60 --verbose-http"` | Forwards CLI flags to `scripts/run_reduced_e2e_smoke.py`. |
    | `KEEP_STACK=1` | Leaves Docker containers running for post-mortem inspection. Default tears down the stack. |
    | `FORCE_ENV_COPY=1` | Replaces `.env` with `env.example` before starting Compose (useful in CI). |
-| `MAX_HEALTH_ATTEMPTS` / `HEALTH_SLEEP_SECONDS` | Adjust health-check retries while waiting on Agent API, auth-service, user-service, and LocalStack. |
-| `CLI_REPORT_PATH=/app/logs/reduced_e2e_smoke.json` | Override report path inside the container. |
-| `ARGS="--reseed-docs"` | Forces the CLI to call the demo reset endpoints before uploading fixtures. |
-| `ARGS="--cleanup-only"` | Runs the demo cleanup endpoints and exits without executing uploads/prompts. |
-| `CLI_PYTHONPATH` | Extend module search paths if you move scripts. |
+   | `REDUCED_E2E_RESEED_DOCS=1` | Forces the CLI to call demo reset + purge endpoints before uploads without passing extra CLI flags. |
+   | `REDUCED_E2E_CLEANUP_ONLY=1` | Runs the HTTP cleanup stages and exits before uploads/prompts (mirrors `--cleanup-only`). |
+   | `MAX_HEALTH_ATTEMPTS` / `HEALTH_SLEEP_SECONDS` | Adjust health-check retries while waiting on Agent API, auth-service, user-service, and LocalStack. |
+   | `CLI_REPORT_PATH=/app/logs/reduced_e2e_smoke.json` | Override report path inside the container. |
+   | `ARGS="--reseed-docs"` | Forces the CLI to call the demo reset endpoints before uploading fixtures. |
+   | `ARGS="--cleanup-only"` | Runs the demo cleanup endpoints and exits without executing uploads/prompts. |
+   | `CLI_PYTHONPATH` | Extend module search paths if you move scripts. |
 3. Logs stream to `services/agent-api/logs/task_04/codex.log`. Use `tail -f services/agent-api/logs/task_04/codex.log` for live triage.
 4. Wrapper behavior recap:
    - Copies `.env` (unless already present or `FORCE_ENV_COPY` toggled).
@@ -102,7 +103,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 | Symptom | Suggested Action |
 | --- | --- |
 | `register` stage fails with 409 | Previous run already seeded the demo email. Use a new `REDUCED_E2E_EMAIL` **or** run the CLI with `--reseed-docs` / `--cleanup-only` to invoke `/v1/demo/reset-conversation` + `/v1/demo/purge-documents` before uploads—no DB tear-down required. |
-| CLI exits complaining about `DATABASE_URL` | Ensure `.env` defines `DATABASE_URL` or pass `--database-url postgresql+asyncpg://...`. The conversation bootstrapper requires direct DB access even when HTTP endpoints succeed. |
+| CLI re-runs hit dedupe failures | Export `REDUCED_E2E_RESEED_DOCS=1` (or pass `--reseed-docs`) so the HTTP demo reset + purge endpoints run before uploads; combine with `REDUCED_E2E_CLEANUP_ONLY=1` when you just want cleanup. |
 | LocalStack stage times out | Confirm `USE_LOCALSTACK=1`, port 4566 is free, and `AWS_ENDPOINT_URL` matches `http://localhost.localstack.cloud:4566`. Increase `MAX_HEALTH_ATTEMPTS`/`HEALTH_SLEEP_SECONDS` for slow hosts. |
 | Attachments missing after uploads | Inspect `logs/reduced_e2e_smoke.json` for the `attach_documents` metadata. If dedupe prevented uploads, delete existing attachments via the Agent API or rerun with a fresh conversation UUID. |
 | Pillar validation flakes | Temporarily pass `--skip-pillars` (or `ARGS="--skip-pillars"`) while investigating. Capture failures in `logs/task_04/codex.log` and update validators only after confirming backend changes. |

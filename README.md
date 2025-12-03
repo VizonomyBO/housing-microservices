@@ -141,7 +141,7 @@ Use this workflow when you need the full stack with production-like settings, re
 
 4. **Run smoke/validation hooks**
    - Execute `make reduced-e2e-smoke` from the repo root to run the reduced-profile automation against the same secrets before rolling out changes. Override `KEEP_STACK=1` if you want the reduced stack to stay up for debugging.
-   - For full-stack-only checks, run `docker compose --profile full exec agent-api uv run python scripts/run_reduced_e2e_smoke.py run --database-url "$DATABASE_URL" --report-path /app/logs/reduced_e2e_smoke.json` so the CLI interacts with live services without tearing them down.
+   - For full-stack-only checks, run `docker compose --profile full exec agent-api uv run python scripts/run_reduced_e2e_smoke.py run --report-path /app/logs/reduced_e2e_smoke.json` so the CLI interacts with live services without tearing them down.
    - See `docs/testing/reduced_e2e_smoke.md` for detailed CLI/Make usage and troubleshooting tips.
 
 5. **Handoff reminders**

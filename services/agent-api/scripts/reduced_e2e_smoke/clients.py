@@ -542,8 +542,12 @@ __all__ = [
     "fetch_conversation",
     "fetch_pillars",
     "list_attachments",
+    "list_conversations",
+    "list_documents",
     "login_user",
     "probe_localstack",
+    "purge_demo_documents",
     "register_user",
+    "reset_demo_conversation",
     "upload_document",
 ]

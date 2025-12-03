@@ -16,7 +16,7 @@
 |---|--------|--------------------|----------------------|------------|
 | 1 | Register Ava | `POST auth-service /v1/auth/register` | Auth microservice + data layer | 201 status, response includes `user.id`, `country_code=USA`. |
 | 2 | Login Ava | `POST /v1/auth/login` | JWT issuance, refresh cookies | 200 status, capture `access_token`, `refresh_token`. |
-| 3 | Bootstrap conversation | `POST /v1/conversations` reuses the deterministic `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` slug (the smoke CLI now calls HTTP by default; the legacy DB helper only runs when explicitly overridden). | Agent API + shared data layer | Conversation row exists before attachments to avoid 404; response payload seeds downstream steps. |
+| 3 | Bootstrap conversation | `POST /v1/conversations` reuses the deterministic `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` slug (the smoke CLI always boots via HTTP; there is no DB fallback). | Agent API + shared data layer | Conversation row exists before attachments to avoid 404; response payload seeds downstream steps. |
 | 3b | List existing conversations | `GET /v1/conversations` (page + tag filters) | Agent API pagination + reduced-scope metadata | Response includes the deterministic conversation with `document_count=0` before uploads; the CLI now fails fast if the listing misses the expected ID. |
 | 4 | Upload Policy Memo | `POST /v1/documents/upload` (Document A) | Markdown ingestion, dedupe hashing | 201 status, `status=COMPLETED`, `content_hash` matches fixture. |
 | 5 | Upload Ledger | `POST /v1/documents/upload` (Document B) | Numerical data ingestion | 201 status, chunk created, message includes ingestion metadata. |
@@ -62,7 +62,7 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
 2. **Modules** (to be introduced in Tasks 02–03):
    - `reduced_e2e_fixtures.py`: loads markdown + scenario manifest, computes SHA-256 hashes for dedupe, exposes dataclasses for documents/prompts.
    - `reduced_e2e_client.py`: wraps `httpx.AsyncClient` for auth + Agent API calls, handling retries, structured logging, and paginated list helpers for `/v1/conversations` + `/v1/documents`.
-   - `conversation_bootstrap.py`: uses shared data layer session (via `uv` + `.venv`) to upsert the deterministic conversation row for the authenticated user. This avoids creating bespoke HTTP endpoints solely for tests.
+   - `conversation_bootstrap.py`: wraps the public `/v1/conversations` endpoint via `httpx` to ensure we always provision or reuse conversations through HTTP (no direct database access in the CLI).
    - `localstack_probe.py`: polls `/_localstack/health` and optional `awslocal s3 ls` to confirm buckets once we start persisting artifacts. [LocalStack internal endpoints](https://docs.localstack.cloud/references/internal-endpoints/).
 3. **Configuration**:
    - **Environment**: script reads `.env` (same as compose), honoring `AUTH_SERVICE_PORT`, `AGENT_API_PORT`, `LOCALSTACK_EDGE_PORT`, `AWS_ENDPOINT_URL`, `STACK_PROFILE`.
@@ -116,7 +116,7 @@ jobs:
 This job mirrors the local workflow and can be embedded in a larger pipeline when Task 05 expands documentation.
 
 ## Risks & Follow-ups
-1. **Conversation lifecycle**: No public HTTP endpoint provisions conversations today. Task 02 must ship a helper that creates one via shared data layer. If a public API later appears, update this plan + checklist immediately so Task 03 swaps helpers for HTTP calls.
+1. **Conversation lifecycle**: The automation now depends entirely on `/v1/conversations` for provisioning. If that contract changes (fields, auth scopes, rate limits), update both the client helper and this plan immediately so downstream tasks do not regress to DB shortcuts.
 2. **LLM nondeterminism**: Prompts rely on textual heuristics (keywords, numeric sums). Keep tolerances loose (e.g., decimal comparisons) and assert on structured citation metadata rather than full strings.
 3. **LocalStack drift**: Endpoint hostnames/ports occasionally change (see LocalStack networking guidance). Keep `AWS_ENDPOINT_URL` defaulted and document overrides; update plan if LocalStack v5 introduces breaking DNS changes.
 4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. The CLI now exposes `--reseed-docs` / `--cleanup-only` flags that call `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` before uploads so operators never need direct DB access, and it double-checks the cleanup by asserting that `/v1/conversations` returns `document_count=0` prior to reseeding.

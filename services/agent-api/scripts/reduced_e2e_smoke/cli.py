@@ -9,7 +9,9 @@ import typer
 
 from .runner import SmokeRunConfig, run_smoke
 
-app = typer.Typer(help="Run the reduced-profile end-to-end smoke test via HTTP APIs.")
+app = typer.Typer(
+    help="Run the reduced-profile end-to-end smoke test via HTTP APIs (no DB access)."
+)
 
 AUTH_BASE_URL_OPTION = typer.Option(
     "http://localhost:5001",
@@ -21,12 +23,6 @@ AGENT_BASE_URL_OPTION = typer.Option(
     "http://localhost:8000",
     envvar="AGENT_API_URL",
     help="Base URL for the Agent API service",
-)
-
-DATABASE_URL_OPTION = typer.Option(
-    None,
-    envvar="DATABASE_URL",
-    help="Async SQLAlchemy DATABASE_URL used for conversation bootstrap",
 )
 
 LOCALSTACK_URL_OPTION = typer.Option(
@@ -90,17 +86,23 @@ STREAM_CAPABILITY_OPTION = typer.Option(
 
 TIMEOUT_OPTION = typer.Option(30.0, help="HTTP client timeout in seconds")
 
-SKIP_PILLARS_OPTION = typer.Option(False, help="Skip the pillars endpoint validation")
+SKIP_PILLARS_OPTION = typer.Option(
+    False,
+    envvar="REDUCED_E2E_SKIP_PILLARS",
+    help="Skip the pillars endpoint validation",
+)
 
 RESEED_DOCS_OPTION = typer.Option(
     False,
     "--reseed-docs",
+    envvar="REDUCED_E2E_RESEED_DOCS",
     help="Call the demo reset endpoints before uploading fixtures to avoid dedupe",
 )
 
 CLEANUP_ONLY_OPTION = typer.Option(
     False,
     "--cleanup-only",
+    envvar="REDUCED_E2E_CLEANUP_ONLY",
     help="Run demo cleanup endpoints and exit without executing the smoke prompts",
 )
 
@@ -109,7 +111,6 @@ CLEANUP_ONLY_OPTION = typer.Option(
 def run(
     auth_base_url: str = AUTH_BASE_URL_OPTION,
     agent_base_url: str = AGENT_BASE_URL_OPTION,
-    database_url: str | None = DATABASE_URL_OPTION,
     localstack_url: str | None = LOCALSTACK_URL_OPTION,
     email: str = EMAIL_OPTION,
     username: str = USERNAME_OPTION,
@@ -141,7 +142,6 @@ def run(
         tags=("reduced_e2e", "demo"),
         timeout_seconds=timeout_seconds,
         stream_capabilities=set(stream_capability),
-        database_url=database_url,
         localstack_url=localstack_url,
         skip_pillars=skip_pillars,
         reseed_docs=reseed_docs or cleanup_only,

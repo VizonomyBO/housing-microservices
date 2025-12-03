@@ -17,14 +17,25 @@ def respx_mock():
         yield mock
 
 
-class StubConversationProvider:
-    def __init__(self, conversation_id: str = "conv-test") -> None:
-        self.conversation_id = conversation_id
-        self.calls: list[tuple[str, str]] = []
-
-    async def ensure_conversation(self, *, owner_user_id: str, country_code: str) -> str:
-        self.calls.append((owner_user_id, country_code))
-        return self.conversation_id
+def _assert_endpoint_subsequence(respx_mock: respx.Router, expected: list[tuple[str, str]]) -> None:
+    observed = [(call.request.method, str(call.request.url)) for call in respx_mock.calls]
+    last_index = -1
+    for method, suffix in expected:
+        try:
+            index = next(
+                i
+                for i, (observed_method, url) in enumerate(observed)
+                if url.endswith(suffix) and observed_method == method
+            )
+        except StopIteration as exc:  # pragma: no cover - assertion helper
+            raise AssertionError(
+                f"Expected {method} call ending with {suffix!r} was not observed"
+            ) from exc
+        if index <= last_index:
+            raise AssertionError(
+                f"Call ending with {suffix!r} occurred out of order (index {index} <= {last_index})"
+            )
+        last_index = index
 
 
 def _mock_success_flows(
@@ -36,6 +47,7 @@ def _mock_success_flows(
     conversation_id: str,
     include_demo_cleanup: bool = False,
     skip_main_flow: bool = False,
+    localstack_url: str | None = None,
 ) -> None:
     document_fixtures = fixtures.documents()
     respx_mock.post("http://auth.test/v1/auth/register").mock(
@@ -263,6 +275,11 @@ def _mock_success_flows(
     if skip_main_flow:
         return
 
+    if localstack_url:
+        respx_mock.get(f"{localstack_url}/_localstack/health").mock(
+            return_value=httpx.Response(200, json={"status": "running"})
+        )
+
 
 def _prompt_answers(failing: bool = False) -> dict[str, str]:
     answers = {
@@ -288,6 +305,7 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         doc_ids=doc_ids,
         prompt_answers=_prompt_answers(),
         conversation_id="conv-test",
+        localstack_url="http://localstack.test",
     )
 
     config = SmokeRunConfig(
@@ -301,9 +319,9 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         last_name="Rivera",
         country_code="USA",
         language="en",
-        conversation_provider=StubConversationProvider(),
         stream_capabilities={"cross_doc_reasoning"},
         skip_pillars=False,
+        localstack_url="http://localstack.test",
     )
     summary = await run_smoke(config)
 
@@ -311,6 +329,17 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
     assert summary.prompts
     assert all(result.success for result in summary.prompts)
     assert config.report_path.exists()
+    _assert_endpoint_subsequence(
+        respx_mock,
+        [
+            ("POST", "/v1/conversations"),
+            ("POST", "/v1/documents/upload"),
+            ("POST", "/v1/conversations/conv-test/attachments"),
+            ("POST", "/v1/chat"),
+            ("GET", "/v1/conversations/conv-test/pillars"),
+            ("GET", "/_localstack/health"),
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -338,7 +367,6 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
         last_name="Rivera",
         country_code="USA",
         language="en",
-        conversation_provider=StubConversationProvider(),
         stream_capabilities={"cross_doc_reasoning"},
         skip_pillars=True,
     )
@@ -419,6 +447,7 @@ async def test_run_smoke_reseed_triggers_demo_endpoints(
         prompt_answers=_prompt_answers(),
         conversation_id=conversation_id,
         include_demo_cleanup=True,
+        localstack_url="http://localstack.test",
     )
 
     config = SmokeRunConfig(
@@ -434,13 +463,24 @@ async def test_run_smoke_reseed_triggers_demo_endpoints(
         language="en",
         reseed_docs=True,
         stream_capabilities={"cross_doc_reasoning"},
+        localstack_url="http://localstack.test",
     )
     summary = await run_smoke(config)
 
     assert summary.success is True
-    paths = [call.request.url.path for call in respx_mock.calls]
-    assert any(path.endswith("/v1/demo/reset-conversation") for path in paths)
-    assert any(path.endswith("/v1/demo/purge-documents") for path in paths)
+    _assert_endpoint_subsequence(
+        respx_mock,
+        [
+            ("POST", "/v1/conversations"),
+            ("POST", "/v1/demo/reset-conversation"),
+            ("POST", "/v1/demo/purge-documents"),
+            ("POST", "/v1/documents/upload"),
+            ("POST", f"/v1/conversations/{conversation_id}/attachments"),
+            ("POST", "/v1/chat"),
+            ("GET", f"/v1/conversations/{conversation_id}/pillars"),
+            ("GET", "/_localstack/health"),
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -459,6 +499,7 @@ async def test_run_smoke_cleanup_only_skips_uploads(
         prompt_answers=_prompt_answers(),
         conversation_id=conversation_id,
         include_demo_cleanup=True,
+        skip_main_flow=True,
     )
 
     config = SmokeRunConfig(
