@@ -50,3 +50,4 @@ Expose authenticated HTTP endpoints for creating and fetching reduced-scope conv
 ## Handoff Notes
 - If you discover additional fields needed by the frontend (e.g., last message timestamp), document them here so Task 07/08 can incorporate them.
 - Keep the deterministic namespace behavior because downstream scripts rely on stable IDs; note any intentional deviations in the checklist.
+- POST/GET `/v1/conversations` now surface `namespace`, `tags`, and `created` flags. The smoke CLI defaults to the HTTP bootstrapper (`HttpConversationBootstrapper`) but still exposes the DB helper for explicit overrides. Future tasks (07–09) should reuse the HTTP client helpers in `scripts/reduced_e2e_smoke/clients.py` instead of importing shared_data_layer directly.

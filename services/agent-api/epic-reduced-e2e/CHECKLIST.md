@@ -14,7 +14,11 @@ _Automated loop available:_ `./run_epic_loop.sh --epic epic-reduced-e2e` re-read
 3. - [x] [Task 03 — Reduced E2E CLI Automation](tasks/task-03-e2e-cli.md) *(2025-12-03: Added `scripts/reduced_e2e_smoke/` package, Typer CLI shim `scripts/run_reduced_e2e_smoke.py`, and mocked tests in `tests/scripts/test_run_reduced_e2e_smoke.py`; next task can call the CLI via Compose wrapper.)*
 4. - [x] [Task 04 — Compose Wrapper & CI Integration](tasks/task-04-compose-wrapper.md) *(2025-12-03: Added `scripts/run_reduced_e2e_compose.sh`, new `make reduced-e2e-smoke` target, README + testing plan updates, and CI snippet. Task 05 should expand docs/troubleshooting based on wrapper behavior.)*
 5. - [x] [Task 05 — Documentation & Production Compose Guide](tasks/task-05-docs-and-prod.md) *(2025-12-03: Authored `docs/testing/reduced_e2e_smoke.md`, added production-mode guidance to `README.md`, cross-linked runbooks, and captured wrapper/env knobs. Future doc changes must update both the plan and execution guides.)*
-6. - [ ] [Task 06 — Conversation Lifecycle HTTP Endpoint](tasks/task-06-conversation-endpoint.md)
-7. - [ ] [Task 07 — Demo Reset & Data Hygiene Endpoints](tasks/task-07-demo-reset-endpoints.md)
-8. - [ ] [Task 08 — Conversation & Document Utility Endpoints](tasks/task-08-utility-endpoints.md)
-9. - [ ] [Task 09 — E2E Automation Refresh (HTTP-only)](tasks/task-09-e2e-refresh.md)
+6. - [x] [Task 06 — Conversation Lifecycle HTTP Endpoint](tasks/task-06-conversation-endpoint.md) *(2025-12-03: Added `/v1/conversations` POST/GET endpoints, conversation service/tests, and updated the smoke CLI + docs to bootstrap via HTTP. Task 07 can build demo reset endpoints on top of this contract.)*
+7. - [x] [Task 07 — Demo Reset & Data Hygiene Endpoints](tasks/task-07-demo-reset-endpoints.md) *(2025-12-03: Added `/v1/demo/reset-conversation` + `/v1/demo/purge-documents`, demo cleanup CLI hooks, docs/tests, and checklist updates.)*
+8. - [x] [Task 08 — Conversation & Document Utility Endpoints](tasks/task-08-utility-endpoints.md) *(2025-12-03: Added `/v1/conversations` list + summary routes, `/v1/documents` list route, CLI inventory stages, docs updates, and tests covering pagination/filters so downstream UI/CLI work can rely on API listings instead of DB peeks.)*
+9. - [x] [Task 09 — E2E Automation Refresh (HTTP-only)](tasks/task-09-e2e-refresh.md) *(2025-12-03: Smoke CLI now runs entirely via HTTP, database bootstrapper removed, new env toggles `REDUCED_E2E_RESEED_DOCS`/`REDUCED_E2E_CLEANUP_ONLY`, docs/tests updated for reset→upload verification.)*
+10. - [ ] [Task 10 — Real Tooling Mode & Env Hardening](tasks/task-10-real-tooling-mode.md)
+11. - [ ] [Task 11 — LangGraph Runner & Full Ingestion Integration](tasks/task-11-langgraph-runner-integration.md)
+12. - [ ] [Task 12 — Real-Tools Smoke Automation & Verification](tasks/task-12-real-tools-smoke.md)
+13. - [ ] [Task 13 — Auth & Service Parity](tasks/task-13-auth-and-service-parity.md)

@@ -46,3 +46,6 @@ Provide HTTP endpoints that allow CI and local operators to reset demo data safe
 ## Handoff Notes
 - If future tasks need broader admin powers (e.g., cross-user purge), note the required safeguards (role checks, feature flags) here.
 - Document any assumptions about fixture hashes so Task 09+ can keep them in sync.
+- Task 06 shipped `/v1/conversations` plus HTTP bootstrap helpers; reuse the existing `create_conversation` client + `HttpConversationBootstrapper` when wiring reset flows so we don’t regress to direct DB writes.
+- `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` currently scope to the authenticated user + deterministic reduced-e2e conversation; expanding to multi-user or bulk purges must layer additional auth/flag checks.
+- The smoke CLI’s `--reseed-docs` flag runs by default inside this task’s examples, and `--cleanup-only` skips uploads entirely—ensure downstream automation references those flags instead of direct DB operations.

@@ -2,6 +2,14 @@
 
 This is the canonical playbook for all agents working inside `services/agent-api`. Follow it exactly so every fresh session can deliver predictable, production-grade results.
 
+## Golden Rules
+
+1. **No runtime stubs in smoke/e2e flows.** All automation (manual or via compose) must call the real services/endpoints unless explicitly carved out below. The only sanctioned temporary exceptions are Valkey/cache wiring (until Task 16 in Epic 03 finishes) and the image/table ingestion features that remain disabled in reduced scope. Everything else—LangGraph chat, ingestion, auth, AWS clients—must talk to the real implementation.
+2. **Unit tests can patch/mocks as needed, but production code cannot.** If you have to isolate an external API for testing, patch the client in the test fixture; never introduce “temporary” stubs in the runtime path.
+3. **Document stub removals.** Whenever you delete a stub or shortcut, update the relevant docs/runbooks so future agents know the real dependency is required.
+
+Violations of these rules cause the exact regressions we’re trying to eliminate (smoke tests that silently short-circuit). Treat them as hard blockers during review.
+
 - ✅ **Service status**: Reduced Scope MVP (Epic 3.5) for the LangGraph gateway. `/v1/chat`, document uploads, pillar endpoints, and auth fallbacks must run in text-only, no-Valkey mode while preserving the full architecture behind flags.
 - 🐍 **Runtime**: Python 3.13 managed by `uv` (virtual env lives at `services/agent-api/.venv`).
 - 📚 **Source of truth**: Epic task directories inside `services/agent-api` (currently `epic-035`, `epic-root-compose`, `epic-reduced-e2e`). Always work from the task doc + checklist for the epic you were assigned.

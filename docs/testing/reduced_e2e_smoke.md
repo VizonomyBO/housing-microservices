@@ -8,6 +8,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Outputs**: Structured JSON summary at `services/agent-api/logs/reduced_e2e_smoke.json` (or `/app/logs/reduced_e2e_smoke.json` when running inside the container) plus mirrored console output in `services/agent-api/logs/task_04/codex.log` when using the wrapper.
 - **Inventory checkpoints**: The CLI now surfaces `/v1/conversations` and `/v1/documents` listings before and after uploads so you can prove that document counts and hashes match what the API exposes (no manual SQL needed).
 - **When to update**: Any time fixtures, prompts, scripts, or Compose profiles change, update this guide, the scenario plan, and `epic-reduced-e2e/CHECKLIST.md` before handing the work off.
+- **No stubs**: Smoke/e2e runs must exercise the real LangGraph runner, ingestion pipeline, and external APIs. The only temporary exceptions are Valkey/cache wiring and image/table ingestion, and unit tests may use patches. If a run reports reduced-scope stubs or fake services, treat it as a failure.
 
 ## Prerequisites
 1. **Tooling**: Docker 25.x with Compose V2 (`docker compose`), Git, a POSIX-compatible shell, and [uv](https://github.com/astral-sh/uv) (Python 3.13) for running the CLI.
