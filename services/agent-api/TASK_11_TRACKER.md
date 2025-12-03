@@ -1,17 +1,19 @@
 # Task 11 Tracker — LangGraph Runner & Ingestion Integration
 
-- [x] Step 1: Re-review LangGraph state/subgraphs, ingestion helpers, and shared data layer modules; document reusable pieces.
-- [ ] Step 2: Identify/extract chunking + Voyage embedding helpers; implement clients with retry/backoff + telemetry.
-- [ ] Step 3: Implement `LangGraphChatRunner` with SSE streaming + structured error handling.
-- [ ] Step 4: Replace reduced ingestion shortcuts with the real pipeline when `use_real_tools` is true; keep text-only fallback.
-- [ ] Step 5: Update pillar generation / `ReducedScopeWorkerRuntime` to draw from persisted chunks/vectors.
-- [ ] Step 6: Wire runner + ingestion into app startup, removing `UnconfiguredChatRunner` from runtime paths and adding diagnostics logs.
-- [ ] Step 7: Expand tests covering runner, ingestion flow, telemetry, and flag fallback.
+(Tracker created 2025-12-03 immediately after plan auto-approval. Update after each sub-step; delete when task exits review.)
+
+## Checklist
+- [x] Step 1: Re-read epic docs & catalog existing LangGraph / ingestion components.
+- [ ] Step 2: Design client + ingestion interfaces (OpenAI, Voyage, chunker, telemetry) and decide on shared helper extraction.
+- [ ] Step 3: Implement `LangGraphChatRunner` with SSE streaming + retries and tests.
+- [ ] Step 4: Replace reduced ingestion shortcut with production pipeline gated by `use_real_tools`.
+- [ ] Step 5: Update reduced-scope runtime & pillars to consume stored chunks/vectors.
+- [ ] Step 6: Wire runner + ingestion into startup with diagnostics + fallback behavior.
+- [ ] Step 7: Expand automated tests for runner, ingestion, flag fallback, telemetry, and rate limits.
 - [ ] Step 8: Run QA suite (`uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto`).
 - [ ] Step 9: Update docs/checklists + handoff notes, then delete plan & tracker.
 
-> Tracker created 2025-12-03 immediately after plan auto-approval; update notes below as work proceeds.
->
-> 2025-12-03: Step 1 complete. Repo review confirmed there is still no LangGraph runner (`ChatRunnerProtocol` only backed by `UnconfiguredChatRunner` in `src/agent_api/http/streaming.py`), no answer composer implementations, and no ingestion pipeline that calls Voyage/OpenAI. Starting Step 2 is blocked until those foundational dependencies exist.
->
-> 2025-12-03: Step 2 Scope Check — still blocked. Repository lacks any Voyage/OpenAI clients or chunking helpers; `pyproject.toml` has no `langgraph`, `openai`, or `voyageai` dependency, and `packages/shared_data_layer` exposes only ORM models (no ingestion utilities). Implementing runners/clients would require designing entirely new infrastructure, which is out of scope for Task 11 without upstream specs.
+## Notes
+- 2025-12-03 10:05 PT — Tracker reset to align with new plan after verifying earlier attempt stalled pre-implementation.
+- 2025-12-03 10:20 PT — Finished inventory: repo still lacks LangGraph graph definitions, ingestion helpers, or model clients; `pyproject.toml` has no `langgraph`, `openai`, or `voyageai` deps, and DocumentUploadService only stores text chunks with no embeddings.
+- 2025-12-03 10:35 PT — Step 2 blocked: no shared ingestion helpers exist in repo or shared_data_layer, and epic docs reference `ArchaaS/lambdas/embedding_writer` code that is not present in this monorepo, so there is nothing to extract or reuse for chunking/Voyage embedding.
