@@ -1,14 +1,15 @@
 # Task 11 Tracker — LangGraph Runner & Ingestion Integration
 
-- [x] Step 1: Context review of LangGraph state/subgraphs, DocumentUploadService, ReducedScopeWorkerRuntime, ingestion helpers. ✅ Reviewed `src/agent_api/http/streaming.py`, LangGraph node modules, ingestion docs, ArchaaS `embedding_writer`, and shared data layer models to map current reduced-mode shortcuts.
-- [ ] Step 2: Extract or implement shared ingestion helpers (chunking, Voyage embeddings, pgvector persistence) inside this service while reusing shared data layer repos.
-- [ ] Step 3: Implement LangGraphChatRunner with client wiring, SSE streaming, retries, and telemetry hooks.
-- [ ] Step 4: Replace reduced ingestion shortcuts with full pipeline in DocumentUploadService/CLI, gated by `use_real_tools` flag.
-- [ ] Step 5: Wire runner + ingestion into app startup and pillar generation, removing `UnconfiguredChatRunner` from real runtime paths.
-- [ ] Step 6: Add/extend tests for runner, ingestion flow, flag fallback, telemetry.^
-- [ ] Step 7: Run QA suite (`uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto`).
-- [ ] Step 8: Update docs/checklists, add handoff notes, delete plan + tracker.
+- [x] Step 1: Re-review LangGraph state/subgraphs, ingestion helpers, and shared data layer modules; document reusable pieces.
+- [ ] Step 2: Identify/extract chunking + Voyage embedding helpers; implement clients with retry/backoff + telemetry.
+- [ ] Step 3: Implement `LangGraphChatRunner` with SSE streaming + structured error handling.
+- [ ] Step 4: Replace reduced ingestion shortcuts with the real pipeline when `use_real_tools` is true; keep text-only fallback.
+- [ ] Step 5: Update pillar generation / `ReducedScopeWorkerRuntime` to draw from persisted chunks/vectors.
+- [ ] Step 6: Wire runner + ingestion into app startup, removing `UnconfiguredChatRunner` from runtime paths and adding diagnostics logs.
+- [ ] Step 7: Expand tests covering runner, ingestion flow, telemetry, and flag fallback.
+- [ ] Step 8: Run QA suite (`uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto`).
+- [ ] Step 9: Update docs/checklists + handoff notes, then delete plan & tracker.
 
-> Tracker initialized 2025-12-03 immediately after plan auto-approval.
-
-> 2025-12-03 update: Step 2+ blocked because the repo lacks any LangGraph builder, LLM client implementations (AnswerComposer, Voyage reranker, OpenAI wrappers), or ingestion pipeline code to reuse. Implementing them would require creating entirely new subsystems with no existing design references beyond high-level docs.
+> Tracker created 2025-12-03 immediately after plan auto-approval; update notes below as work proceeds.
+>
+> 2025-12-03: Step 1 complete. Repo review confirmed there is still no LangGraph runner (`ChatRunnerProtocol` only backed by `UnconfiguredChatRunner` in `src/agent_api/http/streaming.py`), no answer composer implementations, and no ingestion pipeline that calls Voyage/OpenAI. Starting Step 2 is blocked until those foundational dependencies exist.
