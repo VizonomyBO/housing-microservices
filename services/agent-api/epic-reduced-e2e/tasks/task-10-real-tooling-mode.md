@@ -47,3 +47,5 @@ Introduce an explicit “real tooling” mode that keeps AWS mocked via LocalSta
 ## Handoff Notes
 - Subsequent tasks wire the actual LangGraph runner + smoke CLI verification for real mode; record any follow-ups (e.g., metrics gaps, service restarts) discovered during this task.
 - Call out any remaining assumptions about single-tenant secrets so later epics can expand credential management if needed.
+- `REDUCED_SCOPE_USE_REAL_TOOLS` now flips all reduced-scope shims plus enforces `OPENAI_API_KEY` + `VOYAGE_API_KEY`. Task 11 should consume the new `Settings.openai_api_key`/`voyage_api_key` fields and ensure LangGraph + ingestion switch to the full pipeline when `use_real_tools` is `True`.
+- Compose wrapper + smoke CLI expose `REAL_REDUCED_E2E_TOOLS` / `--use-real-tools`. Task 12 must honor these surfaces when adding verification so CI can fail if the backend stays in text-only mode.

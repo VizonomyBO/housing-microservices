@@ -51,3 +51,37 @@ def test_real_aws_without_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.aws_endpoint_url is None
     assert settings.aws_access_key_id is None
     assert settings.aws_secret_access_key is None
+
+
+def test_real_tooling_flips_reduced_scope_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_USE_REAL_TOOLS", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_TEXT_ONLY_CHUNKS", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_DISABLE_VALKEY", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_DISABLE_RATE_LIMITING", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("VOYAGE_API_KEY", "test-voyage")
+
+    settings = load_settings()
+
+    reduced = settings.reduced_scope
+    assert reduced.use_real_tools is True
+    assert reduced.text_only_chunks is False
+    assert reduced.disable_valkey is False
+    assert reduced.disable_rate_limiting is False
+    assert reduced.real_tooling_mode() is True
+
+
+def test_real_tooling_requires_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_USE_REAL_TOOLS", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        load_settings()
+
+    assert "OPENAI_API_KEY" in str(excinfo.value)
+    assert "VOYAGE_API_KEY" in str(excinfo.value)

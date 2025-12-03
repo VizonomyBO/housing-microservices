@@ -79,6 +79,17 @@ REPORT_PATH_OPTION = typer.Option(
     help="Path to the JSON summary report",
 )
 
+USE_REAL_TOOLS_OPTION = typer.Option(
+    False,
+    "--use-real-tools",
+    envvar="REAL_REDUCED_E2E_TOOLS",
+    is_flag=True,
+    help=(
+        "Enable when the reduced stack runs with REDUCED_SCOPE_USE_REAL_TOOLS=1 so the CLI "
+        "records that run as full-tool coverage."
+    ),
+)
+
 STREAM_CAPABILITY_OPTION = typer.Option(
     ["cross_doc_reasoning"],
     help="Prompt capabilities that should run in streaming mode",
@@ -125,6 +136,7 @@ def run(
     skip_pillars: bool = SKIP_PILLARS_OPTION,
     reseed_docs: bool = RESEED_DOCS_OPTION,
     cleanup_only: bool = CLEANUP_ONLY_OPTION,
+    use_real_tools: bool = USE_REAL_TOOLS_OPTION,
 ) -> None:
     """Execute the reduced-profile smoke workflow."""
 
@@ -146,6 +158,7 @@ def run(
         skip_pillars=skip_pillars,
         reseed_docs=reseed_docs or cleanup_only,
         cleanup_only=cleanup_only,
+        use_real_tools=use_real_tools,
     )
     summary = asyncio.run(run_smoke(config))
     raise typer.Exit(code=0 if summary.success else 1)

@@ -72,6 +72,7 @@ services:
       - "${AGENT_API_PORT:-8000}:8000"
     environment:
       SERVICE_MODE: ${SERVICE_MODE:-reduced}
+      REDUCED_SCOPE_USE_REAL_TOOLS: ${REDUCED_SCOPE_USE_REAL_TOOLS:-0}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
       USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
       LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}

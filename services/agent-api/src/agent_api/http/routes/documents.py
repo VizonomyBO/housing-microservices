@@ -58,9 +58,7 @@ async def list_documents(  # pragma: no cover - exercised via HTTP tests
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     page: Annotated[int, Query(ge=1, le=1000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-    tags: Annotated[
-        list[str] | None, Query(description="Filter by tag (all must match)")
-    ] = None,
+    tags: Annotated[list[str] | None, Query(description="Filter by tag (all must match)")] = None,
     content_hash: Annotated[
         list[str] | None,
         Query(description="Filter by SHA-256 content hash"),

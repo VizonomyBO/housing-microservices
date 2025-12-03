@@ -4,7 +4,7 @@ This is the canonical playbook for all agents working inside `services/agent-api
 
 ## Golden Rules
 
-1. **No runtime stubs in smoke/e2e flows.** All automation (manual or via compose) must call the real services/endpoints unless explicitly carved out below. The only sanctioned temporary exceptions are Valkey/cache wiring (until Task 16 in Epic 03 finishes) and the image/table ingestion features that remain disabled in reduced scope. Everything else—LangGraph chat, ingestion, auth, AWS clients—must talk to the real implementation.
+1. **No runtime stubs in smoke/e2e flows.** All automation (manual or via compose) must call the real services/endpoints unless explicitly carved out below. Flip `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or `REAL_REDUCED_E2E_TOOLS=1`/`--use-real-tools`) whenever you need to validate OpenAI/Voyage integrations; the service hard-fails on startup if those secrets are missing. The only sanctioned temporary exceptions are Valkey/cache wiring (until Task 16 in Epic 03 finishes) and the image/table ingestion features that remain disabled in reduced scope. Everything else—LangGraph chat, ingestion, auth, AWS clients—must talk to the real implementation.
 2. **Unit tests can patch/mocks as needed, but production code cannot.** If you have to isolate an external API for testing, patch the client in the test fixture; never introduce “temporary” stubs in the runtime path.
 3. **Document stub removals.** Whenever you delete a stub or shortcut, update the relevant docs/runbooks so future agents know the real dependency is required.
 

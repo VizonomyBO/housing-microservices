@@ -75,6 +75,15 @@ CLI_PYTHONPATH=${CLI_PYTHONPATH:-/app/services/agent-api:/app/services/agent-api
 ensure_env_file
 load_env_files
 
+USE_REAL_TOOLS_FLAG=${REDUCED_SCOPE_USE_REAL_TOOLS:-0}
+if [[ "${REAL_REDUCED_E2E_TOOLS:-0}" == "1" ]]; then
+  USE_REAL_TOOLS_FLAG=1
+fi
+export REDUCED_SCOPE_USE_REAL_TOOLS="$USE_REAL_TOOLS_FLAG"
+if [[ "$USE_REAL_TOOLS_FLAG" == "1" ]]; then
+  info "Real tooling mode enabled (REDUCED_SCOPE_USE_REAL_TOOLS=1)"
+fi
+
 STACK_PROFILE_VALUE=${STACK_PROFILE:-reduced}
 COMPOSE_PROFILES_VALUE=${COMPOSE_PROFILES:-reduced}
 if [[ "$COMPOSE_PROFILES_VALUE" != *reduced* ]]; then
@@ -168,9 +177,15 @@ run_cli() {
   if [[ $# -gt 0 ]]; then
     cli_args+=("$@")
   fi
+  if [[ "${USE_REAL_TOOLS_FLAG:-0}" == "1" ]]; then
+    cli_args+=(--use-real-tools)
+  fi
 
   set +e
-  compose exec "${tty_flag[@]}" agent-api env "PYTHONPATH=${CLI_PYTHONPATH}" "${cli_args[@]}"
+  compose exec "${tty_flag[@]}" agent-api env \
+    "PYTHONPATH=${CLI_PYTHONPATH}" \
+    "REAL_REDUCED_E2E_TOOLS=${USE_REAL_TOOLS_FLAG:-0}" \
+    "${cli_args[@]}"
   local cli_exit=$?
   set -e
   return "$cli_exit"

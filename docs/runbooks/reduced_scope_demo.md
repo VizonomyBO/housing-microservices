@@ -17,6 +17,7 @@ This runbook walks through the Epic 3.5 “text-only, no-Valkey” experience us
    - `COMPOSE_PROFILES=reduced` (adds the reduced profile in addition to Compose’s `default` services).
    - `SERVICE_MODE=reduced` and `REDUCED_SCOPE_*` flags should remain `1`.
    - `USE_LOCALSTACK=1` for mocked AWS endpoints (default). Set to `0` only if you have real AWS credentials.
+   - For “real tooling” runs: set `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or export `REAL_REDUCED_E2E_TOOLS=1` when using the smoke wrapper) **and** provide `OPENAI_API_KEY` + `VOYAGE_API_KEY`. The Agent API now fails fast if those secrets are missing when real mode is requested.
 3. Optional: create `.env.local` (gitignored) for developer-specific overrides and `source` it before running Compose.
 
 ## 3. Launch Sequence
@@ -38,6 +39,12 @@ cd services/agent-api
 This wraps `docker compose --profile reduced config` for linting and executes `pytest -k reduced_scope_smoke` to ensure demo endpoints stay healthy.
 
 > Heads-up: the reduced smoke CLI now provisions conversations/resets demo data exclusively via HTTP (`/v1/conversations`, `/v1/demo/*`). You no longer need to expose `DATABASE_URL` to the CLI; instead toggle cleanup stages with `REDUCED_E2E_RESEED_DOCS=1` or `REDUCED_E2E_CLEANUP_ONLY=1` when invoking the wrapper/Make target.
+
+### Real Tooling Mode Checklist
+- **When to use**: set `REDUCED_SCOPE_USE_REAL_TOOLS=1` anytime you need to validate OpenAI chat completions + Voyage embeddings inside the reduced stack (CI smoke, operator demos, etc.).
+- **Secrets**: `OPENAI_API_KEY` and `VOYAGE_API_KEY` must be present in `.env`/`.env.local`. The FastAPI app exits during startup if either secret is missing while the flag is enabled.
+- **Wrapper shortcut**: export `REAL_REDUCED_E2E_TOOLS=1 make reduced-e2e-smoke` (or pass the env var directly to `scripts/run_reduced_e2e_compose.sh`). The wrapper now propagates the flag into Docker, sets the Typer CLI’s `--use-real-tools` option, and mirrors the state via `REAL_REDUCED_E2E_TOOLS` inside the container.
+- **Limited exceptions**: even in real mode, only Valkey/cache wiring and image/table ingestion remain stubbed. Any other shortcut (fake rate limits, text-only ingestion, etc.) must be treated as a regression.
 
 ## 4. Interacting With the Stack
 | Action | Command / URL |

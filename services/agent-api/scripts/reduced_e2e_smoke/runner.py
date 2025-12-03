@@ -57,6 +57,7 @@ class SmokeRunConfig:
     conversation_provider: ConversationBootstrapper | None = None
     reseed_docs: bool = False
     cleanup_only: bool = False
+    use_real_tools: bool = False
 
 
 async def run_smoke(config: SmokeRunConfig) -> RunSummary:

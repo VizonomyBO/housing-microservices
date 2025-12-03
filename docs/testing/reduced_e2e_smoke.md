@@ -8,7 +8,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Outputs**: Structured JSON summary at `services/agent-api/logs/reduced_e2e_smoke.json` (or `/app/logs/reduced_e2e_smoke.json` when running inside the container) plus mirrored console output in `services/agent-api/logs/task_04/codex.log` when using the wrapper.
 - **Inventory checkpoints**: The CLI now surfaces `/v1/conversations` and `/v1/documents` listings before and after uploads so you can prove that document counts and hashes match what the API exposes (no manual SQL needed).
 - **When to update**: Any time fixtures, prompts, scripts, or Compose profiles change, update this guide, the scenario plan, and `epic-reduced-e2e/CHECKLIST.md` before handing the work off.
-- **No stubs**: Smoke/e2e runs must exercise the real LangGraph runner, ingestion pipeline, and external APIs. The only temporary exceptions are Valkey/cache wiring and image/table ingestion, and unit tests may use patches. If a run reports reduced-scope stubs or fake services, treat it as a failure.
+- **No stubs**: Smoke/e2e runs must exercise the real LangGraph runner, ingestion pipeline, and external APIs. Flip `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or export `REAL_REDUCED_E2E_TOOLS=1` / pass `--use-real-tools`) whenever you need OpenAI/Voyage coverage—the service now refuses to start without `OPENAI_API_KEY` + `VOYAGE_API_KEY`. The only temporary exceptions are Valkey/cache wiring and image/table ingestion, and unit tests may still patch their clients. If a run reports reduced-scope stubs or fake services, treat it as a failure.
 
 ## Prerequisites
 1. **Tooling**: Docker 25.x with Compose V2 (`docker compose`), Git, a POSIX-compatible shell, and [uv](https://github.com/astral-sh/uv) (Python 3.13) for running the CLI.
@@ -19,6 +19,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    ```
    - Define `STACK_PROFILE=reduced`, `COMPOSE_PROFILES=reduced`, `SERVICE_MODE=reduced`, and `USE_LOCALSTACK=1` (default) for the smoke workflow.
    - No direct database connection is required for the smoke CLI anymore; all bootstrap/reset steps use public HTTP endpoints.
+   - For real-tool runs, set `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or rely on `REAL_REDUCED_E2E_TOOLS=1`/`--use-real-tools`) **and** provide `OPENAI_API_KEY` + `VOYAGE_API_KEY` in `.env` or `.env.local`.
 3. **LocalStack vs AWS**:
    - When `USE_LOCALSTACK=1`, export `AWS_ENDPOINT_URL=http://localhost.localstack.cloud:4566` so the automation validates mock AWS endpoints.
    - When targeting AWS, set `USE_LOCALSTACK=0`, clear `AWS_ENDPOINT_URL`, and supply `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` via `.env.local`.
@@ -53,6 +54,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
      --reseed-docs
    ```
    - Provide overrides such as `--skip-pillars`, `--timeout-seconds 45`, or `--stream-capability cross_doc_reasoning --stream-capability sql_reasoning` as needed.
+   - Pass `--use-real-tools` (or export `REAL_REDUCED_E2E_TOOLS=1`) whenever the stack is running with `REDUCED_SCOPE_USE_REAL_TOOLS=1` so the CLI records a real-tool run.
    - Pass `--reseed-docs` (default in the example above) to invoke the demo reset endpoints before uploads; combine with `--cleanup-only` when you just need to wipe demo state without executing prompts.
    - All CLI parameters have matching env vars (see `scripts/reduced_e2e_smoke/cli.py`). Running with `env REDUCED_E2E_EMAIL=... uv run python ...` keeps sensitive values out of shell history.
 4. Inspect the summary:
@@ -70,6 +72,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    | Variable | Purpose |
    | --- | --- |
    | `ARGS="--timeout-seconds 60 --verbose-http"` | Forwards CLI flags to `scripts/run_reduced_e2e_smoke.py`. |
+   | `REAL_REDUCED_E2E_TOOLS=1` | Propagates `REDUCED_SCOPE_USE_REAL_TOOLS=1` into the containers and passes `--use-real-tools` / env mirrors to the CLI (requires `OPENAI_API_KEY` + `VOYAGE_API_KEY`). |
    | `KEEP_STACK=1` | Leaves Docker containers running for post-mortem inspection. Default tears down the stack. |
    | `FORCE_ENV_COPY=1` | Replaces `.env` with `env.example` before starting Compose (useful in CI). |
    | `REDUCED_E2E_RESEED_DOCS=1` | Forces the CLI to call demo reset + purge endpoints before uploads without passing extra CLI flags. |
@@ -99,6 +102,12 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Structured console output**: The CLI prints PASS/FAIL tables with ✅ / ❌ indicators. When run via the wrapper, this output is mirrored to `logs/task_04/codex.log`.
 - **Fixture manifest**: `tests/data/reduced_e2e/scenario_manifest.json` enumerates document aliases (DOC_POLICY, DOC_LEDGER, DOC_KPI) plus prompt IDs (`Q_SIMPLE_QA`, `Q_REASON`, `Q_AGGREGATE`, `Q_SQL`). Update both the manifest and this doc whenever you add or remove fixtures.
 - **Prompt validators**: `scripts/reduced_e2e_smoke/validators.py` houses regex and numeric checks (e.g., `$7.35M` sum, Harbor City KPI 87). If prompts change, adjust the validator and describe the new expectations within this guide.
+
+## Mode Matrix – Text-only vs Real Tooling
+| Mode | How to enable | LLM / embeddings | Cache & rate limiting | Required secrets |
+| --- | --- | --- | --- | --- |
+| **Text-only (default)** | Leave `REDUCED_SCOPE_USE_REAL_TOOLS=0` (wrapper env var unset) | LangGraph sticks to text-only chunks, auto-completes ingestion jobs, and skips OpenAI/Voyage calls. | Valkey client + rate limiter remain disabled (`InMemory` + demo headers). | None beyond LocalStack defaults.
+| **Real tooling** | Set `REDUCED_SCOPE_USE_REAL_TOOLS=1` in `.env` *or* export `REAL_REDUCED_E2E_TOOLS=1`/pass `--use-real-tools` when using the CLI or Compose wrapper. | LangGraph must call OpenAI + Voyage; text-only guardrails lift so ingestion behaves like production. | Cache + limiter wiring re-enable (Valkey stub allowed, but demo shims disabled). | `OPENAI_API_KEY` and `VOYAGE_API_KEY` must be present; startup fails fast if either is missing.
 
 ## Troubleshooting
 | Symptom | Suggested Action |

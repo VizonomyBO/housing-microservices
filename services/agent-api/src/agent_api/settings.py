@@ -31,6 +31,8 @@ class Settings:
     metrics_auth_scheme: str
     valkey_settings: ValkeySettings
     reduced_scope: ReducedScopeSettings
+    openai_api_key: str | None
+    voyage_api_key: str | None
 
 
 def load_settings() -> Settings:
@@ -38,6 +40,7 @@ def load_settings() -> Settings:
 
     reduced_scope = ReducedScopeSettings(
         enabled=_env_flag("REDUCED_SCOPE_ENABLED", default=False),
+        use_real_tools=_env_flag("REDUCED_SCOPE_USE_REAL_TOOLS", default=False),
         text_only_chunks=_env_flag("REDUCED_SCOPE_TEXT_ONLY_CHUNKS", default=True),
         disable_valkey=_env_flag("REDUCED_SCOPE_DISABLE_VALKEY", default=True),
         disable_rate_limiting=_env_flag("REDUCED_SCOPE_DISABLE_RATE_LIMITING", default=True),
@@ -45,6 +48,17 @@ def load_settings() -> Settings:
         allowed_chunk_types=coerce_allowed_chunk_types(
             os.getenv("REDUCED_SCOPE_ALLOWED_CHUNK_TYPES")
         ),
+    )
+
+    openai_api_key = _env_str("OPENAI_API_KEY")
+    voyage_api_key = _env_str("VOYAGE_API_KEY")
+
+    _validate_real_tooling_requirements(
+        reduced_scope=reduced_scope,
+        required_secrets={
+            "OPENAI_API_KEY": openai_api_key,
+            "VOYAGE_API_KEY": voyage_api_key,
+        },
     )
 
     stack_profile = (_env_str("STACK_PROFILE", default="reduced") or "reduced").lower()
@@ -82,6 +96,8 @@ def load_settings() -> Settings:
         metrics_auth_scheme=os.getenv("METRICS_AUTH_SCHEME", "Bearer"),
         valkey_settings=load_valkey_settings(),
         reduced_scope=reduced_scope,
+        openai_api_key=openai_api_key,
+        voyage_api_key=voyage_api_key,
     )
 
 
@@ -124,6 +140,20 @@ def _coalesce_localstack_default(value: str | None, *, use_localstack: bool) -> 
     if use_localstack:
         return "localstack"
     return None
+
+
+def _validate_real_tooling_requirements(
+    *, reduced_scope: ReducedScopeSettings, required_secrets: dict[str, str | None]
+) -> None:
+    if not reduced_scope.use_real_tools:
+        return
+    missing = [name for name, value in required_secrets.items() if not value]
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise RuntimeError(
+            "Real tooling mode requested (REDUCED_SCOPE_USE_REAL_TOOLS=1) but missing secrets: "
+            f"{joined}. Update your environment (.env/.env.local) before rerunning."
+        )
 
 
 __all__ = ["Settings", "load_settings"]

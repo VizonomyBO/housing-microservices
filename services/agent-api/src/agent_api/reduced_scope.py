@@ -20,11 +20,19 @@ class ReducedScopeSettings:
     """Environment-driven toggles for reduced-scope operation."""
 
     enabled: bool = False
+    use_real_tools: bool = False
     text_only_chunks: bool = True
     disable_valkey: bool = True
     disable_rate_limiting: bool = True
     emit_demo_events: bool = True
     allowed_chunk_types: tuple[str, ...] = ("text",)
+
+    def __post_init__(self) -> None:
+        if self.use_real_tools:
+            # Real tooling mode mirrors production behavior even when reduced scope stays enabled.
+            self.text_only_chunks = False
+            self.disable_valkey = False
+            self.disable_rate_limiting = False
 
     def is_enabled(self) -> bool:
         return self.enabled
@@ -38,11 +46,15 @@ class ReducedScopeSettings:
     def should_disable_rate_limiter(self) -> bool:
         return self.enabled and self.disable_rate_limiting
 
+    def real_tooling_mode(self) -> bool:
+        return self.enabled and self.use_real_tools
+
     def to_flags(self) -> ReducedScopeFlags:
         """Generate the runtime flags consumed by LangGraph state."""
 
         return ReducedScopeFlags(
             enabled=self.enabled,
+            use_real_tools=self.use_real_tools,
             text_only_chunks=self.text_only_chunks,
             disable_valkey=self.disable_valkey,
             disable_rate_limiting=self.disable_rate_limiting,
@@ -55,6 +67,7 @@ class ReducedScopeSettings:
 
         return {
             "enabled": self.enabled,
+            "use_real_tools": self.use_real_tools,
             "text_only_chunks": self.text_only_chunks,
             "disable_valkey": self.disable_valkey,
             "disable_rate_limiting": self.disable_rate_limiting,
@@ -66,6 +79,7 @@ class ReducedScopeFlags(BaseModel):
     """Runtime flags injected into LangGraph state + ChatRequestContext."""
 
     enabled: bool = False
+    use_real_tools: bool = False
     text_only_chunks: bool = True
     disable_valkey: bool = True
     disable_rate_limiting: bool = True
@@ -78,6 +92,7 @@ class ReducedScopeFlags(BaseModel):
     def describe(self) -> dict[str, bool | list[str]]:
         return {
             "enabled": self.enabled,
+            "use_real_tools": self.use_real_tools,
             "text_only_chunks": self.text_only_chunks,
             "disable_valkey": self.disable_valkey,
             "disable_rate_limiting": self.disable_rate_limiting,
@@ -116,6 +131,7 @@ def reduced_scope_demo_metadata(
     )
     return {
         "enabled": getattr(flags, "enabled", False),
+        "use_real_tools": getattr(flags, "use_real_tools", False),
         "text_only_chunks": getattr(flags, "text_only_chunks", False),
         "allowed_chunk_types": allowed,
         "disable_valkey": getattr(flags, "disable_valkey", False),

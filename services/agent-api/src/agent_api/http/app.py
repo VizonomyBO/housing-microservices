@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 
 def create_app() -> FastAPI:
     settings = load_settings()
+    if settings.reduced_scope.real_tooling_mode():
+        logger.info(
+            "Reduced scope real tooling mode enabled; Valkey + rate limiting shims are active"
+        )
+    elif settings.reduced_scope.is_enabled():
+        logger.info("Reduced scope text-only mode enabled; demo shims remain in place")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
