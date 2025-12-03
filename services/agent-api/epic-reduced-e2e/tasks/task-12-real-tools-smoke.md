@@ -52,3 +52,5 @@ Update the smoke automation so operators (local + CI) can deliberately run the s
 ## Handoff Notes
 - Capture any rate-limit/cost observations so future epics can implement quotas or scheduled jobs.
 - Note open questions about multi-tenant secrets or CI key rotation if they surface during validation.
+- Telemetry plumbing is in place, but this task did not run against live OpenAI/Voyage keys inside the repo. The first operator to execute a real run after supplying secrets should capture cost + rate-limit notes and attach the resulting `telemetry.real_tools` block to future handoffs (especially if reranker/embedding counts diverge).
+- Compose wrapper now refuses to run `REAL_REDUCED_E2E_TOOLS=1` without `OPENAI_API_KEY` + `VOYAGE_API_KEY`. Keep `.env` and `.env.local` in sync across CI agents so verification does not fail before the CLI starts.

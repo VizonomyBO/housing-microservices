@@ -80,6 +80,12 @@ class ValkeyRateLimiterStub(NullRateLimiter):
         # TODO(epic-04): integrate Valkey-backed limiter once reduced scope lifts.
         return None
 
+    def response_headers(self) -> dict[str, str]:
+        return {
+            "X-RateLimit-Policy": self.policy_name,
+            "Viz-Demo-Mode": "standard",
+        }
+
 
 __all__ = [
     "NullRateLimiter",

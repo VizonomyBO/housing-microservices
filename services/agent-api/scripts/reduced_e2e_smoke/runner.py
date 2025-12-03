@@ -33,6 +33,7 @@ from .clients import (
 )
 from .errors import SmokeError
 from .fixtures import ScenarioFixtures
+from .real_tools import HttpTelemetryRecorder, RealToolVerifier
 from .reporting import PromptRunResult, RunSummary, StageResult, render_and_print, write_json_report
 from .validators import validate_prompt
 
@@ -58,6 +59,7 @@ class SmokeRunConfig:
     reseed_docs: bool = False
     cleanup_only: bool = False
     use_real_tools: bool = False
+    verify_real_tools: bool = False
 
 
 async def run_smoke(config: SmokeRunConfig) -> RunSummary:
@@ -67,13 +69,24 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
     stages: list[StageResult] = []
     prompt_results: list[PromptRunResult] = []
 
+    telemetry = HttpTelemetryRecorder(enabled=config.use_real_tools)
+    verifier = RealToolVerifier(
+        enabled=config.use_real_tools,
+        require_verification=config.verify_real_tools,
+    )
+    real_tool_metadata: dict[str, Any] | None = None
+
     timeout = httpx.Timeout(config.timeout_seconds)
     async with (
         httpx.AsyncClient(
-            base_url=_normalize_url(config.auth_base_url), timeout=timeout
+            base_url=_normalize_url(config.auth_base_url),
+            timeout=timeout,
+            event_hooks=telemetry.build_event_hooks(),
         ) as auth_client,
         httpx.AsyncClient(
-            base_url=_normalize_url(config.agent_base_url), timeout=timeout
+            base_url=_normalize_url(config.agent_base_url),
+            timeout=timeout,
+            event_hooks=telemetry.build_event_hooks(),
         ) as agent_client,
     ):
         recorder = _StageRecorder(stages)
@@ -126,6 +139,18 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                 },
             )
 
+            if config.use_real_tools and config.verify_real_tools:
+                await recorder.record(
+                    "real_tool_preflight",
+                    lambda: _run_real_tool_preflight(
+                        agent_client,
+                        token=login_result.access_token,
+                        tags=config.tags,
+                        verifier=verifier,
+                    ),
+                    metadata_fn=lambda data: data,
+                )
+
             cleanup_requested = config.reseed_docs or config.cleanup_only
             if cleanup_requested:
                 await recorder.record(
@@ -176,6 +201,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                         fixtures=fixtures.documents(),
                         scenario=manifest.scenario,
                         tags=config.tags,
+                        verifier=verifier,
                     ),
                     metadata_fn=lambda result: {"uploaded": len(result)},
                 )
@@ -188,6 +214,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                         aliases=list(uploaded_docs.keys()),
                         tags=config.tags,
                         uploaded_docs=uploaded_docs,
+                        verifier=verifier,
                     ),
                     metadata_fn=lambda payload: {"documents": payload.get("count", 0)},
                 )
@@ -227,6 +254,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                     uploaded_docs=uploaded_docs,
                     stream_capabilities=config.stream_capabilities,
                     country_code=config.country_code,
+                    verifier=verifier,
                 )
                 if not prompts_passed:
                     raise SmokeError(
@@ -253,10 +281,25 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                         lambda: probe_localstack(localstack_url),
                     )
 
+                if config.use_real_tools:
+                    async def _run_real_tool_verification() -> dict[str, Any]:
+                        return verifier.verify()
+
+                    real_tool_metadata = await recorder.record(
+                        "real_tool_verification",
+                        _run_real_tool_verification,
+                        metadata_fn=lambda data: data,
+                    )
+
         except SmokeError:
             pass  # failure already captured in stages
 
     finished_at = datetime.now(UTC)
+    telemetry_payload: dict[str, Any] = {}
+    if config.use_real_tools:
+        telemetry_payload["http_calls"] = telemetry.summary()
+        if real_tool_metadata is not None:
+            telemetry_payload["real_tools"] = real_tool_metadata
     summary = RunSummary(
         scenario=manifest.scenario,
         version=manifest.version,
@@ -264,6 +307,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
         finished_at=finished_at,
         stages=stages,
         prompts=prompt_results,
+        telemetry=telemetry_payload,
     )
     write_json_report(summary, config.report_path)
     render_and_print(summary)
@@ -338,6 +382,30 @@ def _build_demo_purge_payload(fixtures: ScenarioFixtures) -> dict[str, Any]:
     }
 
 
+async def _run_real_tool_preflight(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    tags: Sequence[str],
+    verifier: RealToolVerifier | None,
+) -> dict[str, Any]:
+    payload, headers = await list_documents(
+        client,
+        token,
+        page=1,
+        page_size=1,
+        tags=tags,
+    )
+    if verifier is not None:
+        verifier.record_document_inventory(headers, payload)
+    documents = payload.get("documents") or []
+    reduced_scope = payload.get("reduced_scope")
+    return {
+        "documents_seen": len(documents),
+        "reduced_scope": reduced_scope,
+    }
+
+
 async def _upload_all_documents(
     client: httpx.AsyncClient,
     *,
@@ -346,6 +414,7 @@ async def _upload_all_documents(
     fixtures: list[DocumentFixture],
     scenario: str,
     tags: Sequence[str],
+    verifier: RealToolVerifier | None = None,
 ) -> dict[str, UploadResult]:
     uploads: dict[str, UploadResult] = {}
     for fixture in fixtures:
@@ -365,6 +434,8 @@ async def _upload_all_documents(
             "owner_user_id": owner_user_id,
         }
         result = await upload_document(client, token, payload, alias=fixture.spec.alias)
+        if verifier is not None:
+            verifier.record_upload(result.headers, result.payload)
         if result.content_hash != fixture.content_hash:
             raise SmokeError(
                 "Content hash mismatch",
@@ -416,6 +487,7 @@ async def _record_prompts_stage(
     uploaded_docs: dict[str, UploadResult],
     stream_capabilities: set[str],
     country_code: str,
+    verifier: RealToolVerifier | None,
 ) -> tuple[list[PromptRunResult], bool]:
     start = perf_counter()
     prompt_results = await _run_prompts(
@@ -427,6 +499,7 @@ async def _record_prompts_stage(
         uploaded_docs=uploaded_docs,
         stream_capabilities=stream_capabilities,
         country_code=country_code,
+        verifier=verifier,
     )
     latency = (perf_counter() - start) * 1000
     success = all(result.success for result in prompt_results)
@@ -453,10 +526,13 @@ async def _run_prompts(
     uploaded_docs: dict[str, UploadResult],
     stream_capabilities: set[str],
     country_code: str,
+    verifier: RealToolVerifier | None,
 ) -> list[PromptRunResult]:
     results: list[PromptRunResult] = []
     doc_map = fixtures.document_map()
     for prompt in prompts:
+        if verifier is not None:
+            verifier.record_prompt_capability(prompt.capability, prompt.document_aliases)
         documents = [doc_map[alias] for alias in prompt.document_aliases]
         try:
             document_ids = [uploaded_docs[alias].document_id for alias in prompt.document_aliases]
@@ -476,6 +552,8 @@ async def _run_prompts(
         else:
             completion = await chat_blocking(client, token, payload)
         latency = (perf_counter() - run_start) * 1000
+        if verifier is not None:
+            verifier.record_chat(prompt.id, completion.headers, completion.done_payload)
         validation = validate_prompt(
             prompt,
             answer_text=completion.answer_text,
@@ -617,17 +695,22 @@ async def _verify_document_inventory(
     aliases: Sequence[str],
     tags: Sequence[str],
     uploaded_docs: dict[str, UploadResult],
+    verifier: RealToolVerifier | None = None,
 ) -> dict[str, Any]:
     page = 1
     alias_map: dict[str, dict[str, Any]] = {}
     while page <= 20:
-        payload = await list_documents(
+        payload, headers = await list_documents(
             client,
             token,
             page=page,
             page_size=50,
             tags=tags,
         )
+        if page == 1 and verifier is not None:
+            verifier.record_document_inventory(headers, payload)
+        if page == 1 and tags and isinstance(headers, dict):
+            pass
         documents = payload.get("documents") or []
         for entry in documents:
             metadata = entry.get("metadata") or {}

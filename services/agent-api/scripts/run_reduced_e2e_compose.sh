@@ -82,6 +82,9 @@ fi
 export REDUCED_SCOPE_USE_REAL_TOOLS="$USE_REAL_TOOLS_FLAG"
 if [[ "$USE_REAL_TOOLS_FLAG" == "1" ]]; then
   info "Real tooling mode enabled (REDUCED_SCOPE_USE_REAL_TOOLS=1)"
+  if [[ -z "${OPENAI_API_KEY:-}" || -z "${VOYAGE_API_KEY:-}" ]]; then
+    fail "REAL_REDUCED_E2E_TOOLS=1 requires OPENAI_API_KEY and VOYAGE_API_KEY in .env/.env.local"
+  fi
 fi
 
 STACK_PROFILE_VALUE=${STACK_PROFILE:-reduced}
@@ -181,10 +184,16 @@ run_cli() {
     cli_args+=(--use-real-tools)
   fi
 
+  local verify_flag="${REDUCED_E2E_VERIFY_REAL_TOOLS:-}"
+  if [[ -z "$verify_flag" ]]; then
+    verify_flag="$USE_REAL_TOOLS_FLAG"
+  fi
+
   set +e
   compose exec "${tty_flag[@]}" agent-api env \
     "PYTHONPATH=${CLI_PYTHONPATH}" \
     "REAL_REDUCED_E2E_TOOLS=${USE_REAL_TOOLS_FLAG:-0}" \
+    "REDUCED_E2E_VERIFY_REAL_TOOLS=${verify_flag}" \
     "${cli_args[@]}"
   local cli_exit=$?
   set -e

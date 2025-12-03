@@ -15,4 +15,6 @@ async def test_reduced_scope_rate_limiter_reports_demo_policy() -> None:
 
 def test_valkey_rate_limiter_stub_headers() -> None:
     limiter = ValkeyRateLimiterStub()
-    assert limiter.response_headers()["X-RateLimit-Policy"] == "valkey"
+    headers = limiter.response_headers()
+    assert headers["X-RateLimit-Policy"] == "valkey"
+    assert headers["Viz-Demo-Mode"] == "standard"

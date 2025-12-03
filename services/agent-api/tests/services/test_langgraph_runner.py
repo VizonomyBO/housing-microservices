@@ -85,22 +85,21 @@ async def test_runner_maps_node_errors(db_session):
         runner,
         "_execute_pipeline",
         AsyncMock(side_effect=NodeError(code="BAD", message="boom")),
-    ):
-        with pytest.raises(GatewayError) as excinfo:
-            await runner.run_chat(
-                request=_chat_request(),
-                auth=AuthContext(user_id="user-1"),
-                request_context=RequestContext(
-                    request_id="req-1", traceparent=None, idempotency_key=None, headers={}
-                ),
-                sse_emitter=None,
-                prompt_overrides={},
-                hints={},
-                response_mode=ResponseMode.STREAM,
-                metrics=metrics,
-                cache_observability=CacheObservability(metrics=metrics),
-                db_session=db_session,
-                reduced_scope=ReducedScopeFlags(),
-                rate_limiter=None,
-            )
+    ), pytest.raises(GatewayError) as excinfo:
+        await runner.run_chat(
+            request=_chat_request(),
+            auth=AuthContext(user_id="user-1"),
+            request_context=RequestContext(
+                request_id="req-1", traceparent=None, idempotency_key=None, headers={}
+            ),
+            sse_emitter=None,
+            prompt_overrides={},
+            hints={},
+            response_mode=ResponseMode.STREAM,
+            metrics=metrics,
+            cache_observability=CacheObservability(metrics=metrics),
+            db_session=db_session,
+            reduced_scope=ReducedScopeFlags(),
+            rate_limiter=None,
+        )
     assert excinfo.value.status_code == 400

@@ -90,6 +90,16 @@ USE_REAL_TOOLS_OPTION = typer.Option(
     ),
 )
 
+VERIFY_REAL_TOOLS_OPTION = typer.Option(
+    None,
+    "--verify-real-tools/--skip-verify-real-tools",
+    envvar="REDUCED_E2E_VERIFY_REAL_TOOLS",
+    help=(
+        "Fail the run when the backend headers/metadata indicate text-only mode. Defaults to "
+        "enabled when --use-real-tools is set."
+    ),
+)
+
 STREAM_CAPABILITY_OPTION = typer.Option(
     ["cross_doc_reasoning"],
     help="Prompt capabilities that should run in streaming mode",
@@ -137,8 +147,12 @@ def run(
     reseed_docs: bool = RESEED_DOCS_OPTION,
     cleanup_only: bool = CLEANUP_ONLY_OPTION,
     use_real_tools: bool = USE_REAL_TOOLS_OPTION,
+    verify_real_tools: bool | None = VERIFY_REAL_TOOLS_OPTION,
 ) -> None:
     """Execute the reduced-profile smoke workflow."""
+
+    if verify_real_tools is None:
+        verify_real_tools = use_real_tools
 
     config = SmokeRunConfig(
         auth_base_url=auth_base_url,
@@ -159,6 +173,7 @@ def run(
         reseed_docs=reseed_docs or cleanup_only,
         cleanup_only=cleanup_only,
         use_real_tools=use_real_tools,
+        verify_real_tools=bool(verify_real_tools),
     )
     summary = asyncio.run(run_smoke(config))
     raise typer.Exit(code=0 if summary.success else 1)

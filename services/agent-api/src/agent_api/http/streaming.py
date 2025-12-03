@@ -163,6 +163,7 @@ async def build_streaming_response(
         headers.setdefault("Viz-Demo-Mode", "text-only")
     else:
         headers.setdefault("X-Cache-Mode", "standard")
+        headers.setdefault("Viz-Demo-Mode", "standard")
     response = StreamingResponse(stream, media_type="text/event-stream", headers=headers)
     response.status_code = outcome.status_code
     return response
@@ -239,6 +240,7 @@ async def run_blocking_chat(
         response.headers.setdefault("Viz-Demo-Mode", "text-only")
     else:
         response.headers.setdefault("X-Cache-Mode", "standard")
+        response.headers.setdefault("Viz-Demo-Mode", "standard")
     return response
 
 

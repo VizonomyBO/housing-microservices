@@ -7,6 +7,8 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Entrypoints**: Typer CLI (`scripts/run_reduced_e2e_smoke.py`) and the Compose wrapper (`scripts/run_reduced_e2e_compose.sh`, surfaced as `make reduced-e2e-smoke`).
 - **Outputs**: Structured JSON summary at `services/agent-api/logs/reduced_e2e_smoke.json` (or `/app/logs/reduced_e2e_smoke.json` when running inside the container) plus mirrored console output in `services/agent-api/logs/task_04/codex.log` when using the wrapper.
 - **Inventory checkpoints**: The CLI now surfaces `/v1/conversations` and `/v1/documents` listings before and after uploads so you can prove that document counts and hashes match what the API exposes (no manual SQL needed).
+- **Real-tool verification**: When `--use-real-tools` is set, the CLI performs a lightweight pre-flight `/v1/documents` probe plus a post-run verification stage that inspects `X-Cache-Mode`, `Viz-Demo-Mode`, and `X-RateLimit-Policy` headers. Toggle enforcement with `--verify-real-tools/--skip-verify-real-tools` or `REDUCED_E2E_VERIFY_REAL_TOOLS`; failures indicate the backend never left text-only mode.
+- **Telemetry**: Real-tool runs capture HTTP call latency samples and real-tool counters (ingestion jobs, reranker prompts) in the `telemetry` block of the JSON report so reviewers can prove OpenAI/Voyage were exercised.
 - **When to update**: Any time fixtures, prompts, scripts, or Compose profiles change, update this guide, the scenario plan, and `epic-reduced-e2e/CHECKLIST.md` before handing the work off.
 - **No stubs**: Smoke/e2e runs must exercise the real LangGraph runner, ingestion pipeline, and external APIs. Flip `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or export `REAL_REDUCED_E2E_TOOLS=1` / pass `--use-real-tools`) whenever you need OpenAI/Voyage coverage—the service now refuses to start without `OPENAI_API_KEY` + `VOYAGE_API_KEY`. The only temporary exceptions are Valkey/cache wiring and image/table ingestion, and unit tests may still patch their clients. If a run reports reduced-scope stubs or fake services, treat it as a failure.
 
@@ -19,7 +21,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    ```
    - Define `STACK_PROFILE=reduced`, `COMPOSE_PROFILES=reduced`, `SERVICE_MODE=reduced`, and `USE_LOCALSTACK=1` (default) for the smoke workflow.
    - No direct database connection is required for the smoke CLI anymore; all bootstrap/reset steps use public HTTP endpoints.
-   - For real-tool runs, set `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or rely on `REAL_REDUCED_E2E_TOOLS=1`/`--use-real-tools`) **and** provide `OPENAI_API_KEY` + `VOYAGE_API_KEY` in `.env` or `.env.local`.
+  - For real-tool runs, set `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or rely on `REAL_REDUCED_E2E_TOOLS=1`/`--use-real-tools`) **and** provide `OPENAI_API_KEY` + `VOYAGE_API_KEY` in `.env` or `.env.local`. The Compose wrapper refuses to start the stack when those secrets are missing.
 3. **LocalStack vs AWS**:
    - When `USE_LOCALSTACK=1`, export `AWS_ENDPOINT_URL=http://localhost.localstack.cloud:4566` so the automation validates mock AWS endpoints.
    - When targeting AWS, set `USE_LOCALSTACK=0`, clear `AWS_ENDPOINT_URL`, and supply `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` via `.env.local`.
@@ -55,6 +57,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    ```
    - Provide overrides such as `--skip-pillars`, `--timeout-seconds 45`, or `--stream-capability cross_doc_reasoning --stream-capability sql_reasoning` as needed.
    - Pass `--use-real-tools` (or export `REAL_REDUCED_E2E_TOOLS=1`) whenever the stack is running with `REDUCED_SCOPE_USE_REAL_TOOLS=1` so the CLI records a real-tool run.
+   - Use `--verify-real-tools/--skip-verify-real-tools` (env: `REDUCED_E2E_VERIFY_REAL_TOOLS`) to control whether the CLI fails when headers still report text-only mode. This defaults to `--verify-real-tools` whenever you pass `--use-real-tools`.
    - Pass `--reseed-docs` (default in the example above) to invoke the demo reset endpoints before uploads; combine with `--cleanup-only` when you just need to wipe demo state without executing prompts.
    - All CLI parameters have matching env vars (see `scripts/reduced_e2e_smoke/cli.py`). Running with `env REDUCED_E2E_EMAIL=... uv run python ...` keeps sensitive values out of shell history.
 4. Inspect the summary:
@@ -73,6 +76,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    | --- | --- |
    | `ARGS="--timeout-seconds 60 --verbose-http"` | Forwards CLI flags to `scripts/run_reduced_e2e_smoke.py`. |
    | `REAL_REDUCED_E2E_TOOLS=1` | Propagates `REDUCED_SCOPE_USE_REAL_TOOLS=1` into the containers and passes `--use-real-tools` / env mirrors to the CLI (requires `OPENAI_API_KEY` + `VOYAGE_API_KEY`). |
+   | `REDUCED_E2E_VERIFY_REAL_TOOLS=1` | Forces the CLI to keep verification enabled even if you pass `ARGS="--skip-verify-real-tools"`; set to `0` to allow instrumentation without failing the run. |
    | `KEEP_STACK=1` | Leaves Docker containers running for post-mortem inspection. Default tears down the stack. |
    | `FORCE_ENV_COPY=1` | Replaces `.env` with `env.example` before starting Compose (useful in CI). |
    | `REDUCED_E2E_RESEED_DOCS=1` | Forces the CLI to call demo reset + purge endpoints before uploads without passing extra CLI flags. |
@@ -97,7 +101,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - After the cleanup stages run, the CLI immediately hits `/v1/conversations` and asserts that `document_count=0` for the deterministic conversation; if that check fails, investigate attachments instead of attempting manual SQL cleanups.
 
 ## Reports, Logs, and Validation
-- **JSON summary**: `logs/reduced_e2e_smoke.json` captures `scenario`, `version`, `stages`, `prompts`, and `success`. Each stage lists latency, metadata (user IDs, conversation IDs, number of uploads), and any failure details. Archives live under the same directory if you specify alternate paths.
+- **JSON summary**: `logs/reduced_e2e_smoke.json` captures `scenario`, `version`, `stages`, `prompts`, and `success`. Each stage lists latency, metadata (user IDs, conversation IDs, number of uploads), and any failure details. Archives live under the same directory if you specify alternate paths. When `--use-real-tools` is active, the JSON also includes `telemetry.real_tools` (verification result, embedding job count, reranker prompt count) and `telemetry.http_calls` (latency samples) so reviewers can prove the run touched OpenAI/Voyage.
 - **Inventory metadata**: `conversation_inventory`, `document_inventory`, and `conversation_documents_synced` stages now persist the exact payloads returned by `/v1/conversations` and `/v1/documents` (counts, hashes, aliases). Reference these fields when validating cleanup or diagnosing attachment drift.
 - **Structured console output**: The CLI prints PASS/FAIL tables with ✅ / ❌ indicators. When run via the wrapper, this output is mirrored to `logs/task_04/codex.log`.
 - **Fixture manifest**: `tests/data/reduced_e2e/scenario_manifest.json` enumerates document aliases (DOC_POLICY, DOC_LEDGER, DOC_KPI) plus prompt IDs (`Q_SIMPLE_QA`, `Q_REASON`, `Q_AGGREGATE`, `Q_SQL`). Update both the manifest and this doc whenever you add or remove fixtures.
@@ -117,6 +121,8 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 | LocalStack stage times out | Confirm `USE_LOCALSTACK=1`, port 4566 is free, and `AWS_ENDPOINT_URL` matches `http://localhost.localstack.cloud:4566`. Increase `MAX_HEALTH_ATTEMPTS`/`HEALTH_SLEEP_SECONDS` for slow hosts. |
 | Attachments missing after uploads | Inspect `logs/reduced_e2e_smoke.json` for the `attach_documents` metadata. If dedupe prevented uploads, delete existing attachments via the Agent API or rerun with a fresh conversation UUID. |
 | Pillar validation flakes | Temporarily pass `--skip-pillars` (or `ARGS="--skip-pillars"`) while investigating. Capture failures in `logs/task_04/codex.log` and update validators only after confirming backend changes. |
+| Real-tool verification fails | Inspect the `real_tool_verification` stage detail plus `telemetry.real_tools` to see which headers stayed in text-only (`X-Cache-Mode=text-only`, `X-RateLimit-Policy=demo-mode`). Ensure `REDUCED_SCOPE_USE_REAL_TOOLS=1`, `OPENAI_API_KEY`, and `VOYAGE_API_KEY` are exported inside the containers, then rerun with `--verify-real-tools`. |
+| Compose wrapper exits early when REAL_REDUCED_E2E_TOOLS=1 | The wrapper now enforces that `OPENAI_API_KEY` and `VOYAGE_API_KEY` exist before starting Docker. Populate them in `.env`/`.env.local` or unset `REAL_REDUCED_E2E_TOOLS`. |
 
 ## Checklist Hygiene & Handoff Expectations
 - Whenever you add new stages, fixtures, or troubleshooting steps, immediately update:

@@ -36,6 +36,7 @@ class RunSummary:
     finished_at: datetime
     stages: list[StageResult] = field(default_factory=list)
     prompts: list[PromptRunResult] = field(default_factory=list)
+    telemetry: dict[str, Any] = field(default_factory=dict)
 
     @property
     def success(self) -> bool:
@@ -48,7 +49,7 @@ class RunSummary:
         return delta.total_seconds() * 1000
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "scenario": self.scenario,
             "version": self.version,
             "started_at": self.started_at.isoformat(),
@@ -78,6 +79,9 @@ class RunSummary:
                 for prompt in self.prompts
             ],
         }
+        if self.telemetry:
+            payload["telemetry"] = self.telemetry
+        return payload
 
 
 def write_json_report(summary: RunSummary, path: Path) -> Path:
@@ -111,6 +115,32 @@ def format_console(summary: RunSummary) -> str:
             failures = f" — {', '.join(prompt.failures)}" if prompt.failures else ""
             lines.append(
                 f"  {status} {prompt.prompt_id} [{prompt.mode}] ({prompt.latency_ms:.0f} ms){failures}"
+            )
+    if summary.telemetry:
+        lines.append("")
+        lines.append("Telemetry:")
+        real_tools = summary.telemetry.get("real_tools") or {}
+        if real_tools:
+            lines.append(
+                "  Real tools: requested={requested} verified={verified} signals={signals}".format(
+                    requested=real_tools.get("requested", False),
+                    verified=real_tools.get("verified", False),
+                    signals=real_tools.get("signals_recorded", 0),
+                )
+            )
+            lines.append(
+                "    embeddings={embeddings} reranker_prompts={reranker}".format(
+                    embeddings=real_tools.get("embedding_jobs", 0),
+                    reranker=real_tools.get("reranker_prompts", 0),
+                )
+            )
+        http_calls = summary.telemetry.get("http_calls") or {}
+        if http_calls:
+            lines.append(
+                "  HTTP calls: total={total} avg={avg:.0f} ms".format(
+                    total=http_calls.get("total_calls", 0),
+                    avg=http_calls.get("avg_latency_ms", 0.0),
+                )
             )
     return "\n".join(lines)
 

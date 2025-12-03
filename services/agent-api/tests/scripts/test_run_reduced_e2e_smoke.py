@@ -48,8 +48,30 @@ def _mock_success_flows(
     include_demo_cleanup: bool = False,
     skip_main_flow: bool = False,
     localstack_url: str | None = None,
+    real_mode: bool = False,
 ) -> None:
     document_fixtures = fixtures.documents()
+    verification_headers = (
+        {
+            "X-Cache-Mode": "standard",
+            "X-RateLimit-Policy": "valkey",
+            "Viz-Demo-Mode": "standard",
+        }
+        if real_mode
+        else None
+    )
+    reduced_scope_meta = (
+        {
+            "enabled": True,
+            "use_real_tools": True,
+            "text_only_chunks": False,
+            "disable_valkey": False,
+            "disable_rate_limiting": False,
+            "allowed_chunk_types": ["text"],
+        }
+        if real_mode
+        else None
+    )
     respx_mock.post("http://auth.test/v1/auth/register").mock(
         return_value=httpx.Response(201, json={"message": "ok", "user": {"id": "ignored"}})
     )
@@ -113,6 +135,7 @@ def _mock_success_flows(
                 },
                 "request_id": "req-conv-list",
             },
+            headers=verification_headers,
         )
 
     respx_mock.get("http://agent.test/v1/conversations").mock(side_effect=conversation_list_handler)
@@ -152,7 +175,9 @@ def _mock_success_flows(
                     "has_next": False,
                 },
                 "request_id": "req-doc-list",
+                "reduced_scope": reduced_scope_meta,
             },
+            headers=verification_headers,
         )
 
     respx_mock.get("http://agent.test/v1/documents").mock(side_effect=document_list_handler)
@@ -164,6 +189,14 @@ def _mock_success_flows(
         def upload_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
             fixture = next(upload_iter)
             alias = fixture.spec.alias
+            ingestion = None
+            if reduced_scope_meta:
+                ingestion = {
+                    "stage": "activate",
+                    "status": "COMPLETED",
+                    "started_at": "2025-01-01T00:00:00Z",
+                    "completed_at": "2025-01-01T00:00:05Z",
+                }
             return httpx.Response(
                 201,
                 json={
@@ -171,7 +204,10 @@ def _mock_success_flows(
                     "content_hash": fixture.content_hash,
                     "status": "COMPLETED",
                     "message": "ok",
+                    "reduced_scope": reduced_scope_meta,
+                    "ingestion": ingestion,
                 },
+                headers=verification_headers,
             )
 
         respx_mock.post("http://agent.test/v1/documents/upload").mock(side_effect=upload_handler)
@@ -226,11 +262,14 @@ def _mock_success_flows(
                     """event: meta\ndata: {\"ok\": true}\n\n"""
                     "event: done\ndata: " + json.dumps(done_payload) + "\n\n"
                 )
-                return httpx.Response(
-                    200, content=sse, headers={"content-type": "text/event-stream"}
-                )
+                headers = {"content-type": "text/event-stream"}
+                if verification_headers:
+                    headers.update(verification_headers)
+                return httpx.Response(200, content=sse, headers=headers)
             return httpx.Response(
-                200, json={"done": done_payload, "messages": [{"content": answer}]}
+                200,
+                json={"done": done_payload, "messages": [{"content": answer}]},
+                headers=verification_headers,
             )
 
         respx_mock.post("http://agent.test/v1/chat").mock(side_effect=chat_handler)
@@ -375,6 +414,88 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
     assert summary.success is False
     assert any(not result.success for result in summary.prompts)
     assert config.report_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_real_tools_verification(tmp_path: Path, respx_mock: respx.Router) -> None:
+    fixtures = ScenarioFixtures.load()
+    doc_ids = {
+        fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
+    }
+    _mock_success_flows(
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id="conv-real",
+        real_mode=True,
+    )
+
+    config = SmokeRunConfig(
+        auth_base_url="http://auth.test",
+        agent_base_url="http://agent.test",
+        report_path=tmp_path / "report.json",
+        email="ava@example.com",
+        username="ava",
+        password="secret",
+        first_name="Ava",
+        last_name="Rivera",
+        country_code="USA",
+        language="en",
+        stream_capabilities={"cross_doc_reasoning"},
+        skip_pillars=True,
+        use_real_tools=True,
+        verify_real_tools=True,
+    )
+    summary = await run_smoke(config)
+
+    assert summary.success is True
+    real_tools = summary.telemetry.get("real_tools")
+    assert real_tools is not None
+    assert real_tools["verified"] is True
+    assert real_tools["embedding_jobs"] == len(doc_ids)
+    assert any(stage.name == "real_tool_preflight" for stage in summary.stages)
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_real_tools_verification_failure(
+    tmp_path: Path, respx_mock: respx.Router
+) -> None:
+    fixtures = ScenarioFixtures.load()
+    doc_ids = {
+        fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
+    }
+    _mock_success_flows(
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id="conv-real-fail",
+    )
+
+    config = SmokeRunConfig(
+        auth_base_url="http://auth.test",
+        agent_base_url="http://agent.test",
+        report_path=tmp_path / "report.json",
+        email="ava@example.com",
+        username="ava",
+        password="secret",
+        first_name="Ava",
+        last_name="Rivera",
+        country_code="USA",
+        language="en",
+        stream_capabilities={"cross_doc_reasoning"},
+        skip_pillars=True,
+        use_real_tools=True,
+        verify_real_tools=True,
+    )
+    summary = await run_smoke(config)
+
+    assert summary.success is False
+    failure_stage = next(
+        stage for stage in summary.stages if stage.name == "real_tool_verification"
+    )
+    assert failure_stage.success is False
 
 
 @pytest.mark.asyncio

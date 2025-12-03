@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -33,6 +33,7 @@ class UploadResult:
     content_hash: str
     status: str
     payload: dict[str, Any]
+    headers: dict[str, str]
 
 
 @dataclass(slots=True)
@@ -51,6 +52,7 @@ class ChatCompletion:
     done_payload: dict[str, Any]
     cited_document_ids: list[str]
     events: list[dict[str, Any]] | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 async def list_conversations(
@@ -91,7 +93,7 @@ async def list_documents(
     page_size: int = 20,
     tags: Sequence[str] | None = None,
     content_hashes: Sequence[str] | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, str]]:
     params: list[tuple[str, Any]] = [("page", page), ("page_size", page_size)]
     if tags:
         for tag in tags:
@@ -111,7 +113,7 @@ async def list_documents(
             f"Document list failed ({response.status_code})",
             context={"response": response.text},
         )
-    return response.json()
+    return response.json(), dict(response.headers)
 
 
 async def register_user(client: httpx.AsyncClient, payload: dict[str, Any]) -> RegisterResult:
@@ -243,6 +245,7 @@ async def upload_document(
         content_hash=str(data.get("content_hash")),
         status=str(data.get("status")),
         payload=data,
+        headers=dict(response.headers),
     )
 
 
@@ -321,6 +324,7 @@ async def chat_blocking(
         done_payload=done_payload,
         cited_document_ids=cited_docs,
         events=None,
+        headers=dict(response.headers),
     )
 
 
@@ -344,12 +348,14 @@ async def chat_streaming(
     done_payload = _extract_done_payload(normalized_events)
     answer_text = _extract_answer(done_payload)
     cited_docs = _extract_citations(done_payload)
+    headers_snapshot = dict(response.headers)
     return ChatCompletion(
         mode="stream",
         answer_text=answer_text,
         done_payload=done_payload,
         cited_document_ids=cited_docs,
         events=normalized_events,
+        headers=headers_snapshot,
     )
 
 

@@ -18,6 +18,7 @@
 | 2 | Login Ava | `POST /v1/auth/login` | JWT issuance, refresh cookies | 200 status, capture `access_token`, `refresh_token`. |
 | 3 | Bootstrap conversation | `POST /v1/conversations` reuses the deterministic `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` slug (the smoke CLI always boots via HTTP; there is no DB fallback). | Agent API + shared data layer | Conversation row exists before attachments to avoid 404; response payload seeds downstream steps. |
 | 3b | List existing conversations | `GET /v1/conversations` (page + tag filters) | Agent API pagination + reduced-scope metadata | Response includes the deterministic conversation with `document_count=0` before uploads; the CLI now fails fast if the listing misses the expected ID. |
+| 3c | Real-tool preflight (gated behind `--use-real-tools`) | `GET /v1/documents?page_size=1` | Verification / config guard | Headers must report `X-Cache-Mode=standard` + `Viz-Demo-Mode=standard` and the payload’s `reduced_scope.use_real_tools` must be true; failures abort before uploads so expensive prompts never run in text-only mode. |
 | 4 | Upload Policy Memo | `POST /v1/documents/upload` (Document A) | Markdown ingestion, dedupe hashing | 201 status, `status=COMPLETED`, `content_hash` matches fixture. |
 | 5 | Upload Ledger | `POST /v1/documents/upload` (Document B) | Numerical data ingestion | 201 status, chunk created, message includes ingestion metadata. |
 | 6 | Upload KPI Table | `POST /v1/documents/upload` (Document C) | Structured table as markdown | 201 status. |
@@ -70,7 +71,8 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
    - **Conversation ID**: `CONVERSATION_UUID=uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` stored in tracker JSON for reuse; Task 02 helper will insert if missing and reuse on reruns.
 4. **Execution flow**:
    - Stage runner prints each action with emoji (✅/❌) plus latency; on failure, dumps HTTP request/response payloads to `logs/reduced_e2e/<timestamp>.json`. Inventory stages now log the `document_count` returned by `/v1/conversations` and the alias/hash map returned by `/v1/documents` so operators can confirm resets without touching the database.
-   - Summaries persist to `logs/reduced_e2e/latest_report.json` so CI can parse status.
+   - When real-tool mode is enabled, the runner inserts a `real_tool_preflight` stage right after conversation inventory and a `real_tool_verification` stage at the end. These stages inspect response headers + `reduced_scope` metadata and fail when the backend never left text-only mode.
+   - Summaries persist to `logs/reduced_e2e/latest_report.json` so CI can parse status, and real-tool runs include a `telemetry` block that captures HTTP latency samples plus embedding/reranker counters for audit.
 5. **Reporting**: script returns exit code 0 on success, non-zero otherwise, and writes a markdown recap block for release notes (Task 05 can embed in docs).
 
 ## Validation Strategy
@@ -89,6 +91,7 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
    - Set `KEEP_STACK=1` to keep containers alive for debugging or omit it to have the wrapper tear everything down.
    - The wrapper copies `.env` from `env.example` when missing, starts the reduced + LocalStack profile, probes `/health` + `/v1/health`, runs the Typer CLI inside the `agent-api` container, then collects the JSON summary at `/app/logs/reduced_e2e_smoke.json`.
    - Direct invocation (`uv run python scripts/run_reduced_e2e_smoke.py ...`) still works from `services/agent-api` if you already have the stack running manually.
+   - When `REAL_REDUCED_E2E_TOOLS=1`, the wrapper refuses to start unless `OPENAI_API_KEY` and `VOYAGE_API_KEY` are set and automatically exports `REDUCED_E2E_VERIFY_REAL_TOOLS=1` so real-tool verification fails-fast in CI.
 3. **LocalStack verification**: script (or operator) calls `curl http://localhost:4566/_localstack/health | jq` and surfaces failure states in summary. [LocalStack internal endpoints](https://docs.localstack.cloud/references/internal-endpoints/).
 4. **Quality gates**: Regardless of outcome, continue to run `uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto` before handing off (per `AGENTS.md`).
 5. **Failure triage**: On error, review the JSON log for the first failing stage, inspect HTTP traces, and re-run with `--verbose-http` to log headers/bodies (redacting tokens).
@@ -121,3 +124,4 @@ This job mirrors the local workflow and can be embedded in a larger pipeline whe
 3. **LocalStack drift**: Endpoint hostnames/ports occasionally change (see LocalStack networking guidance). Keep `AWS_ENDPOINT_URL` defaulted and document overrides; update plan if LocalStack v5 introduces breaking DNS changes.
 4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. The CLI now exposes `--reseed-docs` / `--cleanup-only` flags that call `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` before uploads so operators never need direct DB access, and it double-checks the cleanup by asserting that `/v1/conversations` returns `document_count=0` prior to reseeding.
 5. **Checklist hygiene**: If future tasks skip scenario steps (e.g., drop SQL prompt) or add new documents, update `epic-reduced-e2e/CHECKLIST.md` **and** append a Handoff note to this task file explaining the delta so Task 03–05 inherit accurate scope.
+6. **Real-tool verification & key enforcement**: Because the CLI now fails at `real_tool_preflight`/`real_tool_verification` whenever headers stay in text-only mode, incomplete `.env` files (missing `OPENAI_API_KEY`/`VOYAGE_API_KEY`) will surface as smoke failures. Capture the `telemetry.real_tools` blob in handoff notes so future agents know whether a failure was due to configuration or model drift.
