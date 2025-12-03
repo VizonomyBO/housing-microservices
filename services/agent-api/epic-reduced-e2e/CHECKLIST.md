@@ -6,6 +6,9 @@ _Run these tasks sequentially via:_ `./run_tasks.sh --epic epic-reduced-e2e`
 
 _Automated loop available:_ `./run_epic_loop.sh --epic epic-reduced-e2e` re-reads this checklist after each run so newly inserted fix tasks are executed automatically.
 
+## Important
+> Since the new code you'll write will be located at `services/agent-api/scripts/`, create a new uv venv with python 3.13 and manage all dependencies for the scripts there in all the tasks of this checklist.
+
 1. - [ ] [Task 01 — Reduced Stack E2E Test Plan](tasks/task-01-reduced-e2e-plan.md)
 2. - [ ] [Task 02 — Scenario Fixtures & Helper Modules](tasks/task-02-fixtures-and-helpers.md)
 3. - [ ] [Task 03 — Reduced E2E CLI Automation](tasks/task-03-e2e-cli.md)
