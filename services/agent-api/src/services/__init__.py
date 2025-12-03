@@ -6,7 +6,9 @@ from .conversation_service import (
     ConversationEnsureResult,
     ConversationRecord,
     ConversationService,
+    deterministic_conversation_id,
 )
+from .demo_reset_service import ConversationResetResult, DemoResetService, DocumentPurgeResult
 from .document_upload_service import (
     DocumentUploadData,
     DocumentUploadResult,
@@ -40,7 +42,10 @@ __all__ = [
     "ConversationEnsureResult",
     "ConversationPillarResult",
     "ConversationRecord",
+    "ConversationResetResult",
     "ConversationService",
+    "DemoResetService",
+    "DocumentPurgeResult",
     "DocumentUploadData",
     "DocumentUploadResult",
     "DocumentUploadService",
@@ -54,4 +59,5 @@ __all__ = [
     "ReducedScopeCapabilityError",
     "ReducedScopeIngestionJobService",
     "ReducedScopeWorkerRuntime",
+    "deterministic_conversation_id",
 ]

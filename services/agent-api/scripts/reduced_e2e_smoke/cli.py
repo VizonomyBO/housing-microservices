@@ -92,6 +92,18 @@ TIMEOUT_OPTION = typer.Option(30.0, help="HTTP client timeout in seconds")
 
 SKIP_PILLARS_OPTION = typer.Option(False, help="Skip the pillars endpoint validation")
 
+RESEED_DOCS_OPTION = typer.Option(
+    False,
+    "--reseed-docs",
+    help="Call the demo reset endpoints before uploading fixtures to avoid dedupe",
+)
+
+CLEANUP_ONLY_OPTION = typer.Option(
+    False,
+    "--cleanup-only",
+    help="Run demo cleanup endpoints and exit without executing the smoke prompts",
+)
+
 
 @app.command("run")
 def run(
@@ -110,6 +122,8 @@ def run(
     stream_capability: list[str] = STREAM_CAPABILITY_OPTION,
     timeout_seconds: float = TIMEOUT_OPTION,
     skip_pillars: bool = SKIP_PILLARS_OPTION,
+    reseed_docs: bool = RESEED_DOCS_OPTION,
+    cleanup_only: bool = CLEANUP_ONLY_OPTION,
 ) -> None:
     """Execute the reduced-profile smoke workflow."""
 
@@ -130,6 +144,8 @@ def run(
         database_url=database_url,
         localstack_url=localstack_url,
         skip_pillars=skip_pillars,
+        reseed_docs=reseed_docs or cleanup_only,
+        cleanup_only=cleanup_only,
     )
     summary = asyncio.run(run_smoke(config))
     raise typer.Exit(code=0 if summary.success else 1)

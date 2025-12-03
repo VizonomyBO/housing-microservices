@@ -34,8 +34,9 @@ def _mock_success_flows(
     doc_ids: dict[str, str],
     prompt_answers: dict[str, str],
     conversation_id: str,
+    include_demo_cleanup: bool = False,
+    skip_main_flow: bool = False,
 ) -> None:
-    # Auth endpoints
     respx_mock.post("http://auth.test/v1/auth/register").mock(
         return_value=httpx.Response(201, json={"message": "ok", "user": {"id": "ignored"}})
     )
@@ -50,83 +51,141 @@ def _mock_success_flows(
         )
     )
 
+    respx_mock.post("http://agent.test/v1/conversations").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "conversation": {
+                    "conversation_id": conversation_id,
+                    "owner_user_id": "user-123",
+                    "namespace": "reduced-e2e",
+                    "status": "active",
+                    "tags": ["reduced_e2e", "demo"],
+                },
+                "created": True,
+                "request_id": "req-conv",
+            },
+        )
+    )
+
     documents = fixtures.documents()
     upload_iter = iter(documents)
 
-    def upload_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - exercised
-        fixture = next(upload_iter)
-        alias = fixture.spec.alias
-        return httpx.Response(
-            201,
-            json={
-                "document_id": doc_ids[alias],
-                "content_hash": fixture.content_hash,
-                "status": "COMPLETED",
-                "message": "ok",
-            },
-        )
+    if not skip_main_flow:
 
-    respx_mock.post("http://agent.test/v1/documents/upload").mock(side_effect=upload_handler)
-
-    attachment_url = f"http://agent.test/v1/conversations/{conversation_id}/attachments"
-    respx_mock.post(attachment_url).mock(
-        return_value=httpx.Response(
-            201,
-            json={
-                "conversation_id": "conv-test",
-                "document_id": "placeholder",
-                "status": "ATTACHED",
-                "request_id": "req-attach",
-            },
-        )
-    )
-
-    attachment_listing = {
-        "conversation_id": conversation_id,
-        "request_id": "req-list",
-        "attachments": [
-            {
-                "document_id": doc_ids[fixture.spec.alias],
-                "attach_source": "user_request",
-                "role": "primary",
-                "visibility": "visible",
-                "canonical_name": fixture.spec.canonical_name,
-                "access_scope": fixture.spec.access_scope,
-                "country_code": fixture.spec.country_code,
-                "metadata": fixture.spec.metadata,
-            }
-            for fixture in documents
-        ],
-    }
-    respx_mock.get(attachment_url).mock(return_value=httpx.Response(200, json=attachment_listing))
-
-    def chat_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - exercised
-        body = json.loads(request.content.decode())
-        prompt_id = body["hints"].get("prompt_id")
-        answer = prompt_answers[prompt_id]
-        doc_ids_for_prompt = [
-            attachment["document_id"] for attachment in body["message"]["attachments"]
-        ]
-        done_payload = {
-            "answer": answer,
-            "citations": [{"document_id": doc_id} for doc_id in doc_ids_for_prompt],
-        }
-        if request.headers.get("accept") == "text/event-stream":
-            sse = (
-                """event: meta\ndata: {\"ok\": true}\n\n"""
-                "event: done\ndata: " + json.dumps(done_payload) + "\n\n"
+        def upload_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+            fixture = next(upload_iter)
+            alias = fixture.spec.alias
+            return httpx.Response(
+                201,
+                json={
+                    "document_id": doc_ids[alias],
+                    "content_hash": fixture.content_hash,
+                    "status": "COMPLETED",
+                    "message": "ok",
+                },
             )
-            return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
-        return httpx.Response(200, json={"done": done_payload, "messages": [{"content": answer}]})
 
-    respx_mock.post("http://agent.test/v1/chat").mock(side_effect=chat_handler)
+        respx_mock.post("http://agent.test/v1/documents/upload").mock(side_effect=upload_handler)
 
-    respx_mock.get(f"http://agent.test/v1/conversations/{conversation_id}/pillars").mock(
-        return_value=httpx.Response(
-            200,
-            json={"conversation_id": conversation_id, "pillars": [], "request_id": "req-pillars"},
+        attachment_url = f"http://agent.test/v1/conversations/{conversation_id}/attachments"
+        respx_mock.post(attachment_url).mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "conversation_id": "conv-test",
+                    "document_id": "placeholder",
+                    "status": "ATTACHED",
+                    "request_id": "req-attach",
+                },
+            )
         )
-    )
+
+        attachment_listing = {
+            "conversation_id": conversation_id,
+            "request_id": "req-list",
+            "attachments": [
+                {
+                    "document_id": doc_ids[fixture.spec.alias],
+                    "attach_source": "user_request",
+                    "role": "primary",
+                    "visibility": "visible",
+                    "canonical_name": fixture.spec.canonical_name,
+                    "access_scope": fixture.spec.access_scope,
+                    "country_code": fixture.spec.country_code,
+                    "metadata": fixture.spec.metadata,
+                }
+                for fixture in documents
+            ],
+        }
+        respx_mock.get(attachment_url).mock(
+            return_value=httpx.Response(200, json=attachment_listing)
+        )
+
+        def chat_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+            body = json.loads(request.content.decode())
+            prompt_id = body["hints"].get("prompt_id")
+            answer = prompt_answers[prompt_id]
+            doc_ids_for_prompt = [
+                attachment["document_id"] for attachment in body["message"]["attachments"]
+            ]
+            done_payload = {
+                "answer": answer,
+                "citations": [{"document_id": doc_id} for doc_id in doc_ids_for_prompt],
+            }
+            if request.headers.get("accept") == "text/event-stream":
+                sse = (
+                    """event: meta\ndata: {\"ok\": true}\n\n"""
+                    "event: done\ndata: " + json.dumps(done_payload) + "\n\n"
+                )
+                return httpx.Response(
+                    200, content=sse, headers={"content-type": "text/event-stream"}
+                )
+            return httpx.Response(
+                200, json={"done": done_payload, "messages": [{"content": answer}]}
+            )
+
+        respx_mock.post("http://agent.test/v1/chat").mock(side_effect=chat_handler)
+
+        respx_mock.get(f"http://agent.test/v1/conversations/{conversation_id}/pillars").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "conversation_id": conversation_id,
+                    "pillars": [],
+                    "request_id": "req-pillars",
+                },
+            )
+        )
+
+    if include_demo_cleanup:
+        respx_mock.post("http://agent.test/v1/demo/reset-conversation").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "conversation_id": conversation_id,
+                    "detached_documents": 3,
+                    "deleted_messages": 2,
+                    "deleted_checkpoints": 1,
+                    "deleted_agent_runs": 1,
+                    "request_id": "req-reset",
+                },
+            )
+        )
+        respx_mock.post("http://agent.test/v1/demo/purge-documents").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "purged_documents": 3,
+                    "document_ids": ["doc-a", "doc-b", "doc-c"],
+                    "content_hashes": ["hash-a"],
+                    "request_id": "req-purge",
+                },
+            )
+        )
+
+    if skip_main_flow:
+        return
 
 
 def _prompt_answers(failing: bool = False) -> dict[str, str]:
@@ -266,3 +325,82 @@ async def test_run_smoke_http_conversation_bootstrap(
 
     assert summary.success is True
     assert conversation_route.called
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_reseed_triggers_demo_endpoints(
+    tmp_path: Path, respx_mock: respx.Router
+) -> None:
+    fixtures = ScenarioFixtures.load()
+    doc_ids = {
+        fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
+    }
+    conversation_id = "conv-demo"
+    _mock_success_flows(
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id=conversation_id,
+        include_demo_cleanup=True,
+    )
+
+    config = SmokeRunConfig(
+        auth_base_url="http://auth.test",
+        agent_base_url="http://agent.test",
+        report_path=tmp_path / "report.json",
+        email="ava@example.com",
+        username="ava",
+        password="secret",
+        first_name="Ava",
+        last_name="Rivera",
+        country_code="USA",
+        language="en",
+        reseed_docs=True,
+        stream_capabilities={"cross_doc_reasoning"},
+    )
+    summary = await run_smoke(config)
+
+    assert summary.success is True
+    paths = [call.request.url.path for call in respx_mock.calls]
+    assert any(path.endswith("/v1/demo/reset-conversation") for path in paths)
+    assert any(path.endswith("/v1/demo/purge-documents") for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_cleanup_only_skips_uploads(
+    tmp_path: Path, respx_mock: respx.Router
+) -> None:
+    fixtures = ScenarioFixtures.load()
+    conversation_id = "conv-clean"
+    doc_ids = {
+        fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
+    }
+    _mock_success_flows(
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id=conversation_id,
+        include_demo_cleanup=True,
+    )
+
+    config = SmokeRunConfig(
+        auth_base_url="http://auth.test",
+        agent_base_url="http://agent.test",
+        report_path=tmp_path / "report.json",
+        email="ava@example.com",
+        username="ava",
+        password="secret",
+        first_name="Ava",
+        last_name="Rivera",
+        country_code="USA",
+        language="en",
+        stream_capabilities={"cross_doc_reasoning"},
+        reseed_docs=True,
+        cleanup_only=True,
+    )
+    summary = await run_smoke(config)
+
+    assert summary.success is True
+    assert not summary.prompts

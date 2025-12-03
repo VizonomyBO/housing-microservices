@@ -37,6 +37,10 @@ class ConversationEnsureResult:
     created: bool
 
 
+DEFAULT_CONVERSATION_NAMESPACE = "reduced-e2e"
+DEFAULT_CONVERSATION_TITLE = "Reduced E2E Smoke Session"
+
+
 class ConversationService:
     """Encapsulates deterministic conversation creation + lookups."""
 
@@ -44,8 +48,8 @@ class ConversationService:
         self,
         session: AsyncSession,
         *,
-        default_namespace: str = "reduced-e2e",
-        default_title: str = "Reduced E2E Smoke Session",
+        default_namespace: str = DEFAULT_CONVERSATION_NAMESPACE,
+        default_title: str = DEFAULT_CONVERSATION_TITLE,
     ) -> None:
         self._session = session
         self._default_namespace = _normalize_namespace(default_namespace)
@@ -140,6 +144,21 @@ class ConversationService:
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
         )
+
+
+def deterministic_conversation_id(
+    owner_user_id: str,
+    *,
+    namespace: str | None = None,
+    default_namespace: str = DEFAULT_CONVERSATION_NAMESPACE,
+) -> str:
+    """Derive the deterministic UUID used by ConversationService.ensure_conversation."""
+
+    owner_uuid = _as_uuid(owner_user_id)
+    namespace_slug = _normalize_namespace(namespace) or _normalize_namespace(default_namespace)
+    if not namespace_slug:
+        raise ValueError("namespace must resolve to a non-empty slug")
+    return str(uuid5(NAMESPACE_URL, f"{namespace_slug}-{owner_uuid}"))
 
 
 def _as_uuid(value: str) -> UUID:

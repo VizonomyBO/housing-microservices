@@ -21,6 +21,7 @@ from agent_api.http.rate_limit import (
 from agent_api.http.routes.attachments import router as attachments_router
 from agent_api.http.routes.chat import router as chat_router
 from agent_api.http.routes.conversations import router as conversations_router
+from agent_api.http.routes.demo import router as demo_router
 from agent_api.http.routes.documents import router as documents_router
 from agent_api.http.routes.metrics import router as metrics_router
 from agent_api.http.routes.pillars import router as pillars_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(documents_router)
     app.include_router(conversations_router)
     app.include_router(attachments_router)
+    app.include_router(demo_router)
     app.include_router(pillars_router)
     app.include_router(metrics_router)
 

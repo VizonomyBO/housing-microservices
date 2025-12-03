@@ -24,7 +24,9 @@ from .clients import (
     list_attachments,
     login_user,
     probe_localstack,
+    purge_demo_documents,
     register_user,
+    reset_demo_conversation,
     upload_document,
 )
 from .errors import SmokeError
@@ -52,6 +54,8 @@ class SmokeRunConfig:
     localstack_url: str | None = None
     skip_pillars: bool = False
     conversation_provider: ConversationBootstrapper | None = None
+    reseed_docs: bool = False
+    cleanup_only: bool = False
 
 
 async def run_smoke(config: SmokeRunConfig) -> RunSummary:
@@ -73,7 +77,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
         recorder = _StageRecorder(stages)
         login_result: LoginResult
         conversation_id: str
-        uploaded_docs: dict[str, UploadResult]
+        uploaded_docs: dict[str, UploadResult] = {}
 
         try:
             await recorder.record(
@@ -105,63 +109,92 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                 metadata_fn=lambda cid: {"conversation_id": cid},
             )
 
-            uploaded_docs = await recorder.record(
-                "upload_documents",
-                lambda: _upload_all_documents(
-                    agent_client,
-                    token=login_result.access_token,
-                    owner_user_id=login_result.user_id,
-                    fixtures=fixtures.documents(),
-                    scenario=manifest.scenario,
-                    tags=config.tags,
-                ),
-                metadata_fn=lambda result: {"uploaded": len(result)},
-            )
+            cleanup_requested = config.reseed_docs or config.cleanup_only
+            if cleanup_requested:
+                await recorder.record(
+                    "demo_reset_conversation",
+                    lambda: reset_demo_conversation(
+                        agent_client,
+                        login_result.access_token,
+                        {"conversation_id": conversation_id},
+                    ),
+                    metadata_fn=lambda data: {
+                        "detached": data.get("detached_documents"),
+                        "deleted_messages": data.get("deleted_messages"),
+                    },
+                )
+                if config.reseed_docs:
+                    purge_payload = _build_demo_purge_payload(fixtures)
+                    await recorder.record(
+                        "demo_purge_documents",
+                        lambda: purge_demo_documents(
+                            agent_client,
+                            login_result.access_token,
+                            purge_payload,
+                        ),
+                        metadata_fn=lambda data: {"purged": data.get("purged_documents")},
+                    )
 
-            await recorder.record(
-                "attach_documents",
-                lambda: _attach_documents(
+            if not config.cleanup_only:
+                uploaded_docs = await recorder.record(
+                    "upload_documents",
+                    lambda: _upload_all_documents(
+                        agent_client,
+                        token=login_result.access_token,
+                        owner_user_id=login_result.user_id,
+                        fixtures=fixtures.documents(),
+                        scenario=manifest.scenario,
+                        tags=config.tags,
+                    ),
+                    metadata_fn=lambda result: {"uploaded": len(result)},
+                )
+
+                await recorder.record(
+                    "attach_documents",
+                    lambda: _attach_documents(
+                        agent_client,
+                        token=login_result.access_token,
+                        conversation_id=conversation_id,
+                        uploaded_docs=uploaded_docs,
+                    ),
+                    metadata_fn=lambda result: {"attached": result.get("attached", 0)},
+                )
+
+                prompt_results, prompts_passed = await _record_prompts_stage(
+                    recorder,
                     agent_client,
                     token=login_result.access_token,
                     conversation_id=conversation_id,
+                    prompts=fixtures.prompts(),
+                    fixtures=fixtures,
                     uploaded_docs=uploaded_docs,
-                ),
-                metadata_fn=lambda result: {"attached": result.get("attached", 0)},
-            )
-
-            prompt_results, prompts_passed = await _record_prompts_stage(
-                recorder,
-                agent_client,
-                token=login_result.access_token,
-                conversation_id=conversation_id,
-                prompts=fixtures.prompts(),
-                fixtures=fixtures,
-                uploaded_docs=uploaded_docs,
-                stream_capabilities=config.stream_capabilities,
-                country_code=config.country_code,
-            )
-            if not prompts_passed:
-                raise SmokeError(
-                    "Prompt validations failed",
-                    context={
-                        "failed": [
-                            result.prompt_id for result in prompt_results if not result.success
-                        ]
-                    },
+                    stream_capabilities=config.stream_capabilities,
+                    country_code=config.country_code,
                 )
+                if not prompts_passed:
+                    raise SmokeError(
+                        "Prompt validations failed",
+                        context={
+                            "failed": [
+                                result.prompt_id for result in prompt_results if not result.success
+                            ]
+                        },
+                    )
 
-            if not config.skip_pillars:
-                await recorder.record(
-                    "pillars",
-                    lambda: fetch_pillars(agent_client, login_result.access_token, conversation_id),
-                )
+                if not config.skip_pillars:
+                    await recorder.record(
+                        "pillars",
+                        lambda: fetch_pillars(
+                            agent_client, login_result.access_token, conversation_id
+                        ),
+                    )
 
-            if config.localstack_url:
-                localstack_url = _normalize_url(config.localstack_url)
-                await recorder.record(
-                    "localstack",
-                    lambda: probe_localstack(localstack_url),
-                )
+                if config.localstack_url:
+                    localstack_url = _normalize_url(config.localstack_url)
+                    await recorder.record(
+                        "localstack",
+                        lambda: probe_localstack(localstack_url),
+                    )
 
         except SmokeError:
             pass  # failure already captured in stages
@@ -237,6 +270,15 @@ def _normalize_url(value: str) -> str:
     if stripped.startswith(("http://", "https://")):
         return stripped
     return f"http://{stripped}"
+
+
+def _build_demo_purge_payload(fixtures: ScenarioFixtures) -> dict[str, Any]:
+    aliases = list(fixtures.list_aliases())
+    hashes = [fixture.content_hash for fixture in fixtures.documents()]
+    return {
+        "document_aliases": aliases,
+        "content_hashes": hashes,
+    }
 
 
 async def _upload_all_documents(

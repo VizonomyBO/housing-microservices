@@ -48,9 +48,11 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    uv run python scripts/run_reduced_e2e_smoke.py run \
      --database-url "$DATABASE_URL" \
      --localstack-url "${AWS_ENDPOINT_URL:-http://localhost.localstack.cloud:4566}" \
-     --report-path logs/reduced_e2e_smoke.json
+     --report-path logs/reduced_e2e_smoke.json \
+     --reseed-docs
    ```
    - Provide overrides such as `--skip-pillars`, `--timeout-seconds 45`, or `--stream-capability cross_doc_reasoning --stream-capability sql_reasoning` as needed.
+   - Pass `--reseed-docs` (default in the example above) to invoke the demo reset endpoints before uploads; combine with `--cleanup-only` when you just need to wipe demo state without executing prompts.
    - All CLI parameters have matching env vars (see `scripts/reduced_e2e_smoke/cli.py`). Running with `env REDUCED_E2E_EMAIL=... uv run python ...` keeps sensitive values out of shell history.
 4. Inspect the summary:
    ```bash
@@ -68,15 +70,23 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    | `ARGS="--timeout-seconds 60 --verbose-http"` | Forwards CLI flags to `scripts/run_reduced_e2e_smoke.py`. |
    | `KEEP_STACK=1` | Leaves Docker containers running for post-mortem inspection. Default tears down the stack. |
    | `FORCE_ENV_COPY=1` | Replaces `.env` with `env.example` before starting Compose (useful in CI). |
-   | `MAX_HEALTH_ATTEMPTS` / `HEALTH_SLEEP_SECONDS` | Adjust health-check retries while waiting on Agent API, auth-service, user-service, and LocalStack. |
-   | `CLI_REPORT_PATH=/app/logs/reduced_e2e_smoke.json` | Override report path inside the container. |
-   | `CLI_PYTHONPATH` | Extend module search paths if you move scripts. |
+| `MAX_HEALTH_ATTEMPTS` / `HEALTH_SLEEP_SECONDS` | Adjust health-check retries while waiting on Agent API, auth-service, user-service, and LocalStack. |
+| `CLI_REPORT_PATH=/app/logs/reduced_e2e_smoke.json` | Override report path inside the container. |
+| `ARGS="--reseed-docs"` | Forces the CLI to call the demo reset endpoints before uploading fixtures. |
+| `ARGS="--cleanup-only"` | Runs the demo cleanup endpoints and exits without executing uploads/prompts. |
+| `CLI_PYTHONPATH` | Extend module search paths if you move scripts. |
 3. Logs stream to `services/agent-api/logs/task_04/codex.log`. Use `tail -f services/agent-api/logs/task_04/codex.log` for live triage.
 4. Wrapper behavior recap:
    - Copies `.env` (unless already present or `FORCE_ENV_COPY` toggled).
    - Forces `COMPOSE_PROFILES` to include `reduced` and `aws-mock` so LocalStack is available.
    - Starts `postgres`, `db-init`, `agent-api`, `auth-service`, `user-service`, and `localstack` in detached mode, waits for `/health` endpoints, then runs the CLI inside the `agent-api` container via `uv run`.
    - Tears down containers unless `KEEP_STACK=1`.
+
+## Cleanup & Reseed Workflow
+- The Agent API exposes `/v1/demo/reset-conversation` (detaches documents, clears chat history/checkpoints) and `/v1/demo/purge-documents` (removes uploaded fixture docs for the authenticated user). These routes only exist when `SERVICE_MODE=reduced`.
+- Passing `--reseed-docs` (or setting `ARGS="--reseed-docs"` in the Make wrapper) calls both endpoints immediately after the CLI bootstraps a conversation so re-runs never hit dedupe errors.
+- `--cleanup-only` performs register/login, invokes the demo endpoints, writes the JSON summary, and exits without uploading fixtures or running prompts—handy for CI resets between runs without dropping the database.
+- Both flags derive alias/hash lists from `ScenarioFixtures`, so new fixture aliases automatically flow into the purge payload without manual updates.
 
 ## Reports, Logs, and Validation
 - **JSON summary**: `logs/reduced_e2e_smoke.json` captures `scenario`, `version`, `stages`, `prompts`, and `success`. Each stage lists latency, metadata (user IDs, conversation IDs, number of uploads), and any failure details. Archives live under the same directory if you specify alternate paths.
@@ -87,7 +97,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 ## Troubleshooting
 | Symptom | Suggested Action |
 | --- | --- |
-| `register` stage fails with 409 | Previous run already seeded the demo email. Run with a new `REDUCED_E2E_EMAIL` or run the CLI with `--reseed-docs` once that flag lands (see Task 02 plan). Clearing auth-service DB via `docker compose down -v` also resets state. |
+| `register` stage fails with 409 | Previous run already seeded the demo email. Use a new `REDUCED_E2E_EMAIL` **or** run the CLI with `--reseed-docs` / `--cleanup-only` to invoke `/v1/demo/reset-conversation` + `/v1/demo/purge-documents` before uploads—no DB tear-down required. |
 | CLI exits complaining about `DATABASE_URL` | Ensure `.env` defines `DATABASE_URL` or pass `--database-url postgresql+asyncpg://...`. The conversation bootstrapper requires direct DB access even when HTTP endpoints succeed. |
 | LocalStack stage times out | Confirm `USE_LOCALSTACK=1`, port 4566 is free, and `AWS_ENDPOINT_URL` matches `http://localhost.localstack.cloud:4566`. Increase `MAX_HEALTH_ATTEMPTS`/`HEALTH_SLEEP_SECONDS` for slow hosts. |
 | Attachments missing after uploads | Inspect `logs/reduced_e2e_smoke.json` for the `attach_documents` metadata. If dedupe prevented uploads, delete existing attachments via the Agent API or rerun with a fresh conversation UUID. |

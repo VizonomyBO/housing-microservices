@@ -310,6 +310,46 @@ async def fetch_pillars(
     return response.json()
 
 
+async def reset_demo_conversation(
+    client: httpx.AsyncClient,
+    token: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    response = await _request(
+        client,
+        "POST",
+        "/v1/demo/reset-conversation",
+        json=payload,
+        headers=_auth_headers(token),
+    )
+    if response.status_code != 200:
+        raise SmokeError(
+            f"Demo conversation reset failed ({response.status_code})",
+            context={"response": response.text},
+        )
+    return response.json()
+
+
+async def purge_demo_documents(
+    client: httpx.AsyncClient,
+    token: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    response = await _request(
+        client,
+        "POST",
+        "/v1/demo/purge-documents",
+        json=payload,
+        headers=_auth_headers(token),
+    )
+    if response.status_code != 200:
+        raise SmokeError(
+            f"Demo document purge failed ({response.status_code})",
+            context={"response": response.text},
+        )
+    return response.json()
+
+
 async def probe_localstack(url: str) -> dict[str, Any]:
     async with httpx.AsyncClient(base_url=url, timeout=10.0) as client:
         response = await _request(client, "GET", "/_localstack/health")

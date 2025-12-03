@@ -8,6 +8,7 @@
   - LocalStack edge endpoint is reachable at `http://localhost.localstack.cloud:4566` (port 4566 exposed) so SDK calls and any future S3 usage can ride on the recommended hostname for bucket routing.\
     _Reference_: LocalStack endpoint guidance stresses exposing 4566 and using the wildcard DNS names when containers run in the same network. [LocalStack endpoint doc](https://docs.localstack.cloud/references/network-troubleshooting/endpoint-url/).  
   - LocalStack-aware clients (future fixtures/helpers) read `AWS_ENDPOINT_URL` so boto3 or `awslocal` talk to LocalStack instead of public AWS. [LocalStack boto3 doc](https://docs.localstack.cloud/aws/integrations/aws-sdks/python-boto3/).
+  - Demo reset endpoints (`/v1/demo/reset-conversation`, `/v1/demo/purge-documents`) require `SERVICE_MODE=reduced`; the smoke CLI calls them automatically when `--reseed-docs` or `--cleanup-only` is provided.
 - **Exit criteria**: Automation reports PASS when every API call succeeds, assertions on chat responses clear, and LocalStack health + attachments listing confirm the session state. Failures emit structured diagnostics (JSON blob plus log path) for the operator.
 
 ## Scenario Matrix
@@ -27,7 +28,7 @@
 | 12 | SQL-style grouping prompt | `POST /v1/chat` referencing KPI table (Document C) | Table reasoning | Response contains grouped metrics (per city) and highlights the highest KPI. |
 | 13 | Pillar snapshot | `GET /v1/conversations/{conversation_id}/pillars` | Pillar service + runtime | Returns answers generated during uploads (if available); otherwise plan records follow-up. |
 | 14 | LocalStack health check | `curl http://localhost:4566/_localstack/health` | LocalStack readiness | JSON shows `status: running` for S3/EventBridge mocks. [LocalStack internal endpoints](https://docs.localstack.cloud/references/internal-endpoints/). |
-| 15 | Cleanup (optional) | Helper detaches docs / deletes conversation | Idempotency for reruns | Ensures fixture reruns do not accumulate orphan state.
+| 15 | Cleanup (optional) | `POST /v1/demo/reset-conversation` + `POST /v1/demo/purge-documents` | Demo reset endpoints | Resets attachments/chat checkpoints and purges fixture docs so reruns re-upload cleanly without DB access.
 
 ## Data Fixtures
 ### Document Catalog
@@ -116,5 +117,5 @@ This job mirrors the local workflow and can be embedded in a larger pipeline whe
 1. **Conversation lifecycle**: No public HTTP endpoint provisions conversations today. Task 02 must ship a helper that creates one via shared data layer. If a public API later appears, update this plan + checklist immediately so Task 03 swaps helpers for HTTP calls.
 2. **LLM nondeterminism**: Prompts rely on textual heuristics (keywords, numeric sums). Keep tolerances loose (e.g., decimal comparisons) and assert on structured citation metadata rather than full strings.
 3. **LocalStack drift**: Endpoint hostnames/ports occasionally change (see LocalStack networking guidance). Keep `AWS_ENDPOINT_URL` defaulted and document overrides; update plan if LocalStack v5 introduces breaking DNS changes.
-4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. Provide `--reseed-docs` flag plus instructions for wiping conversation attachments.
+4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. The CLI now exposes `--reseed-docs` / `--cleanup-only` flags that call `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` before uploads so operators never need direct DB access.
 5. **Checklist hygiene**: If future tasks skip scenario steps (e.g., drop SQL prompt) or add new documents, update `epic-reduced-e2e/CHECKLIST.md` **and** append a Handoff note to this task file explaining the delta so Task 03–05 inherit accurate scope.

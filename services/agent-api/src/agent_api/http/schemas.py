@@ -116,6 +116,10 @@ __all__ = [
     "ConversationCreateRequest",
     "ConversationRecordResponse",
     "ConversationResponse",
+    "DemoPurgeDocumentsRequest",
+    "DemoPurgeDocumentsResponse",
+    "DemoResetConversationRequest",
+    "DemoResetConversationResponse",
     "DocumentUploadRequest",
     "DocumentUploadResponse",
     "PillarAnswerPayload",
@@ -176,6 +180,84 @@ class DocumentUploadResponse(BaseModel):
     request_id: str
     upload: dict[str, Any] | None = None
     ingestion: dict[str, Any] | None = None
+    reduced_scope: dict[str, Any] | None = None
+
+
+class DemoResetConversationRequest(BaseModel):
+    """Payload for POST /v1/demo/reset-conversation."""
+
+    conversation_id: str | None = Field(
+        default=None,
+        description="Target conversation. Defaults to deterministic reduced-e2e slug.",
+    )
+    namespace: str | None = Field(
+        default="reduced-e2e",
+        description="Namespace used when deriving the deterministic conversation id.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_fields(self) -> DemoResetConversationRequest:
+        if self.conversation_id:
+            self.conversation_id = self.conversation_id.strip()
+            if not self.conversation_id:
+                self.conversation_id = None
+        if self.namespace:
+            self.namespace = self.namespace.strip() or "reduced-e2e"
+        return self
+
+
+class DemoResetConversationResponse(BaseModel):
+    """Response payload for POST /v1/demo/reset-conversation."""
+
+    conversation_id: str
+    detached_documents: int
+    deleted_messages: int
+    deleted_checkpoints: int
+    deleted_agent_runs: int
+    request_id: str
+    reduced_scope: dict[str, Any] | None = None
+
+
+class DemoPurgeDocumentsRequest(BaseModel):
+    """Payload for POST /v1/demo/purge-documents."""
+
+    document_aliases: list[str] = Field(
+        default_factory=list,
+        description="Optional fixture aliases that should be purged (case-insensitive).",
+    )
+    content_hashes: list[str] = Field(
+        default_factory=list,
+        description="Optional SHA-256 hashes to purge. When omitted, purges all user docs.",
+    )
+
+    @model_validator(mode="after")
+    def _normalize_lists(self) -> DemoPurgeDocumentsRequest:
+        aliases = {alias.strip().upper() for alias in self.document_aliases if alias.strip()}
+        hashes: set[str] = set()
+        for value in self.content_hashes:
+            if not value:
+                continue
+            normalized = value.strip().lower()
+            if normalized and len(normalized) == 64:
+                try:
+                    int(normalized, 16)
+                except ValueError as exc:
+                    raise ValueError("content_hashes must be hexadecimal strings") from exc
+                hashes.add(normalized)
+            else:
+                raise ValueError("content_hashes must be 64-character hex strings")
+        self.document_aliases = sorted(aliases)
+        self.content_hashes = sorted(hashes)
+        return self
+
+
+class DemoPurgeDocumentsResponse(BaseModel):
+    """Response payload for POST /v1/demo/purge-documents."""
+
+    purged_documents: int
+    document_ids: list[str] = Field(default_factory=list)
+    content_hashes: list[str] = Field(default_factory=list)
+    request_id: str
     reduced_scope: dict[str, Any] | None = None
 
 
