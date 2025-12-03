@@ -78,6 +78,15 @@ docker compose --profile full down -v  # clean specific profile runs
   - Auth service: `curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health`
   - LocalStack status: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`
 
+### One-command reduced E2E smoke
+Use the new wrapper if you want the reduced stack, health probes, and CLI automation to run with a single command from the repo root:
+
+```bash
+make reduced-e2e-smoke            # optionally pass ARGS="--skip-pillars"
+```
+
+The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which copies `.env` from `env.example` when missing, starts the reduced + LocalStack compose profile, waits for `/health` + `/v1/health`, runs the smoke CLI inside the `agent-api` container, then tears everything down. Set `KEEP_STACK=1` to leave containers running or `ARGS="--timeout-seconds 45"` to forward options to the CLI. Logs stream to `services/agent-api/logs/task_04/codex.log` for later review.
+
 ## 5. Seed & Admin Utilities
 - **Automatic seeding** happens every time `db-init` runs.
 - Manually reseed:

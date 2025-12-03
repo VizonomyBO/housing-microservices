@@ -1,6 +1,6 @@
 # Makefile for Microservices Platform
 
-.PHONY: help build up down logs clean restart ps health test
+.PHONY: help build up down logs clean restart ps health test reduced-e2e-smoke
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -47,6 +47,9 @@ health: ## Check health of all services
 	@echo ""
 	@echo "Checking Account Service..."
 	@curl -s http://localhost:5000/health | python -m json.tool || echo "Account service not responding"
+
+reduced-e2e-smoke: ## Launch reduced stack and run the E2E smoke CLI
+	./services/agent-api/scripts/run_reduced_e2e_compose.sh $(ARGS)
 
 status: ## Show detailed system status
 	@curl -s http://localhost:3000/api/status | python -m json.tool
@@ -485,4 +488,3 @@ clean-test: ## Clean test artifacts and coverage reports
 	@echo "==> Test artifacts cleaned"
 
 clean-all: clean clean-test ## Clean everything including test artifacts
-

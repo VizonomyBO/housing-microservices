@@ -78,12 +78,39 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
      docker compose --profile reduced up --build agent-api
    ```
    Confirm Agent API, auth-service, and LocalStack all healthy (per runbook + LocalStack endpoint doc).
-2. **Smoke runner**: from `services/agent-api` execute `uv run python scripts/run_reduced_e2e_smoke.py --report logs/reduced_e2e`. Optional flags:
-   - `--reseed-docs`: drop existing fixtures before uploads.
-   - `--skip-cleanup`: preserve attachments for debugging.
+2. **Smoke runner**: prefer the Compose wrapper so environment prep, health checks, and CLI execution happen automatically:
+   ```bash
+   make reduced-e2e-smoke                # wraps scripts/run_reduced_e2e_compose.sh
+   ```
+   - Pass additional CLI options via `ARGS`, e.g., `make reduced-e2e-smoke ARGS="--skip-pillars"`.
+   - Set `KEEP_STACK=1` to keep containers alive for debugging or omit it to have the wrapper tear everything down.
+   - The wrapper copies `.env` from `env.example` when missing, starts the reduced + LocalStack profile, probes `/health` + `/v1/health`, runs the Typer CLI inside the `agent-api` container, then collects the JSON summary at `/app/logs/reduced_e2e_smoke.json`.
+   - Direct invocation (`uv run python scripts/run_reduced_e2e_smoke.py ...`) still works from `services/agent-api` if you already have the stack running manually.
 3. **LocalStack verification**: script (or operator) calls `curl http://localhost:4566/_localstack/health | jq` and surfaces failure states in summary. [LocalStack internal endpoints](https://docs.localstack.cloud/references/internal-endpoints/).
 4. **Quality gates**: Regardless of outcome, continue to run `uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto` before handing off (per `AGENTS.md`).
 5. **Failure triage**: On error, review the JSON log for the first failing stage, inspect HTTP traces, and re-run with `--verbose-http` to log headers/bodies (redacting tokens).
+
+### CI reference snippet
+```yaml
+name: reduced-e2e-smoke
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - services/agent-api/**
+      - docker-compose.yml
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Reduced profile E2E smoke
+        env:
+          KEEP_STACK: 0
+        run: make reduced-e2e-smoke
+```
+This job mirrors the local workflow and can be embedded in a larger pipeline when Task 05 expands documentation.
 
 ## Risks & Follow-ups
 1. **Conversation lifecycle**: No public HTTP endpoint provisions conversations today. Task 02 must ship a helper that creates one via shared data layer. If a public API later appears, update this plan + checklist immediately so Task 03 swaps helpers for HTTP calls.
@@ -91,4 +118,3 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
 3. **LocalStack drift**: Endpoint hostnames/ports occasionally change (see LocalStack networking guidance). Keep `AWS_ENDPOINT_URL` defaulted and document overrides; update plan if LocalStack v5 introduces breaking DNS changes.
 4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. Provide `--reseed-docs` flag plus instructions for wiping conversation attachments.
 5. **Checklist hygiene**: If future tasks skip scenario steps (e.g., drop SQL prompt) or add new documents, update `epic-reduced-e2e/CHECKLIST.md` **and** append a Handoff note to this task file explaining the delta so Task 03–05 inherit accurate scope.
-

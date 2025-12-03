@@ -44,3 +44,5 @@ Document the new testing setup so any engineer can run it end-to-end, and expand
 
 ## Handoff Notes
 - Future adjustments to the automation (new prompts, different services) must update both `docs/testing/reduced_e2e_smoke_plan.md` and `docs/testing/reduced_e2e_smoke.md`, plus the checklist, to avoid diverging instructions.
+- Task 04 added `scripts/run_reduced_e2e_compose.sh` + `make reduced-e2e-smoke`; document how `KEEP_STACK`, `ARGS="-- ..."`, and the `services/agent-api/logs/task_04/codex.log` output work so operators know where to inspect failures.
+- If CI flakes on slow hosts, the wrapper exposes `MAX_HEALTH_ATTEMPTS` / `HEALTH_SLEEP_SECONDS` env vars—call that out when describing troubleshooting knobs.

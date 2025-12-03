@@ -113,9 +113,7 @@ def _mock_success_flows(
         if request.headers.get("accept") == "text/event-stream":
             sse = (
                 """event: meta\ndata: {\"ok\": true}\n\n"""
-                 "event: done\ndata: "
-                + json.dumps(done_payload)
-                + "\n\n"
+                "event: done\ndata: " + json.dumps(done_payload) + "\n\n"
             )
             return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
         return httpx.Response(200, json={"done": done_payload, "messages": [{"content": answer}]})
