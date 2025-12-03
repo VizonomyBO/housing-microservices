@@ -15,7 +15,7 @@
 |---|--------|--------------------|----------------------|------------|
 | 1 | Register Ava | `POST auth-service /v1/auth/register` | Auth microservice + data layer | 201 status, response includes `user.id`, `country_code=USA`. |
 | 2 | Login Ava | `POST /v1/auth/login` | JWT issuance, refresh cookies | 200 status, capture `access_token`, `refresh_token`. |
-| 3 | Bootstrap conversation | Helper module creates deterministic UUID via `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` and upserts a `conversations` row (country `USA`). | Shared data layer + reduced runtime assumptions | Conversation row exists before attachments to avoid 404. Record ID for downstream steps. |
+| 3 | Bootstrap conversation | `POST /v1/conversations` reuses the deterministic `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` slug (the smoke CLI now calls HTTP by default; the legacy DB helper only runs when explicitly overridden). | Agent API + shared data layer | Conversation row exists before attachments to avoid 404; response payload seeds downstream steps. |
 | 4 | Upload Policy Memo | `POST /v1/documents/upload` (Document A) | Markdown ingestion, dedupe hashing | 201 status, `status=COMPLETED`, `content_hash` matches fixture. |
 | 5 | Upload Ledger | `POST /v1/documents/upload` (Document B) | Numerical data ingestion | 201 status, chunk created, message includes ingestion metadata. |
 | 6 | Upload KPI Table | `POST /v1/documents/upload` (Document C) | Structured table as markdown | 201 status. |

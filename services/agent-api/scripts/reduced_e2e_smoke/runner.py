@@ -13,7 +13,7 @@ import httpx
 
 from scripts.reduced_e2e_fixtures import DocumentFixture, PromptSpec
 
-from .bootstrap import ConversationBootstrapper, DatabaseConversationBootstrapper
+from .bootstrap import ConversationBootstrapper, HttpConversationBootstrapper
 from .clients import (
     LoginResult,
     UploadResult,
@@ -89,9 +89,12 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
 
             provider = config.conversation_provider
             if provider is None:
-                if not config.database_url:
-                    raise SmokeError("DATABASE_URL must be set to bootstrap conversations")
-                provider = DatabaseConversationBootstrapper(config.database_url)
+                provider = HttpConversationBootstrapper(
+                    client=agent_client,
+                    token=login_result.access_token,
+                    namespace="reduced-e2e",
+                    tags=config.tags,
+                )
 
             conversation_id = await recorder.record(
                 "conversation_bootstrap",

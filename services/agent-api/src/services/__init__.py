@@ -2,6 +2,11 @@
 
 from .attachment_service import AttachmentResult, AttachmentService, AttachmentStatus
 from .checkpoint_service import CheckpointService
+from .conversation_service import (
+    ConversationEnsureResult,
+    ConversationRecord,
+    ConversationService,
+)
 from .document_upload_service import (
     DocumentUploadData,
     DocumentUploadResult,
@@ -32,7 +37,10 @@ __all__ = [
     "AttachmentService",
     "AttachmentStatus",
     "CheckpointService",
+    "ConversationEnsureResult",
     "ConversationPillarResult",
+    "ConversationRecord",
+    "ConversationService",
     "DocumentUploadData",
     "DocumentUploadResult",
     "DocumentUploadService",

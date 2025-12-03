@@ -35,6 +35,15 @@ class UploadResult:
 
 
 @dataclass(slots=True)
+class ConversationResult:
+    conversation_id: str
+    owner_user_id: str
+    namespace: str
+    created: bool
+    payload: dict[str, Any]
+
+
+@dataclass(slots=True)
 class ChatCompletion:
     mode: str
     answer_text: str
@@ -72,6 +81,73 @@ async def login_user(client: httpx.AsyncClient, payload: dict[str, Any]) -> Logi
         user_id=user_id,
         access_token=access_token,
         refresh_token=refresh_token,
+        payload=data,
+    )
+
+
+async def create_conversation(
+    client: httpx.AsyncClient,
+    token: str,
+    payload: dict[str, Any],
+) -> ConversationResult:
+    response = await _request(
+        client,
+        "POST",
+        "/v1/conversations",
+        json=payload,
+        headers=_auth_headers(token),
+    )
+    if response.status_code not in (200, 201):
+        raise SmokeError(
+            f"Conversation create failed ({response.status_code})",
+            context={"response": response.text},
+        )
+    data = response.json()
+    conversation = data.get("conversation") or {}
+    conversation_id = conversation.get("conversation_id")
+    owner_user_id = conversation.get("owner_user_id")
+    namespace = conversation.get("namespace") or payload.get("namespace") or "reduced-e2e"
+    if not conversation_id:
+        raise SmokeError("Conversation response missing conversation_id")
+    if not owner_user_id:
+        raise SmokeError("Conversation response missing owner_user_id")
+    return ConversationResult(
+        conversation_id=str(conversation_id),
+        owner_user_id=str(owner_user_id),
+        namespace=str(namespace),
+        created=bool(data.get("created")),
+        payload=data,
+    )
+
+
+async def fetch_conversation(
+    client: httpx.AsyncClient,
+    token: str,
+    conversation_id: str,
+) -> ConversationResult:
+    response = await _request(
+        client,
+        "GET",
+        f"/v1/conversations/{conversation_id}",
+        headers=_auth_headers(token),
+    )
+    if response.status_code != 200:
+        raise SmokeError(
+            f"Conversation fetch failed ({response.status_code})",
+            context={"conversation_id": conversation_id, "response": response.text},
+        )
+    data = response.json()
+    conversation = data.get("conversation") or {}
+    conv_id = conversation.get("conversation_id") or conversation_id
+    owner_user_id = conversation.get("owner_user_id")
+    namespace = conversation.get("namespace") or "reduced-e2e"
+    if not owner_user_id:
+        raise SmokeError("Conversation fetch did not include owner_user_id")
+    return ConversationResult(
+        conversation_id=str(conv_id),
+        owner_user_id=str(owner_user_id),
+        namespace=str(namespace),
+        created=bool(data.get("created") or False),
         payload=data,
     )
 
@@ -352,12 +428,15 @@ def _extract_done_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 __all__ = [
     "ChatCompletion",
+    "ConversationResult",
     "LoginResult",
     "RegisterResult",
     "UploadResult",
     "attach_document",
     "chat_blocking",
     "chat_streaming",
+    "create_conversation",
+    "fetch_conversation",
     "fetch_pillars",
     "list_attachments",
     "login_user",

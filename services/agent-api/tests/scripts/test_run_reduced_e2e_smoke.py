@@ -33,6 +33,7 @@ def _mock_success_flows(
     fixtures: ScenarioFixtures,
     doc_ids: dict[str, str],
     prompt_answers: dict[str, str],
+    conversation_id: str,
 ) -> None:
     # Auth endpoints
     respx_mock.post("http://auth.test/v1/auth/register").mock(
@@ -67,7 +68,7 @@ def _mock_success_flows(
 
     respx_mock.post("http://agent.test/v1/documents/upload").mock(side_effect=upload_handler)
 
-    attachment_url = "http://agent.test/v1/conversations/conv-test/attachments"
+    attachment_url = f"http://agent.test/v1/conversations/{conversation_id}/attachments"
     respx_mock.post(attachment_url).mock(
         return_value=httpx.Response(
             201,
@@ -81,7 +82,7 @@ def _mock_success_flows(
     )
 
     attachment_listing = {
-        "conversation_id": "conv-test",
+        "conversation_id": conversation_id,
         "request_id": "req-list",
         "attachments": [
             {
@@ -120,9 +121,10 @@ def _mock_success_flows(
 
     respx_mock.post("http://agent.test/v1/chat").mock(side_effect=chat_handler)
 
-    respx_mock.get("http://agent.test/v1/conversations/conv-test/pillars").mock(
+    respx_mock.get(f"http://agent.test/v1/conversations/{conversation_id}/pillars").mock(
         return_value=httpx.Response(
-            200, json={"conversation_id": "conv-test", "pillars": [], "request_id": "req-pillars"}
+            200,
+            json={"conversation_id": conversation_id, "pillars": [], "request_id": "req-pillars"},
         )
     )
 
@@ -146,7 +148,11 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
     }
     _mock_success_flows(
-        respx_mock, fixtures=fixtures, doc_ids=doc_ids, prompt_answers=_prompt_answers()
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id="conv-test",
     )
 
     config = SmokeRunConfig(
@@ -179,7 +185,11 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
     }
     _mock_success_flows(
-        respx_mock, fixtures=fixtures, doc_ids=doc_ids, prompt_answers=_prompt_answers(failing=True)
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(failing=True),
+        conversation_id="conv-test",
     )
 
     config = SmokeRunConfig(
@@ -202,3 +212,57 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
     assert summary.success is False
     assert any(not result.success for result in summary.prompts)
     assert config.report_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_smoke_http_conversation_bootstrap(
+    tmp_path: Path, respx_mock: respx.Router
+) -> None:
+    fixtures = ScenarioFixtures.load()
+    doc_ids = {
+        fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
+    }
+    conversation_id = "conv-http"
+    conversation_route = respx_mock.post("http://agent.test/v1/conversations").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "conversation": {
+                    "conversation_id": conversation_id,
+                    "owner_user_id": "user-123",
+                    "namespace": "reduced-e2e",
+                    "status": "active",
+                    "tags": ["reduced_e2e", "demo"],
+                    "created_at": "2025-01-01T00:00:00Z",
+                },
+                "created": True,
+                "request_id": "req-conv",
+            },
+        )
+    )
+    _mock_success_flows(
+        respx_mock,
+        fixtures=fixtures,
+        doc_ids=doc_ids,
+        prompt_answers=_prompt_answers(),
+        conversation_id=conversation_id,
+    )
+
+    config = SmokeRunConfig(
+        auth_base_url="http://auth.test",
+        agent_base_url="http://agent.test",
+        report_path=tmp_path / "report.json",
+        email="ava@example.com",
+        username="ava",
+        password="secret",
+        first_name="Ava",
+        last_name="Rivera",
+        country_code="USA",
+        language="en",
+        stream_capabilities={"cross_doc_reasoning"},
+        skip_pillars=False,
+    )
+    summary = await run_smoke(config)
+
+    assert summary.success is True
+    assert conversation_route.called

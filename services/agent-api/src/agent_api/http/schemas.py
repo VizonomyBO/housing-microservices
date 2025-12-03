@@ -113,6 +113,9 @@ __all__ = [
     "BlockingChatResponse",
     "ChatMessageBody",
     "ChatRequestBody",
+    "ConversationCreateRequest",
+    "ConversationRecordResponse",
+    "ConversationResponse",
     "DocumentUploadRequest",
     "DocumentUploadResponse",
     "PillarAnswerPayload",
@@ -173,6 +176,65 @@ class DocumentUploadResponse(BaseModel):
     request_id: str
     upload: dict[str, Any] | None = None
     ingestion: dict[str, Any] | None = None
+    reduced_scope: dict[str, Any] | None = None
+
+
+class ConversationCreateRequest(BaseModel):
+    """Payload for POST /v1/conversations."""
+
+    title: str | None = Field(default=None, max_length=255)
+    country_code: str | None = Field(default=None, description="ISO-3 country code")
+    namespace: str | None = Field(default="reduced-e2e", max_length=64)
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _normalize_fields(self) -> ConversationCreateRequest:
+        if self.title is not None:
+            stripped = self.title.strip()
+            self.title = stripped or None
+        if self.country_code:
+            code = self.country_code.strip().upper()
+            if len(code) != 3:
+                raise ValueError("country_code must be a 3-letter ISO code")
+            self.country_code = code
+        if self.namespace is not None:
+            self.namespace = self.namespace.strip() or None
+        cleaned_tags: list[str] = []
+        tag_keys: set[str] = set()
+        for tag in self.tags:
+            if not tag:
+                continue
+            trimmed = tag.strip()
+            key = trimmed.lower()
+            if trimmed and key not in tag_keys:
+                tag_keys.add(key)
+                cleaned_tags.append(trimmed)
+        self.tags = cleaned_tags
+        return self
+
+
+class ConversationRecordResponse(BaseModel):
+    """Response body representing a conversation."""
+
+    conversation_id: str
+    owner_user_id: str | None = None
+    namespace: str
+    title: str | None = None
+    country_code: str | None = None
+    status: str
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class ConversationResponse(BaseModel):
+    """Envelope returned by create/read endpoints."""
+
+    conversation: ConversationRecordResponse
+    request_id: str
+    created: bool | None = None
     reduced_scope: dict[str, Any] | None = None
 
 
