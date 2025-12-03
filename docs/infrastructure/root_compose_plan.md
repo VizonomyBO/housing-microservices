@@ -72,6 +72,16 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
    - Use Docker secrets or AWS Secrets Manager in production; Compose plan should anticipate migrating to `env_file: ./env/.aws.localstack` for CI toggles.
 5. **Matrix documentation:** root plan should publish a table that lists each variable, default, consumer services, and whether it belongs in global `.env`, profile-specific env, or secret store. (Will be produced during Task 03.)
 
+### 4.1 Canonical `.env.example`
+- `env.example` at the repo root is now the single source of truth. Copy it to `.env`, then override sensitive values either directly or via a gitignored `.env.local` before running Compose.
+- **Compose & profiles**: `COMPOSE_PROJECT_NAME`, `COMPOSE_PROFILES`, `STACK_PROFILE`, `SERVICE_MODE`, and `REDUCED_SCOPE_ENABLED` describe which runtime (reduced/full) is active so helper scripts can map them to Docker profiles.
+- **Database & credentials**: `POSTGRES_*`, `AUTH_DB`, `AGENT_API_DB*`, and `DATABASE_URL` match the variables consumed by `docker-compose.yml` and `scripts/init-databases.sh`, keeping auth + agent schemas consistent.
+- **Auth/JWT + service ports**: `JWT_*`, `SECRET_KEY`, `CORS_ORIGINS`, and the host port overrides (`POSTGRES_PORT`, `AGENT_API_PORT`, `AUTH_SERVICE_PORT`, `USER_SERVICE_PORT`, `SWAGGER_SERVICE_PORT`, `MARKER_SERVICE_PORT`) now live in one place instead of service-specific templates.
+- **Agent API flags & metrics**: `SERVICE_NAME`, `METRICS_*`, and every `REDUCED_SCOPE_*` flag bind directly to `src/agent_api/settings.py`, preventing drift between env parsing and the Compose defaults.
+- **AWS/LocalStack**: `USE_LOCALSTACK`, `LOCALSTACK_HOST`, `LOCALSTACK_EDGE_PORT`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, plus `RAW_DOCUMENTS_BUCKET`/`PROCESSED_BUCKET` capture both reduced-mode LocalStack usage and the eventual real AWS endpoints.
+- **Cache/observability**: `VALKEY_*` and `OTEL_COLLECTOR_*` are grouped with descriptive defaults so re-enabling Valkey/OTel in the full profile only requires flipping envs, not editing Compose.
+- **Shared service URLs**: `AUTH_SERVICE_URL`, `USER_SERVICE_URL`, and `ACCOUNT_SERVICE_URL` are interpolated via `${VAR:-default}` inside Compose instead of being hard-coded, keeping swagger-service and user-service aligned with whichever ports the developer picked.
+
 ## 5. LocalStack Integration
 - Add a `localstack` service (image `localstack/localstack:latest`) with exposed `4566` edge port, environment variables `SERVICES=s3,sqs,sns,events,secretsmanager`, and mount for persistence (`localstack_data`).
 - Tie the service to `aws-mock` and `full` profiles; automatically start when `USE_LOCALSTACK=1`.

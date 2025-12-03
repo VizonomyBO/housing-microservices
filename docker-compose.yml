@@ -141,7 +141,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
       JWT_ACCESS_TOKEN_EXPIRES_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRES_MINUTES:-15}
-      AUTH_SERVICE_URL: http://auth-service:5000
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:5000}
       FLASK_ENV: ${FLASK_ENV:-production}
       PORT: 5001
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
@@ -171,8 +171,8 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      ACCOUNT_SERVICE_URL: http://auth-service:5000
-      USER_SERVICE_URL: http://user-service:5001
+      ACCOUNT_SERVICE_URL: ${ACCOUNT_SERVICE_URL:-http://auth-service:5000}
+      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:5001}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -204,7 +204,7 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:
       - microservices-net

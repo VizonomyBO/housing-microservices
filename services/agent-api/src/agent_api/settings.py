@@ -14,7 +14,17 @@ class Settings:
     """Runtime configuration loaded from environment variables."""
 
     service_name: str
+    stack_profile: str
+    service_mode: str
+    http_port: int
     database_url: str | None
+    use_localstack: bool
+    localstack_host: str
+    localstack_edge_port: int
+    aws_region: str
+    aws_endpoint_url: str | None
+    aws_access_key_id: str | None
+    aws_secret_access_key: str | None
     metrics_namespace: str
     metrics_auth_token: str | None
     metrics_auth_header: str
@@ -37,9 +47,22 @@ def load_settings() -> Settings:
         ),
     )
 
+    stack_profile = (_env_str("STACK_PROFILE", default="reduced") or "reduced").lower()
+    service_mode = (_env_str("SERVICE_MODE", default=stack_profile) or stack_profile).lower()
+
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "agent_api"),
+        stack_profile=stack_profile,
+        service_mode=service_mode,
+        http_port=_env_int("AGENT_API_PORT", default=8000),
         database_url=os.getenv("DATABASE_URL"),
+        use_localstack=_env_flag("USE_LOCALSTACK", default=True),
+        localstack_host=_env_str("LOCALSTACK_HOST", default="localstack") or "localstack",
+        localstack_edge_port=_env_int("LOCALSTACK_EDGE_PORT", default=4566),
+        aws_region=_env_str("AWS_REGION", default="us-east-1") or "us-east-1",
+        aws_endpoint_url=_env_str("AWS_ENDPOINT_URL"),
+        aws_access_key_id=_env_str("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=_env_str("AWS_SECRET_ACCESS_KEY"),
         metrics_namespace=os.getenv("METRICS_NAMESPACE", "agent-api"),
         metrics_auth_token=os.getenv("METRICS_AUTH_TOKEN"),
         metrics_auth_header=os.getenv("METRICS_AUTH_HEADER", "Authorization"),
@@ -54,6 +77,22 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    return int(raw) if raw else default
+
+
+def _env_str(name: str, default: str | None = None) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
 
 
 __all__ = ["Settings", "load_settings"]
