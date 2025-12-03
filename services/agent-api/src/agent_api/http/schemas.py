@@ -104,6 +104,15 @@ class BlockingChatResponse(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class PaginationMetadata(BaseModel):
+    """Shared pagination metadata envelope for list endpoints."""
+
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1)
+    total_count: int = Field(ge=0)
+    has_next: bool
+
+
 __all__ = [
     "AttachmentDeleteResponse",
     "AttachmentListResponse",
@@ -114,14 +123,20 @@ __all__ = [
     "ChatMessageBody",
     "ChatRequestBody",
     "ConversationCreateRequest",
+    "ConversationListItem",
+    "ConversationListResponse",
     "ConversationRecordResponse",
     "ConversationResponse",
+    "ConversationSummaryResponse",
     "DemoPurgeDocumentsRequest",
     "DemoPurgeDocumentsResponse",
     "DemoResetConversationRequest",
     "DemoResetConversationResponse",
+    "DocumentListItem",
+    "DocumentListResponse",
     "DocumentUploadRequest",
     "DocumentUploadResponse",
+    "PaginationMetadata",
     "PillarAnswerPayload",
     "PillarResponse",
     "PillarSourcePayload",
@@ -180,6 +195,30 @@ class DocumentUploadResponse(BaseModel):
     request_id: str
     upload: dict[str, Any] | None = None
     ingestion: dict[str, Any] | None = None
+    reduced_scope: dict[str, Any] | None = None
+
+
+class DocumentListItem(BaseModel):
+    document_id: str
+    canonical_name: str
+    access_scope: str
+    country_code: str | None = None
+    language: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    status: str
+    ingestion_stage: str | None = None
+    ingestion_started_at: datetime | None = None
+    ingestion_completed_at: datetime | None = None
+    content_hash: str
+    created_at: datetime
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentListItem]
+    pagination: PaginationMetadata
+    request_id: str
     reduced_scope: dict[str, Any] | None = None
 
 
@@ -317,6 +356,40 @@ class ConversationResponse(BaseModel):
     conversation: ConversationRecordResponse
     request_id: str
     created: bool | None = None
+    reduced_scope: dict[str, Any] | None = None
+
+
+class ConversationListItem(BaseModel):
+    """Lightweight conversation projection for list endpoint."""
+
+    conversation_id: str
+    owner_user_id: str | None = None
+    namespace: str
+    title: str | None = None
+    country_code: str | None = None
+    status: str
+    tags: list[str] = Field(default_factory=list)
+    document_count: int = 0
+    created_at: datetime
+    updated_at: datetime | None = None
+    last_activity_at: datetime
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationListItem]
+    pagination: PaginationMetadata
+    request_id: str
+    reduced_scope: dict[str, Any] | None = None
+
+
+class ConversationSummaryResponse(BaseModel):
+    conversation_id: str
+    attachment_count: int
+    message_count: int
+    user_prompt_count: int
+    last_message_at: datetime | None = None
+    last_activity_at: datetime
+    request_id: str
     reduced_scope: dict[str, Any] | None = None
 
 

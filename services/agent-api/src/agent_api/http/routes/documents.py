@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,14 +22,23 @@ from agent_api.http.deps import (
 )
 from agent_api.http.errors import GatewayError
 from agent_api.http.rate_limit import RateLimiterProtocol
-from agent_api.http.schemas import DocumentUploadRequest, DocumentUploadResponse
+from agent_api.http.schemas import (
+    DocumentListItem,
+    DocumentListResponse,
+    DocumentUploadRequest,
+    DocumentUploadResponse,
+    PaginationMetadata,
+)
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
 from services import (
+    DocumentListEntry,
+    DocumentListingService,
     DocumentUploadData,
     DocumentUploadResult,
     DocumentUploadService,
     DocumentUploadStatus,
+    PaginationWindow,
     ReducedScopeCapabilityError,
     ReducedScopeWorkerRuntime,
 )
@@ -37,6 +47,63 @@ from services.reduced_scope_runtime import IngestionCompletionPayload
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
+
+
+@router.get("", summary="List uploaded documents for the authenticated user")
+async def list_documents(  # pragma: no cover - exercised via HTTP tests
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    auth_context: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    page: Annotated[int, Query(ge=1, le=1000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    tags: Annotated[
+        list[str] | None, Query(description="Filter by tag (all must match)")
+    ] = None,
+    content_hash: Annotated[
+        list[str] | None,
+        Query(description="Filter by SHA-256 content hash"),
+    ] = None,
+    created_after: Annotated[
+        datetime | None,
+        Query(description="Return documents created after this timestamp"),
+    ] = None,
+    created_before: Annotated[
+        datetime | None,
+        Query(description="Return documents created before this timestamp"),
+    ] = None,
+) -> JSONResponse:
+    user_id = _require_user(auth_context)
+    await rate_limiter.acquire(
+        bucket="documents_list",
+        tokens=1,
+        route="documents.list",
+        metadata={"page": page, "page_size": page_size},
+    )
+    listing_service = DocumentListingService(db_session)
+    result = await listing_service.list_documents(
+        owner_user_id=user_id,
+        page=page,
+        page_size=page_size,
+        tags=tags or [],
+        content_hashes=content_hash or [],
+        created_after=created_after,
+        created_before=created_before,
+    )
+    reduced_meta = _maybe_reduced_scope(settings)
+    response = DocumentListResponse(
+        documents=[_to_document_schema(entry) for entry in result.items],
+        pagination=_to_pagination_schema(result.pagination),
+        request_id=request_context.request_id,
+        reduced_scope=reduced_meta,
+    )
+    headers = _build_demo_headers(rate_limiter, settings)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=response.model_dump(mode="json"),
+        headers=headers,
+    )
 
 
 @router.post("/upload", summary="Register a markitdown text document")
@@ -94,11 +161,7 @@ async def upload_document(  # pragma: no cover - exercised via HTTP tests
         )
 
     headers = _build_demo_headers(rate_limiter, settings)
-    reduced_scope_meta = (
-        reduced_scope_demo_metadata(settings.reduced_scope)
-        if settings.reduced_scope.is_enabled()
-        else None
-    )
+    reduced_scope_meta = _maybe_reduced_scope(settings)
 
     if result.status == DocumentUploadStatus.FEATURE_DISABLED:
         await db_session.rollback()
@@ -191,6 +254,50 @@ def _serialize_response(
         reduced_scope=reduced_scope_meta,
     )
     return response.model_dump()
+
+
+def _to_document_schema(entry: DocumentListEntry) -> DocumentListItem:
+    return DocumentListItem(
+        document_id=entry.document_id,
+        canonical_name=entry.canonical_name,
+        access_scope=entry.access_scope,
+        country_code=entry.country_code,
+        language=entry.language,
+        tags=entry.tags,
+        status=entry.status,
+        ingestion_stage=entry.ingestion_stage,
+        ingestion_started_at=entry.ingestion_started_at,
+        ingestion_completed_at=entry.ingestion_completed_at,
+        content_hash=entry.content_hash,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+        metadata=entry.metadata,
+    )
+
+
+def _to_pagination_schema(window: PaginationWindow) -> PaginationMetadata:
+    return PaginationMetadata(
+        page=window.page,
+        page_size=window.page_size,
+        total_count=window.total_count,
+        has_next=window.has_next,
+    )
+
+
+def _maybe_reduced_scope(settings: Settings) -> dict[str, Any] | None:
+    if settings.reduced_scope.is_enabled():
+        return reduced_scope_demo_metadata(settings.reduced_scope)
+    return None
+
+
+def _require_user(auth_context: AuthContext) -> str:
+    if not auth_context.user_id:
+        raise GatewayError(
+            code="UNAUTHORIZED",
+            message="Authentication required",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    return auth_context.user_id
 
 
 def _default_message(status_value: DocumentUploadStatus) -> str:

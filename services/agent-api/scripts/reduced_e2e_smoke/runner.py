@@ -22,6 +22,8 @@ from .clients import (
     chat_streaming,
     fetch_pillars,
     list_attachments,
+    list_conversations,
+    list_documents,
     login_user,
     probe_localstack,
     purge_demo_documents,
@@ -109,6 +111,21 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                 metadata_fn=lambda cid: {"conversation_id": cid},
             )
 
+            await recorder.record(
+                "conversation_inventory",
+                lambda: _fetch_conversation_entry(
+                    agent_client,
+                    token=login_result.access_token,
+                    conversation_id=conversation_id,
+                    tags=config.tags,
+                    country_code=config.country_code,
+                ),
+                metadata_fn=lambda entry: {
+                    "document_count": entry.get("document_count", 0),
+                    "last_activity": entry.get("last_activity_at"),
+                },
+            )
+
             cleanup_requested = config.reseed_docs or config.cleanup_only
             if cleanup_requested:
                 await recorder.record(
@@ -135,6 +152,20 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                         metadata_fn=lambda data: {"purged": data.get("purged_documents")},
                     )
 
+                await recorder.record(
+                    "verify_conversation_reset",
+                    lambda: _verify_conversation_doc_count(
+                        agent_client,
+                        token=login_result.access_token,
+                        conversation_id=conversation_id,
+                        tags=config.tags,
+                        country_code=config.country_code,
+                        minimum=0,
+                        exact=True,
+                    ),
+                    metadata_fn=lambda entry: {"document_count": entry.get("document_count", 0)},
+                )
+
             if not config.cleanup_only:
                 uploaded_docs = await recorder.record(
                     "upload_documents",
@@ -150,6 +181,18 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                 )
 
                 await recorder.record(
+                    "document_inventory",
+                    lambda: _verify_document_inventory(
+                        agent_client,
+                        token=login_result.access_token,
+                        aliases=list(uploaded_docs.keys()),
+                        tags=config.tags,
+                        uploaded_docs=uploaded_docs,
+                    ),
+                    metadata_fn=lambda payload: {"documents": payload.get("count", 0)},
+                )
+
+                await recorder.record(
                     "attach_documents",
                     lambda: _attach_documents(
                         agent_client,
@@ -158,6 +201,20 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                         uploaded_docs=uploaded_docs,
                     ),
                     metadata_fn=lambda result: {"attached": result.get("attached", 0)},
+                )
+
+                await recorder.record(
+                    "conversation_documents_synced",
+                    lambda: _verify_conversation_doc_count(
+                        agent_client,
+                        token=login_result.access_token,
+                        conversation_id=conversation_id,
+                        tags=config.tags,
+                        country_code=config.country_code,
+                        minimum=len(uploaded_docs),
+                        exact=False,
+                    ),
+                    metadata_fn=lambda entry: {"document_count": entry.get("document_count", 0)},
                 )
 
                 prompt_results, prompts_passed = await _record_prompts_stage(
@@ -488,6 +545,111 @@ def _merge_tags(base: Sequence[str], extra: Sequence[str]) -> list[str]:
         seen.add(normalized)
         merged.append(normalized)
     return merged
+
+
+async def _fetch_conversation_entry(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    conversation_id: str,
+    tags: Sequence[str],
+    country_code: str | None,
+) -> dict[str, Any]:
+    page = 1
+    while page <= 20:
+        payload = await list_conversations(
+            client,
+            token,
+            page=page,
+            page_size=50,
+            tags=tags,
+            country_code=country_code,
+        )
+        conversations = payload.get("conversations") or []
+        for entry in conversations:
+            if entry.get("conversation_id") == conversation_id:
+                return entry
+        pagination = payload.get("pagination") or {}
+        if not pagination.get("has_next"):
+            break
+        page += 1
+    raise SmokeError(
+        "Conversation listing missing expected record",
+        context={"conversation_id": conversation_id},
+    )
+
+
+async def _verify_conversation_doc_count(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    conversation_id: str,
+    tags: Sequence[str],
+    country_code: str | None,
+    minimum: int,
+    exact: bool,
+) -> dict[str, Any]:
+    entry = await _fetch_conversation_entry(
+        client,
+        token=token,
+        conversation_id=conversation_id,
+        tags=tags,
+        country_code=country_code,
+    )
+    count = int(entry.get("document_count") or 0)
+    if exact and count != minimum:
+        raise SmokeError(
+            "Unexpected conversation document count",
+            context={"expected": minimum, "actual": count},
+        )
+    if not exact and count < minimum:
+        raise SmokeError(
+            "Conversation has fewer documents than expected",
+            context={"expected_min": minimum, "actual": count},
+        )
+    return entry
+
+
+async def _verify_document_inventory(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    aliases: Sequence[str],
+    tags: Sequence[str],
+    uploaded_docs: dict[str, UploadResult],
+) -> dict[str, Any]:
+    page = 1
+    alias_map: dict[str, dict[str, Any]] = {}
+    while page <= 20:
+        payload = await list_documents(
+            client,
+            token,
+            page=page,
+            page_size=50,
+            tags=tags,
+        )
+        documents = payload.get("documents") or []
+        for entry in documents:
+            metadata = entry.get("metadata") or {}
+            alias = metadata.get("document_alias")
+            if alias:
+                alias_map.setdefault(alias, entry)
+        pagination = payload.get("pagination") or {}
+        if not pagination.get("has_next"):
+            break
+        page += 1
+    missing = [alias for alias in aliases if alias not in alias_map]
+    if missing:
+        raise SmokeError("Document listing missing aliases", context={"aliases": missing})
+    for alias in aliases:
+        expected_hash = uploaded_docs[alias].content_hash.lower()
+        actual_hash = str(alias_map[alias].get("content_hash") or "").lower()
+        if actual_hash != expected_hash:
+            raise SmokeError(
+                "Document hash mismatch",
+                context={"alias": alias, "expected": expected_hash, "actual": actual_hash},
+            )
+    return {"count": len(aliases)}
 
 
 __all__ = ["SmokeRunConfig", "run_smoke"]

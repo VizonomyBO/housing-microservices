@@ -37,6 +37,7 @@ def _mock_success_flows(
     include_demo_cleanup: bool = False,
     skip_main_flow: bool = False,
 ) -> None:
+    document_fixtures = fixtures.documents()
     respx_mock.post("http://auth.test/v1/auth/register").mock(
         return_value=httpx.Response(201, json={"message": "ok", "user": {"id": "ignored"}})
     )
@@ -68,8 +69,83 @@ def _mock_success_flows(
         )
     )
 
-    documents = fixtures.documents()
-    upload_iter = iter(documents)
+    pre_attachment_calls = 2 if include_demo_cleanup else 1
+    convo_calls = {"count": 0}
+
+    def conversation_list_handler(
+        request: httpx.Request,
+    ) -> httpx.Response:  # pragma: no cover - exercised via runner
+        doc_count = len(doc_ids) if convo_calls["count"] >= pre_attachment_calls else 0
+        convo_calls["count"] += 1
+        return httpx.Response(
+            200,
+            json={
+                "conversations": [
+                    {
+                        "conversation_id": conversation_id,
+                        "owner_user_id": "user-123",
+                        "namespace": "reduced-e2e",
+                        "status": "active",
+                        "tags": ["reduced_e2e", "demo"],
+                        "document_count": doc_count,
+                        "created_at": "2025-01-01T00:00:00Z",
+                        "updated_at": "2025-01-01T00:00:00Z",
+                        "last_activity_at": "2025-01-01T00:00:00Z",
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 50,
+                    "total_count": 1,
+                    "has_next": False,
+                },
+                "request_id": "req-conv-list",
+            },
+        )
+
+    respx_mock.get("http://agent.test/v1/conversations").mock(side_effect=conversation_list_handler)
+
+    def document_list_handler(
+        request: httpx.Request,
+    ) -> httpx.Response:  # pragma: no cover - exercised via runner
+        documents = [
+            {
+                "document_id": doc_ids[fixture.spec.alias],
+                "canonical_name": fixture.spec.canonical_name,
+                "access_scope": fixture.spec.access_scope,
+                "country_code": fixture.spec.country_code,
+                "language": fixture.spec.language,
+                "tags": list(fixture.spec.tags),
+                "status": "active",
+                "ingestion_stage": "activate",
+                "ingestion_started_at": "2025-01-01T00:00:00Z",
+                "ingestion_completed_at": "2025-01-01T00:00:00Z",
+                "content_hash": fixture.content_hash,
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-01T00:00:00Z",
+                "metadata": {
+                    "document_alias": fixture.spec.alias,
+                },
+            }
+            for fixture in document_fixtures
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "documents": documents,
+                "pagination": {
+                    "page": 1,
+                    "page_size": 50,
+                    "total_count": len(documents),
+                    "has_next": False,
+                },
+                "request_id": "req-doc-list",
+            },
+        )
+
+    respx_mock.get("http://agent.test/v1/documents").mock(side_effect=document_list_handler)
+
+    upload_iter = iter(document_fixtures)
 
     if not skip_main_flow:
 
@@ -115,7 +191,7 @@ def _mock_success_flows(
                     "country_code": fixture.spec.country_code,
                     "metadata": fixture.spec.metadata,
                 }
-                for fixture in documents
+                for fixture in document_fixtures
             ],
         }
         respx_mock.get(attachment_url).mock(

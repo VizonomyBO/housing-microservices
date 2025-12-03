@@ -6,6 +6,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Purpose**: Verify that registration, authentication, deterministic conversation bootstrap, document ingestion, attachment, prompt validation, pillars, and LocalStack health checks all succeed when the stack runs with `STACK_PROFILE=reduced`.
 - **Entrypoints**: Typer CLI (`scripts/run_reduced_e2e_smoke.py`) and the Compose wrapper (`scripts/run_reduced_e2e_compose.sh`, surfaced as `make reduced-e2e-smoke`).
 - **Outputs**: Structured JSON summary at `services/agent-api/logs/reduced_e2e_smoke.json` (or `/app/logs/reduced_e2e_smoke.json` when running inside the container) plus mirrored console output in `services/agent-api/logs/task_04/codex.log` when using the wrapper.
+- **Inventory checkpoints**: The CLI now surfaces `/v1/conversations` and `/v1/documents` listings before and after uploads so you can prove that document counts and hashes match what the API exposes (no manual SQL needed).
 - **When to update**: Any time fixtures, prompts, scripts, or Compose profiles change, update this guide, the scenario plan, and `epic-reduced-e2e/CHECKLIST.md` before handing the work off.
 
 ## Prerequisites
@@ -58,6 +59,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
    ```bash
    jq '.' logs/reduced_e2e_smoke.json
    ```
+   - Expect new stages named `conversation_inventory`, `document_inventory`, and `conversation_documents_synced`; each stage logs the payload returned by `/v1/conversations` or `/v1/documents` so you can confirm resets and attachment counts without cracking open Postgres.
 
 ### Option B — One-command Wrapper via Make
 1. From the repo root, run:
@@ -87,9 +89,11 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - Passing `--reseed-docs` (or setting `ARGS="--reseed-docs"` in the Make wrapper) calls both endpoints immediately after the CLI bootstraps a conversation so re-runs never hit dedupe errors.
 - `--cleanup-only` performs register/login, invokes the demo endpoints, writes the JSON summary, and exits without uploading fixtures or running prompts—handy for CI resets between runs without dropping the database.
 - Both flags derive alias/hash lists from `ScenarioFixtures`, so new fixture aliases automatically flow into the purge payload without manual updates.
+- After the cleanup stages run, the CLI immediately hits `/v1/conversations` and asserts that `document_count=0` for the deterministic conversation; if that check fails, investigate attachments instead of attempting manual SQL cleanups.
 
 ## Reports, Logs, and Validation
 - **JSON summary**: `logs/reduced_e2e_smoke.json` captures `scenario`, `version`, `stages`, `prompts`, and `success`. Each stage lists latency, metadata (user IDs, conversation IDs, number of uploads), and any failure details. Archives live under the same directory if you specify alternate paths.
+- **Inventory metadata**: `conversation_inventory`, `document_inventory`, and `conversation_documents_synced` stages now persist the exact payloads returned by `/v1/conversations` and `/v1/documents` (counts, hashes, aliases). Reference these fields when validating cleanup or diagnosing attachment drift.
 - **Structured console output**: The CLI prints PASS/FAIL tables with ✅ / ❌ indicators. When run via the wrapper, this output is mirrored to `logs/task_04/codex.log`.
 - **Fixture manifest**: `tests/data/reduced_e2e/scenario_manifest.json` enumerates document aliases (DOC_POLICY, DOC_LEDGER, DOC_KPI) plus prompt IDs (`Q_SIMPLE_QA`, `Q_REASON`, `Q_AGGREGATE`, `Q_SQL`). Update both the manifest and this doc whenever you add or remove fixtures.
 - **Prompt validators**: `scripts/reduced_e2e_smoke/validators.py` houses regex and numeric checks (e.g., `$7.35M` sum, Harbor City KPI 87). If prompts change, adjust the validator and describe the new expectations within this guide.

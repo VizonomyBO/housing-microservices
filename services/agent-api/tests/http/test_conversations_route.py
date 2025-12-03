@@ -123,3 +123,97 @@ async def test_conversation_uses_deterministic_namespace(api_client: AsyncClient
     conv = resp.json()["conversation"]
     expected_id = str(uuid5(NAMESPACE_URL, f"{namespace}-{user_id}"))
     assert conv["conversation_id"] == expected_id
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_returns_paginated_results(api_client: AsyncClient) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    create_resp = await api_client.post(
+        "/v1/conversations",
+        json={"title": "Inventory", "tags": ["Inventory"], "country_code": "USA"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    conversation_id = create_resp.json()["conversation"]["conversation_id"]
+
+    upload_payload = {
+        "document_name": "Inventory Doc",
+        "content": "# Test\nbody",
+        "country_code": "USA",
+        "language": "en",
+        "tags": ["inventory"],
+    }
+    upload_resp = await api_client.post(
+        "/v1/documents/upload",
+        json=upload_payload,
+        headers=headers,
+    )
+    assert upload_resp.status_code == 201
+    document_id = upload_resp.json()["document_id"]
+
+    attach_resp = await api_client.post(
+        f"/v1/conversations/{conversation_id}/attachments",
+        json={"document_id": document_id},
+        headers=headers,
+    )
+    assert attach_resp.status_code in (201, 202)
+
+    list_resp = await api_client.get(
+        "/v1/conversations",
+        params=[("tags", "inventory"), ("page_size", "5")],
+        headers=headers,
+    )
+    assert list_resp.status_code == 200
+    body = list_resp.json()
+    conversations = body["conversations"]
+    assert conversations
+    target = next(item for item in conversations if item["conversation_id"] == conversation_id)
+    assert target["document_count"] >= 1
+    assert body["pagination"]["page"] == 1
+    assert "request_id" in body
+
+
+@pytest.mark.asyncio
+async def test_conversation_summary_reports_attachment_counts(api_client: AsyncClient) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    create_resp = await api_client.post(
+        "/v1/conversations",
+        json={"title": "Summary", "country_code": "USA"},
+        headers=headers,
+    )
+    conversation_id = create_resp.json()["conversation"]["conversation_id"]
+
+    upload_resp = await api_client.post(
+        "/v1/documents/upload",
+        json={
+            "document_name": "Summary Doc",
+            "content": "contents",
+            "country_code": "USA",
+            "language": "en",
+        },
+        headers=headers,
+    )
+    doc_id = upload_resp.json()["document_id"]
+    await api_client.post(
+        f"/v1/conversations/{conversation_id}/attachments",
+        json={"document_id": doc_id},
+        headers=headers,
+    )
+
+    summary_resp = await api_client.get(
+        f"/v1/conversations/{conversation_id}/summary",
+        headers=headers,
+    )
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert summary["attachment_count"] >= 1
+    assert summary["message_count"] == 0
+    assert summary["user_prompt_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_conversation_list_requires_auth(api_client: AsyncClient) -> None:
+    resp = await api_client.get("/v1/conversations")
+    assert resp.status_code == 401

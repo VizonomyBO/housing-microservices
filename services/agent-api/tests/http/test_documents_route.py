@@ -18,8 +18,8 @@ async def _lifespan(app):
 TEST_USER_ID = "33333333-3333-3333-3333-333333333333"
 
 
-def _auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TEST_USER_ID}"}
+def _auth_headers(user_id: str = TEST_USER_ID) -> dict[str, str]:
+    return {"Authorization": f"Bearer {user_id}"}
 
 
 @pytest.fixture
@@ -84,3 +84,35 @@ async def test_upload_document_rejects_image_chunks(api_client: AsyncClient) -> 
     assert data["status"] == "FEATURE_DISABLED"
     assert data["document_id"] is None
     assert response.headers["Retry-After"] == "86400"
+
+
+async def test_list_documents_filters_by_hash(api_client: AsyncClient) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    payload = {
+        "document_name": "Ledger Snapshot",
+        "content": "# Ledger\ncontent",
+        "country_code": "USA",
+        "language": "en",
+        "tags": ["reduced_e2e"],
+    }
+    upload_resp = await api_client.post("/v1/documents/upload", json=payload, headers=headers)
+    assert upload_resp.status_code == 201
+    content_hash = upload_resp.json()["content_hash"]
+
+    list_resp = await api_client.get(
+        "/v1/documents",
+        params=[("content_hash", content_hash), ("tags", "reduced_e2e")],
+        headers=headers,
+    )
+    assert list_resp.status_code == 200
+    body = list_resp.json()
+    assert body["documents"]
+    document = body["documents"][0]
+    assert document["content_hash"] == content_hash
+    assert document["canonical_name"] == "Ledger Snapshot"
+
+
+async def test_list_documents_requires_auth(api_client: AsyncClient) -> None:
+    resp = await api_client.get("/v1/documents")
+    assert resp.status_code == 401

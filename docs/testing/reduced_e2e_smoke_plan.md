@@ -17,9 +17,11 @@
 | 1 | Register Ava | `POST auth-service /v1/auth/register` | Auth microservice + data layer | 201 status, response includes `user.id`, `country_code=USA`. |
 | 2 | Login Ava | `POST /v1/auth/login` | JWT issuance, refresh cookies | 200 status, capture `access_token`, `refresh_token`. |
 | 3 | Bootstrap conversation | `POST /v1/conversations` reuses the deterministic `uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` slug (the smoke CLI now calls HTTP by default; the legacy DB helper only runs when explicitly overridden). | Agent API + shared data layer | Conversation row exists before attachments to avoid 404; response payload seeds downstream steps. |
+| 3b | List existing conversations | `GET /v1/conversations` (page + tag filters) | Agent API pagination + reduced-scope metadata | Response includes the deterministic conversation with `document_count=0` before uploads; the CLI now fails fast if the listing misses the expected ID. |
 | 4 | Upload Policy Memo | `POST /v1/documents/upload` (Document A) | Markdown ingestion, dedupe hashing | 201 status, `status=COMPLETED`, `content_hash` matches fixture. |
 | 5 | Upload Ledger | `POST /v1/documents/upload` (Document B) | Numerical data ingestion | 201 status, chunk created, message includes ingestion metadata. |
 | 6 | Upload KPI Table | `POST /v1/documents/upload` (Document C) | Structured table as markdown | 201 status. |
+| 6b | List uploaded documents | `GET /v1/documents` (filter by tag + content hash) | Document inventory, ingestion status, content hash verification | Response echoes each fixture alias/content hash so the CLI can enforce that API state matches in-memory uploads before attachments. |
 | 7 | Attach Policy + Ledger | `POST /v1/conversations/{conversation_id}/attachments` (twice) | Attachment pipeline, reduced-scope filtering | 201 status for text docs, confirm listing shows both. |
 | 8 | Optional: auto-attach base doc | same endpoint with `auto_attach_base_docs=true` | Auto attachment fallback | Response contains `auto_attached` IDs if seeded docs exist. |
 | 9 | Simple QA prompt | `POST /v1/chat` (blocking) referencing policy doc | Retrieval + citation | Response contains phrase from Document A plus citation metadata pointing at uploaded doc. |
@@ -59,7 +61,7 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
 1. **Entry point**: `services/agent-api/scripts/run_reduced_e2e_smoke.py` executed via `uv run python ...`. Script orchestrates sequential stages above and exits non-zero on the first hard failure.
 2. **Modules** (to be introduced in Tasks 02–03):
    - `reduced_e2e_fixtures.py`: loads markdown + scenario manifest, computes SHA-256 hashes for dedupe, exposes dataclasses for documents/prompts.
-   - `reduced_e2e_client.py`: wraps `httpx.AsyncClient` for auth + Agent API calls, handling retries and structured logging.
+   - `reduced_e2e_client.py`: wraps `httpx.AsyncClient` for auth + Agent API calls, handling retries, structured logging, and paginated list helpers for `/v1/conversations` + `/v1/documents`.
    - `conversation_bootstrap.py`: uses shared data layer session (via `uv` + `.venv`) to upsert the deterministic conversation row for the authenticated user. This avoids creating bespoke HTTP endpoints solely for tests.
    - `localstack_probe.py`: polls `/_localstack/health` and optional `awslocal s3 ls` to confirm buckets once we start persisting artifacts. [LocalStack internal endpoints](https://docs.localstack.cloud/references/internal-endpoints/).
 3. **Configuration**:
@@ -67,7 +69,7 @@ _All prompts run in blocking mode to keep assertions simple; streaming coverage 
    - **LocalStack defaults**: prefer `AWS_ENDPOINT_URL=http://localhost.localstack.cloud:4566` so fixture helpers that eventually rely on boto3 inherit the recommended host. [LocalStack boto3 doc](https://docs.localstack.cloud/aws/integrations/aws-sdks/python-boto3/).
    - **Conversation ID**: `CONVERSATION_UUID=uuid5(NAMESPACE_URL, f"reduced-e2e-{user_id}")` stored in tracker JSON for reuse; Task 02 helper will insert if missing and reuse on reruns.
 4. **Execution flow**:
-   - Stage runner prints each action with emoji (✅/❌) plus latency; on failure, dumps HTTP request/response payloads to `logs/reduced_e2e/<timestamp>.json`.
+   - Stage runner prints each action with emoji (✅/❌) plus latency; on failure, dumps HTTP request/response payloads to `logs/reduced_e2e/<timestamp>.json`. Inventory stages now log the `document_count` returned by `/v1/conversations` and the alias/hash map returned by `/v1/documents` so operators can confirm resets without touching the database.
    - Summaries persist to `logs/reduced_e2e/latest_report.json` so CI can parse status.
 5. **Reporting**: script returns exit code 0 on success, non-zero otherwise, and writes a markdown recap block for release notes (Task 05 can embed in docs).
 
@@ -117,5 +119,5 @@ This job mirrors the local workflow and can be embedded in a larger pipeline whe
 1. **Conversation lifecycle**: No public HTTP endpoint provisions conversations today. Task 02 must ship a helper that creates one via shared data layer. If a public API later appears, update this plan + checklist immediately so Task 03 swaps helpers for HTTP calls.
 2. **LLM nondeterminism**: Prompts rely on textual heuristics (keywords, numeric sums). Keep tolerances loose (e.g., decimal comparisons) and assert on structured citation metadata rather than full strings.
 3. **LocalStack drift**: Endpoint hostnames/ports occasionally change (see LocalStack networking guidance). Keep `AWS_ENDPOINT_URL` defaulted and document overrides; update plan if LocalStack v5 introduces breaking DNS changes.
-4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. The CLI now exposes `--reseed-docs` / `--cleanup-only` flags that call `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` before uploads so operators never need direct DB access.
+4. **Data reset requirements**: Duplicate uploads or lingering attachments can cause dedupe responses. The CLI now exposes `--reseed-docs` / `--cleanup-only` flags that call `/v1/demo/reset-conversation` and `/v1/demo/purge-documents` before uploads so operators never need direct DB access, and it double-checks the cleanup by asserting that `/v1/conversations` returns `document_count=0` prior to reseeding.
 5. **Checklist hygiene**: If future tasks skip scenario steps (e.g., drop SQL prompt) or add new documents, update `epic-reduced-e2e/CHECKLIST.md` **and** append a Handoff note to this task file explaining the delta so Task 03–05 inherit accurate scope.

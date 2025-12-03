@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,6 +51,67 @@ class ChatCompletion:
     done_payload: dict[str, Any]
     cited_document_ids: list[str]
     events: list[dict[str, Any]] | None = None
+
+
+async def list_conversations(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    tags: Sequence[str] | None = None,
+    country_code: str | None = None,
+) -> dict[str, Any]:
+    params: list[tuple[str, Any]] = [("page", page), ("page_size", page_size)]
+    if tags:
+        for tag in tags:
+            params.append(("tags", tag))
+    if country_code:
+        params.append(("country_code", country_code))
+    response = await _request(
+        client,
+        "GET",
+        "/v1/conversations",
+        headers=_auth_headers(token),
+        params=params,
+    )
+    if response.status_code != 200:
+        raise SmokeError(
+            f"Conversation list failed ({response.status_code})",
+            context={"response": response.text},
+        )
+    return response.json()
+
+
+async def list_documents(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    tags: Sequence[str] | None = None,
+    content_hashes: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    params: list[tuple[str, Any]] = [("page", page), ("page_size", page_size)]
+    if tags:
+        for tag in tags:
+            params.append(("tags", tag))
+    if content_hashes:
+        for value in content_hashes:
+            params.append(("content_hash", value))
+    response = await _request(
+        client,
+        "GET",
+        "/v1/documents",
+        headers=_auth_headers(token),
+        params=params,
+    )
+    if response.status_code != 200:
+        raise SmokeError(
+            f"Document list failed ({response.status_code})",
+            context={"response": response.text},
+        )
+    return response.json()
 
 
 async def register_user(client: httpx.AsyncClient, payload: dict[str, Any]) -> RegisterResult:
@@ -375,9 +437,10 @@ async def _request(
     *,
     json: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    params: dict[str, Any] | list[tuple[str, Any]] | None = None,
 ) -> httpx.Response:
     try:
-        response = await client.request(method, url, json=json, headers=headers)
+        response = await client.request(method, url, json=json, headers=headers, params=params)
     except httpx.HTTPError as exc:
         raise SmokeError(f"HTTP error calling {url}: {exc}") from exc
     return response
