@@ -49,3 +49,8 @@ Refresh the top-level documentation so that a developer can clone the repo, copy
 - Developers following the README steps can bring up the stack without guessing missing env vars or flags.
 - Optional runbooks are updated/created as needed.
 - Task 05 logs include any verification commands run (`docker compose`, smoke scripts, etc.).
+
+## Handoff Notes
+- Docs were updated on 2025-12-03 to describe the root Compose workflow, LocalStack toggle, and new runbooks. Future agents should extend the same sections if additional services/profiles are added.
+- If upcoming tasks introduce new verification scripts or CLI helpers, remember to cross-link them from `README.md`, `QUICKSTART.md`, and the runbooks so onboarding stays single-sourced.
+- The next doc-focused effort should validate whether automation (Make targets, GitHub Actions docs) also needs references to the new compose profiles; no action was required in Task 05 because those files already referenced root compose.

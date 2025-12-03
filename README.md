@@ -1,515 +1,122 @@
-# Microservices Platform with TypeScript Swagger Aggregator
+# Housing Microservices Platform
 
-A comprehensive microservices ecosystem featuring a Flask-based Account Management Service and a TypeScript-based Swagger UI aggregator for centralized API documentation.
+A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gateway) with the legacy authentication, user, marker, and swagger services. The repo now ships a single root `docker-compose.yml` that can start either a reduced Agent API demo or the full stack with LocalStack-backed AWS emulation.
 
-## 🚀 Features
+## Service Inventory
+| Service | Language | Host Port | Profiles | Notes |
+| --- | --- | --- | --- | --- |
+| `postgres` | pgvector 16 | `${POSTGRES_PORT:-5432}` | default | Shared database for every service plus the reduced agent schema.
+| `db-init` | Python/uv | n/a | `reduced`, `full`, `ops` | Runs Alembic migrations + `scripts/seed_reduced_scope_data.py --if-empty`.
+| `agent-api` | FastAPI + LangGraph | `${AGENT_API_PORT:-8000}` | `reduced`, `full` | Text-only demo when `SERVICE_MODE=reduced`; reconnects to Valkey/AWS once flags flip.
+| `auth-service` | Flask | `${AUTH_SERVICE_PORT:-5001}` | default | Issues JWTs for the UI + downstream services.
+| `user-service` | Flask | `${USER_SERVICE_PORT:-5002}` | default | Depends on auth-service for token validation.
+| `swagger-service` | Node/Express | `${SWAGGER_SERVICE_PORT:-3000}` | default | Aggregates OpenAPI docs for every public service.
+| `marker-service` | FastAPI | `${MARKER_SERVICE_PORT:-8004}` | `full` | Exercises LocalStack S3/EventBridge flows during ingestion tasks.
+| `localstack` | LocalStack | `${LOCALSTACK_EDGE_PORT:-4566}` | default, `agent-api`, `full`, `aws-mock` | Emulates AWS endpoints when `USE_LOCALSTACK=1`.
+| `valkey` | Valkey 7 | `${VALKEY_PORT:-6379}` | `full` | Cache/rate-limit placeholder until the queue workers return.
+| `otel-collector` | OpenTelemetry | `${OTEL_COLLECTOR_GRPC_PORT:-4317}` | `full` | Optional traces/metrics collector.
+| `db-shell` | Postgres client | n/a | `ops`, `reduced`, `full` | Long-lived psql shell for ad-hoc queries.
 
-### Account Management Service (Flask/Python)
-- **Secure Authentication**: JWT-based access and refresh tokens
-- **Password Security**: Argon2 hashing algorithm
-- **User Management**: Registration, login, password reset
-- **Token Rotation**: Secure refresh token management
-- **Rate Limiting**: Protection against brute force attacks
-- **Input Validation**: Comprehensive security validation
-- **OpenAPI Documentation**: Auto-generated API specification
+## Prerequisites
+- Docker Desktop 25.x (or Engine 25.x) with Compose V2 (`docker compose`).
+- Git + bash-compatible shell (scripts assume POSIX shell semantics).
+- Optional: [uv](https://github.com/astral-sh/uv) to run scripts/tests without leaving the virtualenv.
 
-### TypeScript Swagger Aggregator Service
-- **Centralized Documentation**: Single portal for all microservices
-- **Type-Safe**: Full TypeScript implementation
-- **Service Discovery**: Automatic detection and aggregation
-- **Health Monitoring**: Real-time service health tracking
-- **Interactive UI**: Swagger UI with all services
-- **Auto-Refresh**: Periodic spec updates
-
-### Infrastructure
-- **Docker Orchestration**: Multi-container deployment
-- **PostgreSQL**: Robust data persistence
-- **Network Isolation**: Secure inter-service communication
-- **Health Checks**: Automated monitoring and recovery
-
-## 📋 Prerequisites
-
-- Docker 20.10+
-- Docker Compose 2.0+
-- (Optional for local dev) Node.js 18+ and Python 3.11+
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Docker Environment                     │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         Swagger Aggregator (Port 3000)           │  │
-│  │         TypeScript/Node.js/Express               │  │
-│  └──────────────────────────────────────────────────┘  │
-│                          │                              │
-│                          ▼                              │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │        Account Service (Port 5000)               │  │
-│  │        Flask/Python/SQLAlchemy                   │  │
-│  └──────────────────────────────────────────────────┘  │
-│                          │                              │
-│                          ▼                              │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │        PostgreSQL Database (Port 5432)           │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 🚦 Quick Start
-
-### 1. Clone and Setup
-
+## 1. Clone & Seed Config
 ```bash
-git clone <repository-url>
-cd ia-project
-cp .env.example .env
+git clone <repo-url>
+cd housing-microservices
+cp env.example .env        # never commit secrets
 ```
+Update `.env` with non-default passwords, JWT secrets, and any AWS credentials needed for full-mode testing. Use `.env.local` for personal overrides.
 
-### 2. Configure Environment Variables
+## 2. Pick a Stack Profile
+`STACK_PROFILE` mirrors the documentation narrative, while Compose profiles control which containers run.
 
-Edit the `.env` file with your configuration:
+| Use Case | STACK_PROFILE | Compose Flag | What Starts |
+| --- | --- | --- | --- |
+| Reduced Agent API demo | `reduced` | `docker compose --profile reduced up agent-api` | `postgres`, `db-init`, `agent-api`, `db-shell`, `localstack` (for S3 mocks).
+| Full platform | `full` | `docker compose --profile full up` | Everything above plus auth-service, user-service, swagger-service, marker-service, valkey, otel-collector.
+| Default legacy stack | `reduced` or `full` | `docker compose up` | `postgres`, auth-service, user-service, swagger-service, localstack.
 
+You can also set `COMPOSE_PROFILES` in `.env` or your shell (e.g., `COMPOSE_PROFILES=reduced,ops`). Compose always includes services without an explicit `profiles` entry (`postgres`, auth-service, user-service, swagger-service).
+
+## 3. Launch the Stack
+### Reduced (Epic 3.5 demo)
 ```bash
-# Database
-POSTGRES_PASSWORD=your-secure-password
-
-# JWT Secret (must be at least 32 characters)
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
-
-# Service URLs
-ACCOUNT_SERVICE_URL=http://auth-service:5000
+STACK_PROFILE=reduced \
+COMPOSE_PROFILES=reduced \
+  docker compose --profile reduced up --build agent-api
 ```
+- `db-init` waits for Postgres, runs Alembic migrations, then seeds via `services/agent-api/scripts/seed_reduced_scope_data.py --if-empty`.
+- The Agent API starts with `REDUCED_SCOPE_*` flags enabled, so `/v1/chat`, `/v1/documents/upload`, and pillar routes all run without Valkey.
+- Visit `http://localhost:${AGENT_API_PORT:-8000}/docs` for FastAPI, or see service URLs below.
 
-### 3. Start All Services
-
+### Full stack + LocalStack
 ```bash
-docker-compose up --build
+STACK_PROFILE=full \
+COMPOSE_PROFILES=full \
+  docker compose --profile full up --build
 ```
+- Brings up every service, LocalStack, Valkey, and optional telemetry.
+- Expect the first build to take several minutes because each service image builds from source.
+- Tail logs service-by-service (`docker compose logs -f agent-api`, `docker compose logs -f localstack`).
 
-This will start:
-- PostgreSQL database on port 5432
-- Account Service on port 5000
-- Swagger Aggregator on port 3000
-
-### 4. Access the Services
-
-- **📚 API Documentation**: http://localhost:3000/docs
-- **🏠 Landing Page**: http://localhost:3000
-- **💚 Health Check**: http://localhost:3000/health
-- **📊 System Status**: http://localhost:3000/api/status
-- **🔐 Account API**: http://localhost:5000
-
-## 🧪 Reduced Scope Agent API Demo (Epic 3.5)
-
-FastAPI + Postgres can now be run in a “text-only, no-Valkey” mode for Epic 3.5 demos.
-
-1. Copy the template env file: `cp services/agent-api/.env.reduced.example services/agent-api/.env.reduced` and update passwords/secrets.
-2. (Optional) Validate assets via `services/agent-api/scripts/verify_reduced_scope_compose.sh` (runs `docker compose config` + smoke tests).
-3. Launch the stack:
-   ```bash
-   docker compose -f services/agent-api/docker-compose.reduced.yml up --build
-   ```
-   - `postgres` exposes `${AGENT_API_DB_PORT:-5434}` and enables `pgvector` via init SQL.
-   - `db-init` runs Alembic migrations and `scripts/seed_reduced_scope_data.py --if-empty` so `/v1/chat`, `/v1/documents/upload`, and pillar routes have markitdown text immediately.
-4. Access FastAPI on `http://localhost:${AGENT_API_PORT:-8000}`; SSE + LangGraph streaming remain available while Valkey/queues stay disabled.
-5. Follow `docs/runbooks/reduced_scope_demo.md` for CLI usage, manual seeding, teardown, and instructions to revert to the full AWS deployment.
-
-> Need to return to the production topology? Flip `REDUCED_SCOPE_ENABLED=0`, reintroduce Valkey/SES containers, and follow the AWS deployment steps in `docs/infrastructure/infrastructure_and_deployment.md`.
-
-## 📖 API Documentation
-
-### Account Service Endpoints
-
-#### Authentication
-- `POST /auth/register` - Register a new user
-- `POST /auth/login` - Login and receive JWT tokens
-- `POST /auth/refresh` - Refresh access token
-- `POST /auth/logout` - Logout and revoke refresh token
-- `POST /auth/forgot-password` - Request password reset
-- `POST /auth/reset-password` - Reset password with token
-- `POST /auth/verify-token` - Verify access token validity
-
-#### System
-- `GET /health` - Service health check
-- `GET /status` - Service status information
-- `GET /openapi.json` - OpenAPI specification
-
-### Swagger Aggregator Endpoints
-
-#### Documentation
-- `GET /` - Landing page
-- `GET /docs` - Interactive Swagger UI
-
-#### Health & Monitoring
-- `GET /health` - Aggregator health check
-- `GET /health/metrics` - Detailed metrics for all services
-- `GET /health/metrics/:service` - Metrics for specific service
-
-#### Service Management
-- `GET /api/services` - List all registered services
-- `GET /api/services/:name` - Get specific service details
-- `GET /api/specs` - Aggregated OpenAPI specification
-- `GET /api/specs/:service` - Specification for specific service
-- `POST /api/refresh` - Force refresh all services
-- `POST /api/refresh/:service` - Refresh specific service
-- `GET /api/status` - Comprehensive system status
-
-## 🔒 Security Features
-
-### Account Service
-- **Argon2 Password Hashing**: Industry-leading password security
-- **JWT Tokens**: Stateless authentication with access/refresh pattern
-- **Token Rotation**: Automatic refresh token rotation for enhanced security
-- **Rate Limiting**: Brute force protection on sensitive endpoints
-- **Input Validation**: Comprehensive request validation and sanitization
-- **CORS Configuration**: Secure cross-origin resource sharing
-- **Security Headers**: HSTS, CSP, X-Frame-Options, etc.
-- **SQL Injection Prevention**: SQLAlchemy ORM with parameterized queries
-
-### Infrastructure
-- **Docker Network Isolation**: Services communicate through private network
-- **Non-root Containers**: Enhanced container security
-- **Environment Variables**: Secure configuration management
-- **Health Checks**: Automated monitoring and recovery
-
-## 🧪 Testing the API
-
-### Register a New User
-
+### Stopping & Cleaning Up
 ```bash
-curl -X POST http://localhost:5000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "username": "testuser",
-    "password": "SecurePass123!",
-    "first_name": "Test",
-    "last_name": "User"
-  }'
+docker compose down              # stop containers, keep volumes
+docker compose down -v           # wipes Postgres/LocalStack data
+docker compose --profile full down -v  # clean specific profile runs
 ```
 
-### Login
-
-```bash
-curl -X POST http://localhost:5000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "login": "user@example.com",
-    "password": "SecurePass123!"
-  }'
-```
-
-### Refresh Token
-
-```bash
-curl -X POST http://localhost:5000/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "your-refresh-token"
-  }'
-```
-
-### Check System Status
-
-```bash
-curl http://localhost:3000/api/status
-```
-
-## 🛠️ Development
-
-### Local Development - Account Service
-
-```bash
-cd services/auth-service
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export DATABASE_URL=postgresql://account_user:secure_password@localhost:5432/account_db
-export JWT_SECRET_KEY=your-secret-key
-
-# Run the service
-python run.py
-```
-
-### Local Development - Swagger Service
-
-```bash
-cd services/swagger-service
-
-# Install dependencies
-npm install
-
-# Set environment variables
-export PORT=3000
-export ACCOUNT_SERVICE_URL=http://localhost:5000
-
-# Run in development mode (with hot reload)
-npm run dev
-
-# Build for production
-npm run build
-npm start
-```
-
-### Pre-commit Hooks Setup
-
-To automatically run linting and formatting checks before each commit:
-
-```bash
-# Install pre-commit (if not already installed)
-pip install pre-commit
-
-# Or using Homebrew on macOS
-brew install pre-commit
-
-# Install the git hooks
-pre-commit install
-
-# (Optional) Run pre-commit on all files
-pre-commit run --all-files
-```
-
-The pre-commit hooks will automatically:
-- Format Python code with `black` and `isort`
-- Lint Python code with `flake8`
-- Format TypeScript/JavaScript code with `prettier`
-- Lint TypeScript/JavaScript code with `eslint`
-- Run security checks with `bandit`
-- Check for common issues (trailing whitespace, large files, etc.)
-
-To skip hooks for a specific commit (not recommended):
-```bash
-git commit --no-verify -m "your message"
-```
-
-## 📁 Project Structure
-
-```
-ia-project/
-├── services/
-│   ├── auth-service/          # Flask authentication service
-│   │   ├── app/
-│   │   │   ├── __init__.py       # Application factory
-│   │   │   ├── config.py         # Configuration
-│   │   │   ├── models/           # Database models
-│   │   │   ├── services/         # Business logic
-│   │   │   ├── api/              # API endpoints
-│   │   │   └── utils/            # Utilities
-│   │   ├── requirements.txt
-│   │   ├── Dockerfile
-│   │   └── run.py
-│   │
-│   └── swagger-service/          # TypeScript aggregator
-│       ├── src/
-│       │   ├── app.ts            # Main application
-│       │   ├── config/           # Configuration
-│       │   ├── types/            # TypeScript types
-│       │   ├── services/         # Core services
-│       │   ├── routes/           # Route handlers
-│       │   ├── middleware/       # Middleware
-│       │   └── utils/            # Utilities
-│       ├── package.json
-│       ├── tsconfig.json
-│       └── Dockerfile
-│
-├── docker-compose.yml            # Docker orchestration
-├── .env.example                  # Environment template
-├── .gitignore
-└── README.md
-```
-
-## 🔄 Adding New Microservices
-
-To add a new microservice to the ecosystem:
-
-1. **Create the service** with an OpenAPI endpoint (e.g., `/openapi.json`)
-2. **Add health check** endpoint (e.g., `/health`)
-3. **Update service registry** in `services/swagger-service/src/config/services.ts`:
-
-```typescript
-{
-  name: 'Your Service',
-  url: 'http://your-service:port',
-  specEndpoint: '/openapi.json',
-  healthEndpoint: '/health',
-  description: 'Service description',
-  version: '1.0.0',
-  tags: ['tag1', 'tag2'],
-  enabled: true,
-}
-```
-
-4. **Add to docker-compose.yml** if needed
-5. **Restart** the Swagger aggregator service
-
-The new service will automatically appear in the unified documentation!
-
-## 🐳 Docker Commands
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# View logs for specific service
-docker-compose logs -f auth-service
-docker-compose logs -f swagger-service
-
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes (database data)
-docker-compose down -v
-
-# Rebuild services
-docker-compose up --build
-
-# Check service status
-docker-compose ps
-```
-
-## 🔍 Monitoring
-
-### Check Service Health
-
-```bash
-# Overall health
-curl http://localhost:3000/health
-
-# Service metrics
-curl http://localhost:3000/health/metrics
-
-# Specific service metrics
-curl http://localhost:3000/health/metrics/Account%20Service
-```
-
-### View Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Account service only
-docker-compose logs -f auth-service
-
-# Swagger service only
-docker-compose logs -f swagger-service
-
-# Database only
-docker-compose logs -f postgres
-```
-
-## 🐛 Troubleshooting
-
-### Services Not Starting
-
-1. Check if ports are already in use:
-```bash
-lsof -i :3000
-lsof -i :5000
-lsof -i :5432
-```
-
-2. Check Docker logs:
-```bash
-docker-compose logs
-```
-
-3. Verify environment variables:
-```bash
-docker-compose config
-```
-
-### Database Connection Issues
-
-1. Check PostgreSQL is running:
-```bash
-docker-compose ps postgres
-```
-
-2. Check database logs:
-```bash
-docker-compose logs postgres
-```
-
-3. Verify database connection:
-```bash
-docker-compose exec postgres psql -U account_user -d account_db
-```
-
-### Swagger UI Not Showing Services
-
-1. Check if Account Service is healthy:
-```bash
-curl http://localhost:5000/health
-```
-
-2. Verify OpenAPI spec is accessible:
-```bash
-curl http://localhost:5000/openapi.json
-```
-
-3. Force refresh:
-```bash
-curl -X POST http://localhost:3000/api/refresh
-```
-
-## 📝 Environment Variables
-
-### Account Service
-- `DATABASE_URL`: PostgreSQL connection string
-- `JWT_SECRET_KEY`: Secret key for JWT signing (min 32 chars)
-- `JWT_ACCESS_TOKEN_EXPIRES`: Access token lifetime (seconds)
-- `JWT_REFRESH_TOKEN_EXPIRES`: Refresh token lifetime (seconds)
-
-### Swagger Service
-- `PORT`: Server port (default: 3000)
-- `NODE_ENV`: Environment (development/production)
-- `LOG_LEVEL`: Logging level (error/warn/info/debug)
-- `ACCOUNT_SERVICE_URL`: Account service URL
-- `SPEC_REFRESH_INTERVAL`: Spec refresh interval (ms)
-- `HEALTH_CHECK_INTERVAL`: Health check interval (ms)
-
-## 🚀 Production Deployment
-
-For production deployment:
-
-1. **Update environment variables** with production values
-2. **Use strong secrets** for JWT and database passwords
-3. **Enable HTTPS** with reverse proxy (nginx/traefik)
-4. **Set up monitoring** (Prometheus, Grafana)
-5. **Configure backups** for PostgreSQL
-6. **Set resource limits** in docker-compose.yml
-7. **Enable logging** to external service
-8. **Use Docker secrets** instead of environment variables
-
-## 📄 License
-
-MIT
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## 📧 Support
-
-For issues and questions, please open an issue on GitHub.
-
----
-
-**Built with ❤️ using Flask, TypeScript, Docker, and PostgreSQL**
+## 4. Verify & Smoke Test
+- Validate Compose file + reduced profile: `services/agent-api/scripts/verify_reduced_scope_compose.sh` (runs `docker compose --profile reduced config` + `pytest -k reduced_scope_smoke`).
+- Quick config sanity check for the full stack: `docker compose --profile full config`.
+- Hit health endpoints once containers are healthy:
+  - Swagger UI: `http://localhost:${SWAGGER_SERVICE_PORT:-3000}`
+  - Agent API health: `curl http://localhost:${AGENT_API_PORT:-8000}/health`
+  - Auth service: `curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health`
+  - LocalStack status: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`
+
+## 5. Seed & Admin Utilities
+- **Automatic seeding** happens every time `db-init` runs.
+- Manually reseed:
+  ```bash
+  docker compose run --rm db-init
+  ```
+- Run Agent API CLI helpers (pillar generation, ingestion, etc.):
+  ```bash
+  docker compose --profile reduced exec agent-api \
+    uv run agent_api.cli --help
+  ```
+- Connect to Postgres with `db-shell`:
+  ```bash
+  docker compose --profile reduced run --rm db-shell psql \
+    -h postgres -U ${AGENT_API_DB_USER:-agent_api} -d ${AGENT_API_DB:-agent_reduced}
+  ```
+
+## 6. LocalStack vs Real AWS
+- LocalStack is on by default (`USE_LOCALSTACK=1`). The services read `LOCALSTACK_HOST`, `LOCALSTACK_EDGE_PORT`, and `AWS_ENDPOINT_URL` from `.env`.
+- To hit real AWS resources:
+  1. Set `USE_LOCALSTACK=0`.
+  2. Provide real `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN`.
+  3. Clear `AWS_ENDPOINT_URL` so SDKs resolve actual AWS endpoints.
+  4. Restart any containers that talk to AWS (`docker compose restart agent-api marker-service`).
+- LocalStack data lives in the `localstack_data` volume. Remove it with `docker volume rm housing-microservices_localstack_data` or `docker compose down -v` if you need a clean slate.
+
+## 7. Troubleshooting Cheatsheet
+| Symptom | Fix |
+| --- | --- |
+| Ports already in use | `lsof -i :8000`, stop conflicting process, then re-run Compose. |
+| `db-init` fails with auth errors | Ensure `.env` passwords match `scripts/init-databases.sh` defaults or override them consistently. Rerun `docker compose run --rm db-init`. |
+| LocalStack healthcheck flaps | Increase `LOCALSTACK_DEBUG=1` to inspect logs, or temporarily set `USE_LOCALSTACK=0` to bypass AWS emulation. |
+| Services stuck in `starting` | Run `docker compose ps`, inspect `docker compose logs <service>`, verify `.env` copied from `env.example`. |
+| Need a clean database | `docker compose down -v`, then start the stack again so `db-init` reseeds from scratch. |
+
+## 8. Additional References
+- `docs/runbooks/reduced_scope_demo.md` — detailed walkthrough of the reduced-profile workflow.
+- `docs/runbooks/full_stack_compose.md` — full-stack LocalStack runbook (new in Task 05).
+- `docs/infrastructure/root_compose_plan.md` — architectural decisions behind the root Compose stack.
+- `docs/infrastructure/infrastructure_and_deployment.md` — AWS deployment strategy + how the local Compose mirrors it.
+
+Questions? Start with the relevant runbook, then open an issue/PR with the context you gathered. Happy hacking! 🚀

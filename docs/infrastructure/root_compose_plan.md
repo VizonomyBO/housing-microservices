@@ -5,7 +5,7 @@
 - Support two runtime profiles:
   - `full`: boots Postgres + auth-service + user-service + swagger-service + agent-api + marker-service + shared dependencies (Valkey, LocalStack, telemetry exporters).
   - `reduced`: limits startup to agent-api, its `db-init` helper, and Postgres with the Epic 3.5 feature flags to keep text-only, no-Valkey mode.
-- Keep parity with existing reduced-scope experience (seed scripts, `uv` runtime, pgvector) while paving the path to retire `services/agent-api/docker-compose.reduced.yml`.
+- Keep parity with the legacy reduced-scope experience (seed scripts, `uv` runtime, pgvector) while paving the path to retire the old service-scoped reduced Compose file.
 
 ## 2. Service & Dependency Inventory
 | Component | Runtime / Image | Ports | Build Context | Critical Dependencies | Notes |
@@ -104,7 +104,7 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
    - Update `docs/runbooks/reduced_scope_demo.md` to call the root compose file with `COMPOSE_PROFILES=agent-api`.
    - Remove references to `docker-compose.reduced.yml` from README/QUICKSTART once Task 02 implements the stack.
 4. **Deletion checklist:**
-   - After Task 02 verifies parity, delete `services/agent-api/docker-compose.reduced.yml` and associated scripts that duplicate root behavior.
+   - After Task 02 verifies parity, delete the deprecated service-level reduced Compose file and associated scripts that duplicated root behavior. (Completed December 2025, note retained here for historical context.)
    - Preserve `scripts/verify_reduced_scope_compose.sh` by pointing it to the root compose file.
 5. **CI adjustments:** ensure GitHub workflows or future `uv` scripts call `docker compose --profile agent-api config` as part of linting.
 

@@ -1,66 +1,87 @@
 # Reduced Scope Demo Runbook
 
-This runbook explains how to launch the Agent API + Postgres demo stack for Epic 3.5 using only FastAPI, LangGraph, and the shared data layer. The flow keeps Valkey, SES, SQS, and GitHub Actions disabled while preserving the full production architecture behind feature flags.
+This runbook walks through the Epic 3.5 “text-only, no-Valkey” experience using the root `docker-compose.yml`. The reduced profile launches just enough infrastructure for FastAPI + Postgres while keeping the production architecture (LangGraph nodes, seed scripts, LocalStack) behind feature flags.
 
-## Prerequisites
-- Docker 25.x+ with Compose V2 (`docker compose` CLI).
-- Python 3.13-compatible host (only required for running `uv` commands outside containers).
-- Access to the repo root (`housing-microservices`).
+## 1. Prerequisites
+- Docker 25.x with Compose V2 (`docker compose`).
+- Git + bash-compatible shell.
+- Optional: [uv](https://github.com/astral-sh/uv) if you need to run CLI helpers or smoke tests locally.
 
-## Environment Files
-1. Copy `services/agent-api/.env.reduced.example` to `.env.reduced` inside the same directory.
-2. Adjust secrets as needed:
-   - `AGENT_API_DB_PASSWORD` — Postgres password for the demo database.
-   - `DATABASE_URL` — Async SQLAlchemy URL (default uses `postgresql+asyncpg`).
-   - `REDUCED_SCOPE_*` flags — leave enabled for the demo; flip to `0` only when re-enabling Valkey/queues.
-3. Root-level `env.example` now documents the same variables so CI/CD and manual runs share the same defaults.
+## 2. Environment Prep
+1. From the repo root:
+   ```bash
+   cp env.example .env
+   ```
+2. Set/confirm the following variables in `.env` or your shell:
+   - `STACK_PROFILE=reduced`
+   - `COMPOSE_PROFILES=reduced` (adds the reduced profile in addition to Compose’s `default` services).
+   - `SERVICE_MODE=reduced` and `REDUCED_SCOPE_*` flags should remain `1`.
+   - `USE_LOCALSTACK=1` for mocked AWS endpoints (default). Set to `0` only if you have real AWS credentials.
+3. Optional: create `.env.local` (gitignored) for developer-specific overrides and `source` it before running Compose.
 
-## Bringing Up the Stack
+## 3. Launch Sequence
+```bash
+STACK_PROFILE=reduced \
+COMPOSE_PROFILES=reduced \
+  docker compose --profile reduced up --build agent-api
+```
+- `postgres` starts immediately because it has no profile restrictions.
+- `db-init` waits for Postgres to become healthy, then runs Alembic migrations and `services/agent-api/scripts/seed_reduced_scope_data.py --if-empty`.
+- `agent-api` starts once `db-init` completes successfully. LocalStack is attached automatically so S3/EventBridge clients resolve to the mock endpoints.
+
+### Smoke Verification (Optional but Recommended)
+Run the helper script from the Agent API service directory:
 ```bash
 cd services/agent-api
-./scripts/verify_reduced_scope_compose.sh   # optional but recommended
-COMPOSE_FILE=docker-compose.reduced.yml
-DATABASE_URL=postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced \
-  docker compose -f "$COMPOSE_FILE" up --build
+./scripts/verify_reduced_scope_compose.sh
 ```
-- `postgres` exposes port 5434 on the host (configurable via `AGENT_API_DB_PORT`).
-- `db-init` runs `alembic upgrade head` followed by `python scripts/seed_reduced_scope_data.py --if-empty`.
-- `agent-api` container listens on `${AGENT_API_PORT:-8000}` with `REDUCED_SCOPE_ENABLED=1`.
+This wraps `docker compose --profile reduced config` for linting and executes `pytest -k reduced_scope_smoke` to ensure demo endpoints stay healthy.
 
-### Seeding & Admin Actions
-- Seed script runs automatically, but you can re-run it:
+## 4. Interacting With the Stack
+| Action | Command / URL |
+| --- | --- |
+| FastAPI docs | `http://localhost:${AGENT_API_PORT:-8000}/docs` |
+| Chat stream smoke | `curl http://localhost:${AGENT_API_PORT:-8000}/health` |
+| Browse seeded documents | `GET /v1/documents?limit=5` via the FastAPI docs |
+| CLI helpers | `docker compose --profile reduced exec agent-api uv run agent_api.cli --help` |
+| PostgreSQL shell | `docker compose --profile reduced run --rm db-shell psql -h postgres -U agent_api -d agent_reduced` |
+| LocalStack health | `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health` |
+
+## 5. Seeding & Maintenance
+- Rerun seed logic at any time:
   ```bash
-  docker compose -f services/agent-api/docker-compose.reduced.yml run --rm agent-api \
+  docker compose run --rm db-init
+  ```
+- Force-reseed with CLI:
+  ```bash
+  docker compose --profile reduced exec agent-api \
     uv run python scripts/seed_reduced_scope_data.py --force
   ```
-- `db-shell` profile exposes a long-running Postgres container for manual psql access:
-  ```bash
-  docker compose -f services/agent-api/docker-compose.reduced.yml run --rm db-shell psql \
-    -h postgres -U agent_api -d agent_reduced
-  ```
+- Tail logs when debugging: `docker compose logs -f agent-api`, `docker compose logs -f db-init`.
 
-### Running CLI Helpers
-Exec into the API container to run the reduced-scope CLI from Task 03:
+## 6. Teardown & Reset
 ```bash
-docker compose -f services/agent-api/docker-compose.reduced.yml exec agent-api \
-  uv run agent-runtime generate-pillars --country-code USA
+docker compose --profile reduced down       # stop reduced profile containers
+docker compose --profile reduced down -v    # also delete Postgres + LocalStack volumes
 ```
+Use the `-v` flag whenever you want to rebuild the demo database from scratch. Restarting afterward automatically runs `db-init` with fresh seeds.
 
-## Teardown
-```bash
-docker compose -f services/agent-api/docker-compose.reduced.yml down
-# Remove volumes (including Postgres data)
-docker compose -f services/agent-api/docker-compose.reduced.yml down -v
-```
+## 7. Switching Back to Full Mode
+1. Update `.env` or your shell:
+   ```bash
+   export STACK_PROFILE=full
+   export COMPOSE_PROFILES=full
+   export USE_LOCALSTACK=0   # optional if you have real AWS credentials
+   ```
+2. Run `docker compose --profile full up --build` to start every service.
+3. Refer to `docs/runbooks/full_stack_compose.md` for the full workflow (LocalStack toggle, marker-service flows, telemetry).
 
-## Smoke Verification
-- `services/agent-api/scripts/verify_reduced_scope_compose.sh` validates the Compose file and runs `pytest -k reduced_scope_smoke`.
-- CI jobs can call the script directly to guard against regressions without bringing containers up.
+## 8. Troubleshooting
+| Symptom | Action |
+| --- | --- |
+| `db-init` exits non-zero | Ensure `.env` passwords match `scripts/init-databases.sh` defaults, then `docker compose run --rm db-init`. |
+| Agent API stuck in `starting` | Check `docker compose logs agent-api` for missing env vars; confirm `STACK_PROFILE=reduced`. |
+| LocalStack healthcheck fails | Inspect `docker compose logs localstack`; set `LOCALSTACK_DEBUG=1` for verbose output. |
+| Need to bypass LocalStack | Set `USE_LOCALSTACK=0`, provide real AWS creds, and `docker compose restart agent-api`. |
 
-## Reverting to Full Architecture (Post-demo)
-1. Set `REDUCED_SCOPE_ENABLED=0` and restore Valkey/SQS configuration in `.env` files.
-2. Switch deployment pipelines back to `docs/infrastructure/infrastructure_and_deployment.md` AWS flow (re-enable GitHub Actions workflows, Terraform Valkey/SES modules, worker ASGs).
-3. Reintroduce Valkey/SES containers into the root `docker-compose.yml` or an extended profile if a local cache is required for testing before production.
-4. Remove/disable the `db-init` helper once CI/CD handles migrations and seeding again.
-
-Document outstanding infra follow-ups in `services/agent-api/epic-035/tasks/task-05-auth-notification-fallback.md` before leaving the reduced-scope mode.
+Keep this runbook close whenever you demo LangGraph features without the rest of the platform. For the complementary full-stack experience, see `docs/runbooks/full_stack_compose.md`.
