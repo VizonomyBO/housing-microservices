@@ -12,6 +12,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from shared_data_layer.db.session import DatabaseSessionManager
 
+from agent_api.auth import AuthTokenValidator
+from agent_api.aws.factory import AWSClientFactory
 from agent_api.http.deps import (
     UnconfiguredChatRunner,
     get_chat_runner,
@@ -54,12 +56,14 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         registry = get_metrics_registry()
         app.state.metrics_registry = registry
+        app.state.auth_validator = AuthTokenValidator(settings.auth, metrics=registry)
         app.state.cache_observability = CacheObservability(
             metrics=registry, namespace=settings.metrics_namespace
         )
         app.state.settings = settings
         app.state.reduced_scope = settings.reduced_scope
         app.state.rate_limiter = _build_rate_limiter(settings)
+        app.state.aws_factory = AWSClientFactory(settings=settings)
 
         app.state.valkey_client = await _initialize_cache_client(
             settings=settings,

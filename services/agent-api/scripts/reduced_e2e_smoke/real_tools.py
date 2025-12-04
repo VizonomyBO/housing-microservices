@@ -178,7 +178,10 @@ class RealToolVerifier:
     def record_prompt_capability(self, capability: str, document_aliases: list[str]) -> None:
         if not self.enabled:
             return
-        if capability.lower() in {"cross_doc_reasoning", "rerank", "fusion"} or len(document_aliases) > 1:
+        if (
+            capability.lower() in {"cross_doc_reasoning", "rerank", "fusion"}
+            or len(document_aliases) > 1
+        ):
             self.reranker_prompts += 1
 
     def _record_signal(

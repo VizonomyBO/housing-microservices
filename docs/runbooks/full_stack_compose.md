@@ -44,8 +44,8 @@ COMPOSE_PROFILES=full,ops \
 | Valkey ping | `docker compose exec valkey valkey-cli ping` |
 
 ## 5. LocalStack Toggle
-- **Local mode (default)**: `USE_LOCALSTACK=1` keeps `AWS_ENDPOINT_URL` pointing at the `localstack` container. Buckets (`RAW_DOCUMENTS_BUCKET`, `PROCESSED_BUCKET`) are created on startup.
-- **Real AWS**: set `USE_LOCALSTACK=0`, populate `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, (optional) `AWS_SESSION_TOKEN`, and clear `AWS_ENDPOINT_URL`. Restart any AWS-aware services (`docker compose restart agent-api marker-service`).
+- **Local mode (default)**: `USE_LOCALSTACK=1` keeps `AWS_ENDPOINT_URL` pointing at the `localstack` container. Buckets (`RAW_DOCUMENTS_BUCKET`, `PROCESSED_BUCKET`) are created on startup and the smoke wrapper waits for `/_localstack/health` before running.
+- **Real AWS**: set `USE_LOCALSTACK=0`, populate `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, (optional) `AWS_SESSION_TOKEN`, and clear `AWS_ENDPOINT_URL`. Restart any AWS-aware services (`docker compose restart agent-api marker-service`), and expect the reduced smoke wrapper to skip LocalStack entirely so every SDK call hits the real endpoints you configured.
 - To inspect LocalStack resources, run `docker compose exec localstack awslocal s3 ls`.
 
 ## 6. Seeding & CLI Helpers

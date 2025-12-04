@@ -81,11 +81,14 @@ async def test_runner_maps_node_errors(db_session):
         openai_client=None,
         metrics=metrics,
     )
-    with patch.object(
-        runner,
-        "_execute_pipeline",
-        AsyncMock(side_effect=NodeError(code="BAD", message="boom")),
-    ), pytest.raises(GatewayError) as excinfo:
+    with (
+        patch.object(
+            runner,
+            "_execute_pipeline",
+            AsyncMock(side_effect=NodeError(code="BAD", message="boom")),
+        ),
+        pytest.raises(GatewayError) as excinfo,
+    ):
         await runner.run_chat(
             request=_chat_request(),
             auth=AuthContext(user_id="user-1"),

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Annotated
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request, status
 from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_api.auth import AuthTokenValidator, AuthValidationError
+from agent_api.aws.factory import AWSClientFactory
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.rate_limit import NullRateLimiter, RateLimiterProtocol
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
@@ -27,6 +29,8 @@ _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner
 _STREAM_SETTINGS = StreamSettings()
 _CACHE_CLIENT_STATE: dict[str, ValkeyCacheClientProtocol | None] = {"client": None}
 _RATE_LIMITER_STATE: dict[str, RateLimiterProtocol | None] = {"limiter": None}
+_AUTH_VALIDATOR_STATE: dict[str, AuthTokenValidator | None] = {"validator": None}
+_AWS_FACTORY_STATE: dict[str, AWSClientFactory | None] = {"factory": None}
 
 
 async def get_request_context(request: Request) -> RequestContext:
@@ -51,13 +55,25 @@ async def get_request_context(request: Request) -> RequestContext:
 
 
 async def get_auth_context(request: Request) -> AuthContext:
-    """Stubbed auth dependency that extracts the bearer subject when available."""
+    """Validate the Authorization header and return the authenticated user context."""
 
     header = request.headers.get("Authorization")
-    if header and header.startswith("Bearer "):
-        token = header.split(" ", 1)[1].strip()
-        return AuthContext(user_id=_coerce_user_id(token))
-    return AuthContext(user_id=None)
+    if not header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header"
+        )
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Authorization header"
+        )
+    validator = _resolve_auth_validator(request)
+    try:
+        context = await validator.validate(token.strip())
+    except AuthValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    request.state.auth_context = context
+    return context
 
 
 def get_chat_runner() -> ChatRunnerProtocol:
@@ -172,8 +188,22 @@ def get_document_ingestion_pipeline(request: Request) -> VoyageIngestionPipeline
     return getattr(request.app.state, "ingestion_pipeline", None)
 
 
+def get_aws_client_factory(request: Request) -> AWSClientFactory:
+    if hasattr(request, "app"):
+        factory = getattr(request.app.state, "aws_factory", None)
+        if factory is None:
+            settings = get_settings(request)
+            factory = AWSClientFactory(settings=settings)
+            request.app.state.aws_factory = factory
+        return factory
+    if _AWS_FACTORY_STATE["factory"] is None:
+        _AWS_FACTORY_STATE["factory"] = AWSClientFactory(settings=load_settings())
+    return _AWS_FACTORY_STATE["factory"]
+
+
 __all__ = [
     "get_auth_context",
+    "get_aws_client_factory",
     "get_cache_client",
     "get_cache_observability",
     "get_chat_runner",
@@ -192,8 +222,17 @@ __all__ = [
 ]
 
 
-def _coerce_user_id(raw: str) -> str:
-    try:
-        return str(UUID(raw))
-    except ValueError:
-        return str(uuid5(NAMESPACE_URL, raw))
+def _resolve_auth_validator(request: Request) -> AuthTokenValidator:
+    if hasattr(request, "app"):
+        validator = getattr(request.app.state, "auth_validator", None)
+        if validator is not None:
+            return validator
+        settings = get_settings(request)
+        metrics = get_metrics_registry_dep(request)
+        validator = AuthTokenValidator(settings.auth, metrics=metrics)
+        request.app.state.auth_validator = validator
+        return validator
+    if _AUTH_VALIDATOR_STATE["validator"] is None:
+        settings = load_settings()
+        _AUTH_VALIDATOR_STATE["validator"] = AuthTokenValidator(settings.auth)
+    return _AUTH_VALIDATOR_STATE["validator"]

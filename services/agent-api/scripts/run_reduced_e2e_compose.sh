@@ -65,15 +65,34 @@ load_env_files() {
 
 STACK_STARTED=0
 COMPOSE_PROFILE="reduced"
-SERVICES=(postgres db-init agent-api auth-service user-service localstack)
+BASE_SERVICES=(postgres db-init agent-api auth-service user-service)
+SERVICES=()
 MAX_HEALTH_ATTEMPTS=${MAX_HEALTH_ATTEMPTS:-40}
 HEALTH_SLEEP_SECONDS=${HEALTH_SLEEP_SECONDS:-5}
 HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-5}
 CLI_REPORT_PATH=${CLI_REPORT_PATH:-/app/logs/reduced_e2e_smoke.json}
 CLI_PYTHONPATH=${CLI_PYTHONPATH:-/app/services/agent-api:/app/services/agent-api/src}
 
+is_truthy() {
+  local value="${1:-}"
+  case "${value,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 ensure_env_file
 load_env_files
+
+LOCALSTACK_ENABLED=0
+if is_truthy "${USE_LOCALSTACK:-1}"; then
+  LOCALSTACK_ENABLED=1
+fi
+
+SERVICES=(${BASE_SERVICES[@]})
+if [[ $LOCALSTACK_ENABLED -eq 1 ]]; then
+  SERVICES+=("localstack")
+fi
 
 USE_REAL_TOOLS_FLAG=${REDUCED_SCOPE_USE_REAL_TOOLS:-0}
 if [[ "${REAL_REDUCED_E2E_TOOLS:-0}" == "1" ]]; then
@@ -92,8 +111,18 @@ COMPOSE_PROFILES_VALUE=${COMPOSE_PROFILES:-reduced}
 if [[ "$COMPOSE_PROFILES_VALUE" != *reduced* ]]; then
   COMPOSE_PROFILES_VALUE="reduced,${COMPOSE_PROFILES_VALUE}"
 fi
-if [[ "$COMPOSE_PROFILES_VALUE" != *aws-mock* ]]; then
-  COMPOSE_PROFILES_VALUE="${COMPOSE_PROFILES_VALUE},aws-mock"
+if [[ $LOCALSTACK_ENABLED -eq 1 ]]; then
+  if [[ "$COMPOSE_PROFILES_VALUE" != *aws-mock* ]]; then
+    COMPOSE_PROFILES_VALUE="${COMPOSE_PROFILES_VALUE},aws-mock"
+  fi
+else
+  COMPOSE_PROFILES_VALUE=$(python - "$COMPOSE_PROFILES_VALUE" <<'PY'
+import sys
+profiles = sys.argv[1]
+parts = [p for p in profiles.split(',') if p and p != 'aws-mock']
+print(','.join(parts) if parts else 'default')
+PY
+  )
 fi
 export STACK_PROFILE="$STACK_PROFILE_VALUE"
 export COMPOSE_PROFILES="$COMPOSE_PROFILES_VALUE"
@@ -147,14 +176,17 @@ wait_for_stack() {
   local agent_port=${AGENT_API_PORT:-8000}
   local auth_port=${AUTH_SERVICE_PORT:-5001}
   local user_port=${USER_SERVICE_PORT:-5002}
-  local localstack_port=${LOCALSTACK_EDGE_PORT:-4566}
   declare -a targets=(
     "Agent API /health|http://localhost:${agent_port}/health"
     "Agent API /v1/health|http://localhost:${agent_port}/v1/health"
     "Auth Service|http://localhost:${auth_port}/v1/health"
     "User Service|http://localhost:${user_port}/v1/health"
-    "LocalStack|http://localhost:${localstack_port}/_localstack/health"
   )
+
+  if [[ $LOCALSTACK_ENABLED -eq 1 ]]; then
+    local localstack_port=${LOCALSTACK_EDGE_PORT:-4566}
+    targets+=("LocalStack|http://localhost:${localstack_port}/_localstack/health")
+  fi
 
   local entry name url
   for entry in "${targets[@]}"; do
@@ -177,6 +209,10 @@ run_cli() {
   fi
 
   local cli_args=(uv run python scripts/run_reduced_e2e_smoke.py --output "$CLI_REPORT_PATH")
+  if [[ $LOCALSTACK_ENABLED -eq 1 ]]; then
+    local stack_url="http://localstack:${LOCALSTACK_EDGE_PORT:-4566}"
+    cli_args+=(--localstack-url "$stack_url")
+  fi
   if [[ $# -gt 0 ]]; then
     cli_args+=("$@")
   fi

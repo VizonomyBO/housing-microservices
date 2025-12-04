@@ -13,6 +13,8 @@ from agent_api.http.streaming import ChatRunnerProtocol, ChatRunResult
 from streaming.events import SSEEventType, TaskLifecyclePayload
 from streaming.sse_emitter import SSEEmitter
 
+_AUTH_HEADERS = {"Authorization": "Bearer 00000000-0000-0000-0000-000000000001"}
+
 
 class _SuccessfulRunner(ChatRunnerProtocol):
     async def run_chat(
@@ -90,7 +92,7 @@ def test_streaming_endpoint_emits_sse_frames() -> None:
     app = create_app()
     client = TestClient(app)
 
-    with client.stream("POST", "/v1/chat", json=_payload()) as response:
+    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
         chunks = list(response.iter_lines())
 
     assert response.status_code == 200
@@ -108,7 +110,7 @@ def test_blocking_mode_returns_json_payload() -> None:
     client = TestClient(app)
 
     payload = _payload(response_mode="blocking")
-    response = client.post("/v1/chat", json=payload)
+    response = client.post("/v1/chat", json=payload, headers=_AUTH_HEADERS)
     data = response.json()
     assert response.status_code == 200
     assert data["done"]["status"] == "COMPLETED"
@@ -122,7 +124,7 @@ def test_streaming_error_emits_task_error_event() -> None:
     app = create_app()
     client = TestClient(app)
 
-    with client.stream("POST", "/v1/chat", json=_payload()) as response:
+    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
         chunks = list(response.iter_lines())
 
     assert any("event: task_error" in chunk for chunk in chunks)
@@ -135,7 +137,7 @@ def test_reduced_scope_emits_demo_event(monkeypatch: pytest.MonkeyPatch) -> None
     app = create_app()
     client = TestClient(app)
 
-    with client.stream("POST", "/v1/chat", json=_payload()) as response:
+    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
         chunks = list(response.iter_lines())
 
     assert response.headers["X-Cache-Mode"] == "text-only"

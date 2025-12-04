@@ -17,6 +17,7 @@ This runbook walks through the Epic 3.5 “text-only, no-Valkey” experience us
    - `COMPOSE_PROFILES=reduced` (adds the reduced profile in addition to Compose’s `default` services).
    - `SERVICE_MODE=reduced` and `REDUCED_SCOPE_*` flags should remain `1`.
    - `USE_LOCALSTACK=1` for mocked AWS endpoints (default). Set to `0` only if you have real AWS credentials.
+   - `AUTH_SHARED_SECRET`/`AUTH_JWKS_URL` to control JWT validation. Leave `AUTH_JWKS_URL` empty until auth-service publishes JWKS metadata; ensure `AUTH_SHARED_SECRET` matches `JWT_SECRET_KEY` so HS256 dev tokens stay valid.
    - For “real tooling” runs: set `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or export `REAL_REDUCED_E2E_TOOLS=1` when using the smoke wrapper) **and** provide `OPENAI_API_KEY` + `VOYAGE_API_KEY`. The Agent API now fails fast if those secrets are missing when real mode is requested.
 3. Optional: create `.env.local` (gitignored) for developer-specific overrides and `source` it before running Compose.
 
@@ -26,9 +27,10 @@ STACK_PROFILE=reduced \
 COMPOSE_PROFILES=reduced \
   docker compose --profile reduced up --build agent-api
 ```
+- `scripts/run_reduced_e2e_compose.sh` mirrors this behavior: when `USE_LOCALSTACK=0` it omits the LocalStack container entirely and runs the smoke CLI without the `--localstack-url` probe so every AWS call hits the real endpoint you configured.
 - `postgres` starts immediately because it has no profile restrictions.
 - `db-init` waits for Postgres to become healthy, then runs Alembic migrations and `services/agent-api/scripts/seed_reduced_scope_data.py --if-empty`.
-- `agent-api` starts once `db-init` completes successfully. LocalStack is attached automatically so S3/EventBridge clients resolve to the mock endpoints.
+- `agent-api` starts once `db-init` completes successfully. When `USE_LOCALSTACK=1`, LocalStack joins the stack so S3/EventBridge clients resolve to mock endpoints; set `USE_LOCALSTACK=0` to skip the container and rely on real AWS services instead.
 
 ### Smoke Verification (Optional but Recommended)
 Run the helper script from the Agent API service directory:
@@ -45,6 +47,18 @@ This wraps `docker compose --profile reduced config` for linting and executes `p
 - **Secrets**: `OPENAI_API_KEY` and `VOYAGE_API_KEY` must be present in `.env`/`.env.local`. The FastAPI app exits during startup if either secret is missing while the flag is enabled.
 - **Wrapper shortcut**: export `REAL_REDUCED_E2E_TOOLS=1 make reduced-e2e-smoke` (or pass the env var directly to `scripts/run_reduced_e2e_compose.sh`). The wrapper now propagates the flag into Docker, sets the Typer CLI’s `--use-real-tools` option, and mirrors the state via `REAL_REDUCED_E2E_TOOLS` inside the container.
 - **Limited exceptions**: even in real mode, only Valkey/cache wiring and image/table ingestion remain stubbed. Any other shortcut (fake rate limits, text-only ingestion, etc.) must be treated as a regression.
+
+### Authentication Tokens
+
+- The smoke CLI now registers (or reuses) the demo account and calls `/v1/auth/login` on auth-service to obtain a real JWT before it touches the Agent API. If the login stage fails, inspect `auth-service` logs—the API will now reject every request without a valid token.
+- Manual API explorations must propagate that JWT via the `Authorization: Bearer <token>` header. To fetch one quickly:
+  ```bash
+  curl -s http://localhost:${AUTH_SERVICE_PORT:-5001}/v1/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"login":"ava.reduced+demo@example.com","password":"DemoPassw0rd!"}' \
+    | jq -r '.access_token'
+  ```
+- Update the login payload if you override the demo credentials via `REDUCED_E2E_*` env vars. Tokens expire after 15 minutes by default; rerun the command (or the smoke CLI) whenever the Agent API returns `401`.
 
 ## 4. Interacting With the Stack
 | Action | Command / URL |
@@ -91,6 +105,7 @@ Use the `-v` flag whenever you want to rebuild the demo database from scratch. R
 | `db-init` exits non-zero | Ensure `.env` passwords match `scripts/init-databases.sh` defaults, then `docker compose run --rm db-init`. |
 | Agent API stuck in `starting` | Check `docker compose logs agent-api` for missing env vars; confirm `STACK_PROFILE=reduced`. |
 | LocalStack healthcheck fails | Inspect `docker compose logs localstack`; set `LOCALSTACK_DEBUG=1` for verbose output. |
+| API calls return 401 | Fetch a fresh JWT from auth-service (see Authentication Tokens above) and include it via `Authorization: Bearer <token>`. |
 | Need to bypass LocalStack | Set `USE_LOCALSTACK=0`, provide real AWS creds, and `docker compose restart agent-api`. |
 
 Keep this runbook close whenever you demo LangGraph features without the rest of the platform. For the complementary full-stack experience, see `docs/runbooks/full_stack_compose.md`.

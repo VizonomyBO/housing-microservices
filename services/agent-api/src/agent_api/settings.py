@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from agent_api.reduced_scope import ReducedScopeSettings, coerce_allowed_chunk_types
@@ -35,6 +36,24 @@ class Settings:
     voyage_api_key: str | None
     openai_chat_model: str
     voyage_embedding_model: str
+    auth: AuthSettings
+
+
+@dataclass(slots=True)
+class AuthSettings:
+    """Configuration required to validate JWTs issued by auth-service."""
+
+    jwks_url: str | None
+    issuer: str | None
+    audience: str | None
+    algorithms: tuple[str, ...]
+    cache_ttl_seconds: int
+    leeway_seconds: int
+    required_scopes: tuple[str, ...]
+    shared_secret: str | None
+    scope_claim: str
+    tenant_claim: str | None
+    http_timeout_seconds: float
 
 
 def load_settings() -> Settings:
@@ -74,6 +93,23 @@ def load_settings() -> Settings:
     localstack_edge_port = _env_int("LOCALSTACK_EDGE_PORT", default=4566)
     use_localstack = _env_flag("USE_LOCALSTACK", default=True)
 
+    auth_settings = AuthSettings(
+        jwks_url=_env_str("AUTH_JWKS_URL"),
+        issuer=_env_str("AUTH_JWT_ISSUER"),
+        audience=_env_str("AUTH_JWT_AUDIENCE"),
+        algorithms=_env_csv(
+            "AUTH_JWT_ALGORITHMS",
+            default=("RS256", "HS256"),
+        ),
+        cache_ttl_seconds=_env_int("AUTH_JWKS_CACHE_SECONDS", default=3600),
+        leeway_seconds=_env_int("AUTH_JWT_LEEWAY_SECONDS", default=60),
+        required_scopes=_env_csv("AUTH_REQUIRED_SCOPES"),
+        shared_secret=_env_str("AUTH_SHARED_SECRET") or _env_str("JWT_SECRET_KEY"),
+        scope_claim=_env_str("AUTH_SCOPE_CLAIM", default="scope") or "scope",
+        tenant_claim=_env_str("AUTH_TENANT_CLAIM", default="tenant_id"),
+        http_timeout_seconds=_env_float("AUTH_JWKS_TIMEOUT_SECONDS", default=5.0),
+    )
+
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "agent_api"),
         stack_profile=stack_profile,
@@ -106,6 +142,7 @@ def load_settings() -> Settings:
         voyage_api_key=voyage_api_key,
         openai_chat_model=openai_chat_model,
         voyage_embedding_model=voyage_embedding_model,
+        auth=auth_settings,
     )
 
 
@@ -130,6 +167,24 @@ def _env_str(name: str, default: str | None = None) -> str | None:
         return default
     value = raw.strip()
     return value or default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    return float(raw) if raw else default
+
+
+def _env_csv(name: str, default: Iterable[str] | None = None) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return tuple(default or ())
+    values = [segment.strip() for segment in raw.split(",") if segment.strip()]
+    if not values and default is not None:
+        return tuple(default)
+    return tuple(values)
 
 
 def _resolve_aws_endpoint_url(
@@ -164,4 +219,4 @@ def _validate_real_tooling_requirements(
         )
 
 
-__all__ = ["Settings", "load_settings"]
+__all__ = ["AuthSettings", "Settings", "load_settings"]

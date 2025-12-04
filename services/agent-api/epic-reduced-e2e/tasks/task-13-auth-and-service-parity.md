@@ -50,3 +50,5 @@ Make the Agent API smoke environment enforce the same auth + AWS behaviors as pr
 ## Handoff Notes
 - Document any remaining auth/AWS gaps (e.g., missing IAM policies, token refresh ergonomics).
 - Call out operational safeguards (rate limits, cost considerations) when pointing smoke runs at production AWS resources.
+- Auth-service still issues HS256 tokens and lacks a JWKS endpoint. Keep `AUTH_SHARED_SECRET` synchronized with `JWT_SECRET_KEY` until the JWKS route ships, then set `AUTH_JWKS_URL` so the validator can swap to RS256.
+- When operators point the smoke stack at real AWS (`USE_LOCALSTACK=0`) remind them to clean up buckets/queues afterward and to run with tightly scoped IAM credentials—the wrapper no longer stands up LocalStack in this mode.

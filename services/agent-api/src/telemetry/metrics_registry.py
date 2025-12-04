@@ -111,6 +111,12 @@ class MetricsRegistry:
             ("code", "severity"),
             registry=self._registry,
         )
+        self.auth_events = Counter(
+            "agent_auth_events_total",
+            "Authentication success/failure counts grouped by reason",
+            ("event", "reason"),
+            registry=self._registry,
+        )
         self.rate_limiter_wait = Histogram(
             "agent_rate_limiter_wait_seconds",
             "Observed wait durations when requesting limiter permits",
@@ -178,6 +184,9 @@ class MetricsRegistry:
 
     def record_guardrail_violation(self, *, code: str, severity: str) -> None:
         self.guardrail_violations.labels(code, severity).inc()
+
+    def record_auth_event(self, *, event: str, reason: str | None) -> None:
+        self.auth_events.labels(event, reason or "none").inc()
 
     def record_rate_limiter_wait(
         self, *, model: str, route: str | None, wait_seconds: float

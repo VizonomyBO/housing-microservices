@@ -18,9 +18,10 @@ class RequestContext:
 
 @dataclass(slots=True)
 class AuthContext:
-    """Placeholder auth/identity context until real IAM wiring lands."""
+    """Authenticated user context shared across FastAPI dependencies."""
 
     user_id: str | None
+    tenant_id: str | None = None
     roles: list[str] = field(default_factory=list)
     scopes: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)

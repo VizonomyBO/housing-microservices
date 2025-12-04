@@ -282,6 +282,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                     )
 
                 if config.use_real_tools:
+
                     async def _run_real_tool_verification() -> dict[str, Any]:
                         return verifier.verify()
 
