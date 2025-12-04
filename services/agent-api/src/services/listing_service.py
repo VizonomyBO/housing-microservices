@@ -10,7 +10,7 @@ from uuid import UUID
 
 from shared_data_layer.db.models.conversations import Conversation, Message
 from shared_data_layer.db.models.documents import ConversationDocument, Document
-from sqlalchemy import and_, cast, func, literal, select
+from sqlalchemy import and_, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -225,10 +225,17 @@ class DocumentListingService:
         content_hashes: Sequence[str] | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        include_base_documents: bool = False,
     ) -> PaginatedResult:
         owner_uuid = _as_uuid(owner_user_id)
+        ownership_clause = Document.owner_user_id == owner_uuid
+        if include_base_documents:
+            ownership_clause = or_(
+                ownership_clause,
+                and_(Document.owner_user_id.is_(None), Document.access_scope == "base"),
+            )
         criteria = [
-            Document.owner_user_id == owner_uuid,
+            ownership_clause,
             Document.deleted_at.is_(None),
         ]
         normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]

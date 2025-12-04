@@ -50,12 +50,62 @@ DEMO_DOCUMENTS = (
         language="en",
         content="""
         ## Housing Stability Update 2024
-        - Rental assistance expanded across three pilot cities.
-        - Pillar metrics improved after community land trust adoption.
-        - Markitdown ingestion feeds text-only context for LangGraph demos.
+        - Rental assistance expanded across three pilot cities: Arroyo Vista, Brookhaven, and District 9.
+        - Pillar metrics improved 14% after community land trust adoption; District 9’s land trust now owns 210 units.
+        - Text-only context is optimized for LangGraph demos so analysts can trace every recommendation back to the memo.
         """.strip(),
         source_uri="https://example.com/demo/housing-stability",
         tags=("demo", "markitdown", "housing"),
+    ),
+    DemoDocument(
+        canonical_name="Voucher Expansion Guardrails FY24",
+        country_code="USA",
+        language="en",
+        content="""
+        ### Voucher Expansion Guardrails
+        1. **Equity Cap:** No more than 65% of a borough’s total vouchers may be allocated to a single developer; excess vouchers must be rebalanced within 30 days.
+        2. **Affordability Floor:** Any building that receives expansion vouchers must prove tenants spend **< 35%** of income on rent after subsidies; automatic clawbacks trigger if the ratio exceeds 40% for two consecutive months.
+
+        The memo also directs housing teams to pair the guardrails with District 9’s community land trust so voucher families can graduate into permanently affordable units once their arrears fall below $500.
+        """.strip(),
+        source_uri="https://example.com/demo/voucher-guardrails",
+        tags=("demo", "policy", "voucher"),
+    ),
+    DemoDocument(
+        canonical_name="District 9 Relief Ledger",
+        country_code="USA",
+        language="en",
+        content="""
+        ## District 9 Ledger Insights (Nov 2024)
+        - 118 renter households carry **>$1,200** in arrears; 46% of them live in the CLT pipeline waiting for rehab.
+        - Utility delinquencies jumped 19% after energy prices spiked; seniors cite unpredictable payment plans.
+        - Cash flow review shows the hardship fund can cover **$250k** in one-time arrears credits if disbursed in two waves.
+
+        ### Suggested Plays
+        - Pair guardrail-compliant vouchers with the arrears credits so families can requalify within 45 days.
+        - Launch an **energy-coaching plus direct-pay** pilot so the city pays the utility first and back-bills renters only for verified usage.
+        """.strip(),
+        source_uri="https://example.com/demo/d9-ledger",
+        tags=("demo", "ledger", "district9"),
+    ),
+    DemoDocument(
+        canonical_name="District 9 KPI Dashboard",
+        country_code="USA",
+        language="en",
+        content="""
+        ### KPI Table (Nov 2024)
+
+        | City / Zone     | KPI                     | Value |
+        |-----------------|------------------------|-------|
+        | Arroyo Vista    | Housing Stability Score | 78    |
+        | Brookhaven      | Housing Stability Score | 82    |
+        | District 9 Core | Housing Stability Score | 88    |
+        | District 9 East | Voucher Utilization %  | 91    |
+
+        Any KPI exceeding **80** triggers a proactive coaching action plan, while values below 80 require remediation memos.
+        """.strip(),
+        source_uri="https://example.com/demo/d9-kpis",
+        tags=("demo", "kpi", "table"),
     ),
 )
 

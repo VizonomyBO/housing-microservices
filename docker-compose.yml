@@ -165,7 +165,11 @@ services:
     <<: *service-defaults
     build:
       <<: *monorepo-build
-      dockerfile: services/swagger-service/Dockerfile
+      context: ./services/swagger-service
+      dockerfile: Dockerfile
+    profiles:
+      - ops
+      - full
     container_name: swagger-service
     ports:
       - "${SWAGGER_SERVICE_PORT:-3000}:3000"
@@ -226,6 +230,7 @@ services:
     image: localstack/localstack:latest
     container_name: localstack
     profiles:
+      - reduced
       - aws-mock
       - full
       - agent-api

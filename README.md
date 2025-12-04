@@ -117,12 +117,14 @@ The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which 
 ## 7. Production Mode with Compose
 Use this workflow when you need the full stack with production-like settings, real secrets, and optional AWS access.
 
+> Need a turnkey reduced-scope deployment (`.env.prod` + verification script) for demos? Follow [`docs/runbooks/prod_setup.md`](docs/runbooks/prod_setup.md).
+
 1. **Prep environment files**
    ```bash
    cp env.example .env
-   cp env.example .env.production  # optional reference copy
+   cp env.example .env.prod        # prod-only copy that stays gitignored
    ```
-   Edit `.env` (or `.env.production` + `source` it) with production-grade secrets:
+   Edit `.env` for dev/defaults and `.env.prod` for the prod profile, then `set -a && source .env.prod && set +a` before running prod compose. Use production-grade secrets:
    - Non-default JWT/signing secrets, database passwords, and API keys (`AGENT_OPENAI_API_KEY`, `EMAIL_PROVIDER_API_KEY`, etc.).
    - `STACK_PROFILE=full` and `COMPOSE_PROFILES=full,ops` so Compose launches every service plus helper containers.
    - `SERVICE_MODE=full` to turn on Valkey and pillar fallbacks.

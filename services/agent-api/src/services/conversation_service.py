@@ -107,6 +107,7 @@ class ConversationService:
             conversation.metadata_ = merged_meta
 
         await self._session.flush()
+        await self._session.refresh(conversation)
         record = self._to_record(conversation)
         return ConversationEnsureResult(conversation=record, created=created)
 

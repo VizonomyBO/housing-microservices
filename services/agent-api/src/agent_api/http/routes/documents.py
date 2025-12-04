@@ -90,6 +90,7 @@ async def list_documents(  # pragma: no cover - exercised via HTTP tests
         content_hashes=content_hash or [],
         created_after=created_after,
         created_before=created_before,
+        include_base_documents=settings.reduced_scope.enabled,
     )
     reduced_meta = _maybe_reduced_scope(settings)
     response = DocumentListResponse(

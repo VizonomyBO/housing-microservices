@@ -51,6 +51,7 @@ dist/
 # Environment
 .env
 .env.local
+.env.prod
 .env.*.local
 .venv
 venv/
@@ -88,6 +89,7 @@ dist/
 # Logs
 logs/
 *.log
+prod_sample_run.json
 assistant-folder/
 .cursor/
 .cursorrules
