@@ -51,7 +51,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
     command: >-
-      bash -c "uv run alembic -c ../packages/shared_data_layer/src/shared_data_layer/migrations/alembic.ini upgrade head && uv run python scripts/seed_reduced_scope_data.py --if-empty"
+      bash -c "uv run python ../../packages/shared_data_layer/src/shared_data_layer/manage.py migrate && uv run python scripts/seed_reduced_scope_data.py --if-empty"
     networks:
       - microservices-net
 

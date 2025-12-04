@@ -47,6 +47,14 @@ async def health_check(request: Request, session: DatabaseSession) -> JSONRespon
     )
 
 
+@router.get("/v1/health", include_in_schema=False)
+async def health_check_v1(
+    request: Request, session: DatabaseSession
+) -> JSONResponse:
+    """Versioned health endpoint to mirror compose health probes."""
+    return await health_check(request, session)
+
+
 @router.get("/status")
 async def service_status(request: Request) -> JSONResponse:
     """

@@ -75,6 +75,8 @@ LANGUAGE_OPTION = typer.Option(
 
 REPORT_PATH_OPTION = typer.Option(
     Path("logs/reduced_e2e_smoke.json"),
+    "--report-path",
+    "--output",
     envvar="REDUCED_E2E_REPORT",
     help="Path to the JSON summary report",
 )

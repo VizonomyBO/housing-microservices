@@ -9,6 +9,7 @@ from uuid import UUID
 
 from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.documents import ConversationDocument, Document
+from shared_data_layer.db.models.retrieval import Chunk
 from shared_data_layer.repositories.documents import DocumentRepository
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,17 @@ class DocumentSummary:
     def auto_attach_enabled(self) -> bool:
         metadata = self.metadata or {}
         return metadata.get("auto_attach_enabled", True)
+
+
+@dataclass(slots=True)
+class DocumentChunkPreview:
+    """Trimmed chunk content surfaced to AttachmentScopeLoader."""
+
+    document_id: str
+    chunk_id: str
+    text: str
+    page_number: int | None = None
+    position: int | None = None
 
 
 class ConversationScopeRepository:
@@ -160,6 +172,59 @@ class ConversationScopeRepository:
         rows = (await self._session.execute(stmt)).scalars().all()
         return {str(row.id): self._map_document(row) for row in rows}
 
+    async def load_document_chunk_previews(
+        self,
+        document_ids: Iterable[str | UUID],
+        *,
+        chunk_types: Sequence[str] = ("text",),
+        max_chars_per_doc: int = 1600,
+        max_chunks_per_doc: int = 5,
+    ) -> dict[str, list[DocumentChunkPreview]]:
+        uuids = [_as_uuid(doc_id) for doc_id in document_ids]
+        if not uuids:
+            return {}
+        stmt = (
+            select(
+                Chunk.document_id,
+                Chunk.id,
+                Chunk.position,
+                Chunk.text_content,
+                Chunk.page_number,
+                Chunk.chunk_type,
+            )
+            .where(Chunk.document_id.in_(uuids))
+            .order_by(Chunk.document_id, Chunk.position)
+        )
+        if chunk_types:
+            stmt = stmt.where(Chunk.chunk_type.in_(tuple(chunk_types)))
+        rows = await self._session.execute(stmt)
+        previews: dict[str, list[DocumentChunkPreview]] = {}
+        char_counts: dict[str, int] = {}
+        chunk_counts: dict[str, int] = {}
+        for row in rows:
+            doc_id = str(row.document_id)
+            text = (row.text_content or "").strip()
+            if not text:
+                continue
+            if chunk_counts.get(doc_id, 0) >= max_chunks_per_doc:
+                continue
+            remaining = max_chars_per_doc - char_counts.get(doc_id, 0)
+            if remaining <= 0:
+                continue
+            snippet = text if len(text) <= remaining else text[:remaining]
+            previews.setdefault(doc_id, []).append(
+                DocumentChunkPreview(
+                    document_id=doc_id,
+                    chunk_id=str(row.id),
+                    text=snippet,
+                    page_number=row.page_number,
+                    position=row.position,
+                )
+            )
+            char_counts[doc_id] = char_counts.get(doc_id, 0) + len(snippet)
+            chunk_counts[doc_id] = chunk_counts.get(doc_id, 0) + 1
+        return previews
+
     def _map_document(self, document: Document) -> DocumentSummary:
         metadata = document.metadata_ if document is not None else None
         return DocumentSummary(
@@ -201,6 +266,15 @@ class ConversationScopePort(Protocol):
     async def hydrate_documents(
         self, document_ids: Iterable[str | UUID]
     ) -> dict[str, DocumentSummary]: ...
+
+    async def load_document_chunk_previews(
+        self,
+        document_ids: Iterable[str | UUID],
+        *,
+        chunk_types: Sequence[str] = ("text",),
+        max_chars_per_doc: int = 1600,
+        max_chunks_per_doc: int = 5,
+    ) -> dict[str, list[DocumentChunkPreview]]: ...
 
 
 def _as_uuid(value: str | UUID | None) -> UUID:

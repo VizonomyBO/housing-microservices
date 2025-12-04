@@ -29,9 +29,10 @@ ENV APP_HOME=/app/services/agent-api \
     UV_PROJECT_ENV="${APP_HOME}/.venv"
 RUN useradd --create-home --shell /bin/bash agent
 WORKDIR ${APP_HOME}
-COPY --from=builder /app/packages ./../packages
+COPY --from=builder /app/packages /app/packages
 COPY --from=builder /app/services/agent-api ${APP_HOME}
+RUN mkdir -p /app/logs && chown -R agent:agent ${APP_HOME} /app/packages /app/logs
 USER agent
 EXPOSE 8000
-ENTRYPOINT ["uv"]
-CMD ["run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--workers", "2"]
+ENTRYPOINT ["uv", "run"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "src", "--workers", "2"]

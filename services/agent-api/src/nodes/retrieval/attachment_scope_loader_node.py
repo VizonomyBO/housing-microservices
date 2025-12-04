@@ -8,13 +8,18 @@ from uuid import UUID
 
 from models.retrieval import (
     AttachmentDocument,
+    AttachmentDocumentChunk,
     AttachmentReference,
     AttachmentScope,
     AttachmentType,
     AttachmentWorkflow,
 )
 from nodes.retrieval.exceptions import InputNormalizationError
-from repositories.conversation_scope_repository import ConversationScopePort, DocumentSummary
+from repositories.conversation_scope_repository import (
+    ConversationScopePort,
+    DocumentChunkPreview,
+    DocumentSummary,
+)
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, lifecycle_span
@@ -30,6 +35,9 @@ class AttachmentScopeLoaderNode:
 
     scope_repository: ConversationScopePort
     workflow_repository: WorkflowRepositoryProtocol | None = None
+    preview_chunk_types: tuple[str, ...] = ("text",)
+    max_preview_chars: int = 1600
+    max_preview_chunks: int = 5
 
     async def __call__(
         self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
@@ -61,14 +69,23 @@ class AttachmentScopeLoaderNode:
                 "workflow_refs": len(workflow_refs),
             },
         ):
-            documents_lookup = await self.scope_repository.hydrate_documents(
-                [ref.document_id for ref in document_refs if ref.document_id]
+            document_ids = [ref.document_id for ref in document_refs if ref.document_id]
+            documents_lookup = await self.scope_repository.hydrate_documents(document_ids)
+            chunk_previews = await self.scope_repository.load_document_chunk_previews(
+                document_ids,
+                chunk_types=self.preview_chunk_types,
+                max_chars_per_doc=self.max_preview_chars,
+                max_chunks_per_doc=self.max_preview_chunks,
             )
 
             warnings = list(normalized_input.warnings)
             missing_assets: list[str] = []
             documents = self._build_document_scope(
-                document_refs, documents_lookup, warnings, missing_assets
+                document_refs,
+                documents_lookup,
+                chunk_previews,
+                warnings,
+                missing_assets,
             )
             workflows = await self._build_workflow_scope(workflow_refs, warnings, missing_assets)
             add_metadata(
@@ -89,6 +106,7 @@ class AttachmentScopeLoaderNode:
         self,
         references: list[AttachmentReference],
         documents_lookup: dict[str, DocumentSummary],
+        chunk_previews: dict[str, list[DocumentChunkPreview]],
         warnings: list[str],
         missing_assets: list[str],
     ) -> list[AttachmentDocument]:
@@ -101,6 +119,15 @@ class AttachmentScopeLoaderNode:
                 missing_assets.append(ref.document_id)
                 warnings.append(f"Document {ref.document_id} no longer exists or is unavailable")
                 continue
+            preview_chunks = [
+                AttachmentDocumentChunk(
+                    chunk_id=preview.chunk_id,
+                    text=preview.text,
+                    page_number=preview.page_number,
+                    position=preview.position,
+                )
+                for preview in chunk_previews.get(ref.document_id, [])
+            ]
             documents.append(
                 AttachmentDocument(
                     document_id=summary.document_id,
@@ -113,6 +140,7 @@ class AttachmentScopeLoaderNode:
                     read_only=ref.read_only,
                     auto_attached=ref.auto_attached,
                     metadata=summary.metadata,
+                    chunks=preview_chunks,
                 )
             )
         return documents

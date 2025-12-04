@@ -140,6 +140,14 @@ def create_app() -> FastAPI:
     app.include_router(pillars_router)
     app.include_router(metrics_router)
 
+    @app.get("/health", include_in_schema=False)
+    async def root_health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/v1/health", include_in_schema=False)
+    async def versioned_health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.exception_handler(GatewayError)
     async def handle_gateway_error(request: Request, exc: GatewayError) -> JSONResponse:
         return JSONResponse(

@@ -10,6 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from authlib.jose import JoseError, JsonWebKey, jwt
@@ -199,7 +200,13 @@ class AuthTokenValidator:
         user_id = payload.get("sub") or payload.get("user_id")
         if not user_id:
             raise self._failure("missing_sub", "Token missing subject/user identifier")
-        return str(user_id)
+        raw = str(user_id)
+        try:
+            UUID(raw)
+            return raw
+        except ValueError:
+            derived = uuid5(NAMESPACE_URL, raw)
+            return str(derived)
 
     def _resolve_tenant_id(self, payload: dict[str, Any]) -> str | None:
         claim_name = self._settings.tenant_claim or "tenant_id"

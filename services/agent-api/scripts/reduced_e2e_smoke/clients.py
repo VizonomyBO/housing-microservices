@@ -452,7 +452,22 @@ async def _request(
     return response
 
 
+def _normalize_done_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    nested = payload.get("payload")
+    if isinstance(nested, dict):
+        normalized = dict(nested)
+        # Preserve top-level metadata for debugging without polluting consumers.
+        metadata = {key: value for key, value in payload.items() if key != "payload"}
+        if metadata and "_event_metadata" not in normalized:
+            normalized["_event_metadata"] = metadata
+        return normalized
+    return payload
+
+
 def _extract_answer(done_payload: dict[str, Any], fallback: dict[str, Any] | None = None) -> str:
+    done_payload = _normalize_done_payload(done_payload)
     if not done_payload:
         done_payload = {}
     answer = done_payload.get("answer") or done_payload.get("text")
@@ -467,6 +482,7 @@ def _extract_answer(done_payload: dict[str, Any], fallback: dict[str, Any] | Non
 
 
 def _extract_citations(done_payload: dict[str, Any]) -> list[str]:
+    done_payload = _normalize_done_payload(done_payload)
     citations = done_payload.get("citations") or []
     results: list[str] = []
     if isinstance(citations, list):
@@ -531,7 +547,7 @@ def _ensure_no_stream_errors(events: list[dict[str, Any]]) -> None:
 def _extract_done_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
     for event in events:
         if event.get("event") == "done":
-            return event.get("data") or {}
+            return _normalize_done_payload(event.get("data") or {})
     raise SmokeError("Streaming response missing done event")
 
 

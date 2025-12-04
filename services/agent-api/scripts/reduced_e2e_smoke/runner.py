@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 
@@ -33,6 +34,7 @@ from .clients import (
 )
 from .errors import SmokeError
 from .fixtures import ScenarioFixtures
+from .judge import PromptJudge, build_prompt_judge_from_env
 from .real_tools import HttpTelemetryRecorder, RealToolVerifier
 from .reporting import PromptRunResult, RunSummary, StageResult, render_and_print, write_json_report
 from .validators import validate_prompt
@@ -60,6 +62,7 @@ class SmokeRunConfig:
     cleanup_only: bool = False
     use_real_tools: bool = False
     verify_real_tools: bool = False
+    prompt_judge: PromptJudge | None = None
 
 
 async def run_smoke(config: SmokeRunConfig) -> RunSummary:
@@ -75,6 +78,8 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
         require_verification=config.verify_real_tools,
     )
     real_tool_metadata: dict[str, Any] | None = None
+
+    prompt_judge = config.prompt_judge or build_prompt_judge_from_env()
 
     timeout = httpx.Timeout(config.timeout_seconds)
     async with (
@@ -106,6 +111,8 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                 metadata_fn=lambda result: {"user_id": result.user_id},
             )
 
+            owner_user_id = _normalize_owner_id(login_result.user_id)
+
             provider = config.conversation_provider
             if provider is None:
                 provider = HttpConversationBootstrapper(
@@ -118,7 +125,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
             conversation_id = await recorder.record(
                 "conversation_bootstrap",
                 lambda: provider.ensure_conversation(
-                    owner_user_id=login_result.user_id,
+                    owner_user_id=owner_user_id,
                     country_code=config.country_code,
                 ),
                 metadata_fn=lambda cid: {"conversation_id": cid},
@@ -197,10 +204,10 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                     lambda: _upload_all_documents(
                         agent_client,
                         token=login_result.access_token,
-                        owner_user_id=login_result.user_id,
-                        fixtures=fixtures.documents(),
+                        owner_user_id=owner_user_id,
+                        fixtures=list(fixtures.documents()),
                         scenario=manifest.scenario,
-                        tags=config.tags,
+                        tags=tuple(config.tags),
                         verifier=verifier,
                     ),
                     metadata_fn=lambda result: {"uploaded": len(result)},
@@ -255,6 +262,7 @@ async def run_smoke(config: SmokeRunConfig) -> RunSummary:
                     stream_capabilities=config.stream_capabilities,
                     country_code=config.country_code,
                     verifier=verifier,
+                    prompt_judge=prompt_judge,
                 )
                 if not prompts_passed:
                     raise SmokeError(
@@ -374,6 +382,15 @@ def _normalize_url(value: str) -> str:
     return f"http://{stripped}"
 
 
+def _normalize_owner_id(user_id: str) -> str:
+    raw = str(user_id)
+    try:
+        UUID(raw)
+        return raw
+    except ValueError:
+        return str(uuid5(NAMESPACE_URL, raw))
+
+
 def _build_demo_purge_payload(fixtures: ScenarioFixtures) -> dict[str, Any]:
     aliases = list(fixtures.list_aliases())
     hashes = [fixture.content_hash for fixture in fixtures.documents()]
@@ -489,6 +506,7 @@ async def _record_prompts_stage(
     stream_capabilities: set[str],
     country_code: str,
     verifier: RealToolVerifier | None,
+    prompt_judge: PromptJudge | None,
 ) -> tuple[list[PromptRunResult], bool]:
     start = perf_counter()
     prompt_results = await _run_prompts(
@@ -501,6 +519,7 @@ async def _record_prompts_stage(
         stream_capabilities=stream_capabilities,
         country_code=country_code,
         verifier=verifier,
+        prompt_judge=prompt_judge,
     )
     latency = (perf_counter() - start) * 1000
     success = all(result.success for result in prompt_results)
@@ -528,6 +547,7 @@ async def _run_prompts(
     stream_capabilities: set[str],
     country_code: str,
     verifier: RealToolVerifier | None,
+    prompt_judge: PromptJudge | None,
 ) -> list[PromptRunResult]:
     results: list[PromptRunResult] = []
     doc_map = fixtures.document_map()
@@ -555,13 +575,14 @@ async def _run_prompts(
         latency = (perf_counter() - run_start) * 1000
         if verifier is not None:
             verifier.record_chat(prompt.id, completion.headers, completion.done_payload)
-        validation = validate_prompt(
+        validation = await validate_prompt(
             prompt,
             answer_text=completion.answer_text,
             done_payload=completion.done_payload,
             expected_document_ids=document_ids,
             cited_document_ids=completion.cited_document_ids,
             document_fixtures=documents,
+            prompt_judge=prompt_judge,
         )
         results.append(
             PromptRunResult(
@@ -572,6 +593,9 @@ async def _run_prompts(
                 latency_ms=latency,
                 failures=validation.failures,
                 response_excerpt=completion.answer_text[:240],
+                judge_name=validation.judge_name,
+                judge_score=validation.judge_score,
+                judge_explanation=validation.judge_explanation,
             )
         )
     return results

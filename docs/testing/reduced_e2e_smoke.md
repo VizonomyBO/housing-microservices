@@ -108,7 +108,7 @@ This guide describes how to run the reduced-profile end-to-end smoke automation 
 - **Inventory metadata**: `conversation_inventory`, `document_inventory`, and `conversation_documents_synced` stages now persist the exact payloads returned by `/v1/conversations` and `/v1/documents` (counts, hashes, aliases). Reference these fields when validating cleanup or diagnosing attachment drift.
 - **Structured console output**: The CLI prints PASS/FAIL tables with ✅ / ❌ indicators. When run via the wrapper, this output is mirrored to `logs/task_04/codex.log`.
 - **Fixture manifest**: `tests/data/reduced_e2e/scenario_manifest.json` enumerates document aliases (DOC_POLICY, DOC_LEDGER, DOC_KPI) plus prompt IDs (`Q_SIMPLE_QA`, `Q_REASON`, `Q_AGGREGATE`, `Q_SQL`). Update both the manifest and this doc whenever you add or remove fixtures.
-- **Prompt validators**: `scripts/reduced_e2e_smoke/validators.py` houses regex and numeric checks (e.g., `$7.35M` sum, Harbor City KPI 87). If prompts change, adjust the validator and describe the new expectations within this guide.
+- **Prompt validators**: `scripts/reduced_e2e_smoke/validators.py` now defers to an OpenAI-backed “LLM judge” (fed by `OPENAI_API_KEY` / `REDUCED_E2E_JUDGE_MODEL`) to score prompt answers for relevance + document grounding; when those secrets are absent it falls back to the legacy regex/numeric heuristics baked into the manifest. Update both the manifest and this doc whenever you change prompts so the fallback rules stay truthful.
 
 ## Mode Matrix – Text-only vs Real Tooling
 | Mode | How to enable | LLM / embeddings | Cache & rate limiting | Required secrets |

@@ -67,6 +67,7 @@ COMPOSE_PROFILES=full \
 docker compose down              # stop containers, keep volumes
 docker compose down -v           # wipes Postgres/LocalStack data
 docker compose --profile full down -v  # clean specific profile runs
+docker compose --profile reduced down -v --remove-orphans  # force-remove lingering reduced-stack networks
 ```
 
 ## 4. Verify & Smoke Test

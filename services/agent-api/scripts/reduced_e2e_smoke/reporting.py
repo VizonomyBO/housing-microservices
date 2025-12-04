@@ -26,6 +26,9 @@ class PromptRunResult:
     latency_ms: float
     failures: list[str] = field(default_factory=list)
     response_excerpt: str | None = None
+    judge_name: str | None = None
+    judge_score: float | None = None
+    judge_explanation: str | None = None
 
 
 @dataclass(slots=True)
@@ -75,6 +78,9 @@ class RunSummary:
                     "latency_ms": prompt.latency_ms,
                     "failures": prompt.failures,
                     "response_excerpt": prompt.response_excerpt,
+                    "judge_name": prompt.judge_name,
+                    "judge_score": prompt.judge_score,
+                    "judge_explanation": prompt.judge_explanation,
                 }
                 for prompt in self.prompts
             ],
@@ -113,9 +119,16 @@ def format_console(summary: RunSummary) -> str:
         for prompt in summary.prompts:
             status = "✅" if prompt.success else "❌"
             failures = f" — {', '.join(prompt.failures)}" if prompt.failures else ""
+            judge_suffix = ""
+            if prompt.judge_name and prompt.judge_score is not None:
+                judge_suffix = f"; {prompt.judge_name}={prompt.judge_score:.2f}"
+            elif prompt.judge_name:
+                judge_suffix = f"; {prompt.judge_name}"
             lines.append(
-                f"  {status} {prompt.prompt_id} [{prompt.mode}] ({prompt.latency_ms:.0f} ms){failures}"
+                f"  {status} {prompt.prompt_id} [{prompt.mode}] ({prompt.latency_ms:.0f} ms{judge_suffix}){failures}"
             )
+            if prompt.judge_explanation and not prompt.success:
+                lines.append(f"      {prompt.judge_explanation}")
     if summary.telemetry:
         lines.append("")
         lines.append("Telemetry:")

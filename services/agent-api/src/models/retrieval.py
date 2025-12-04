@@ -146,6 +146,15 @@ class NormalizedInput(BaseModel):
     )
 
 
+class AttachmentDocumentChunk(BaseModel):
+    """Chunk preview surfaced to downstream prompt builders."""
+
+    chunk_id: str
+    text: str
+    page_number: int | None = None
+    position: int | None = None
+
+
 class AttachmentDocument(BaseModel):
     """Hydrated document scoped for retrieval."""
 
@@ -159,6 +168,7 @@ class AttachmentDocument(BaseModel):
     read_only: bool = False
     auto_attached: bool = False
     metadata: dict[str, Any] | None = None
+    chunks: list[AttachmentDocumentChunk] = Field(default_factory=list)
 
 
 class AttachmentWorkflow(BaseModel):
