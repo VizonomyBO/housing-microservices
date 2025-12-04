@@ -395,7 +395,6 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         skip_pillars=False,
         prompt_judge=StubPromptJudge(),
         localstack_url="http://localstack.test",
-        prompt_judge=StubPromptJudge(),
     )
     summary = await run_smoke(config)
 

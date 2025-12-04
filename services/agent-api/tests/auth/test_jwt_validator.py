@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from authlib.jose import jwt
@@ -48,7 +49,8 @@ async def test_validator_produces_auth_context() -> None:
 
     context = await validator.validate(token)
 
-    assert context.user_id == "user-123"
+    expected_user_id = str(uuid5(NAMESPACE_URL, "user-123"))
+    assert context.user_id == expected_user_id
     assert context.tenant_id == "tenant-321"
     assert "agent:demo" in context.scopes
     assert context.metadata["claims"]["sub"] == "user-123"
