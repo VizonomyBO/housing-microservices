@@ -234,6 +234,11 @@ class RouterNode:
         if not flags.enabled:
             return decision
         route = decision.route
+        if route is None:
+            return decision
+        if route == RouterRoute.NUMERICAL and flags.should_skip_capability(route.value):
+            add_metadata(reduced_scope_override=route.value)
+            return decision
         if route not in {RouterRoute.NUMERICAL, RouterRoute.VISION}:
             return decision
         if not flags.should_skip_capability(route.value):

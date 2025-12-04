@@ -115,6 +115,7 @@ class AnswerSynthesizerNode:
             if state.requires_sql:
                 self._require_numerical_sql_trace(state)
                 self._ensure_sql_citation(result, state)
+                self._append_sql_rows(result, state)
             return {
                 "answer": result.answer_text,
                 "citations": result.citations,
@@ -207,6 +208,28 @@ class AnswerSynthesizerNode:
         trace = state.numerical_trace or {}
         table_results = trace.get("table_results") or []
         return table_results[0] if table_results else None
+
+    def _append_sql_rows(self, result: AnswerSynthesisResult, state: AgentState) -> None:
+        rows = list(state.numerical_result_rows or [])
+        if not rows:
+            trace = state.numerical_trace or {}
+            rows = list(trace.get("table_results") or [])
+        if not rows:
+            return
+        marker = "[SQL_ROWS]"
+        if marker in result.answer_text:
+            return
+        formatted_rows: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                formatted_rows.append(f"- {row}")
+                continue
+            parts: list[str] = []
+            for key, value in row.items():
+                parts.append(f"{key}={value}")
+            formatted_rows.append(f"- {', '.join(parts)}")
+        rows_block = "\n".join([marker, *formatted_rows])
+        result.answer_text = result.answer_text.rstrip() + "\n\n" + rows_block
 
 
 __all__ = [

@@ -54,7 +54,7 @@
 | `Q_SIMPLE_QA` | “What two guardrails did the latest housing memo add for voucher expansion?” | Simple QA | Mentions voucher district count + rent cap 32% | Regex for “five districts” and “32%” plus citation referencing `DOC_POLICY`. |
 | `Q_REASON` | “Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters.” | Propositive reasoning | Two bullet/numbered ideas referencing doc facts (e.g., shift $0.5M, enforce KPI emails). | Check response includes “District 9” and both doc aliases present in metadata/citations. |
 | `Q_AGGREGATE` | “Sum the total rental assistance disbursed this quarter and highlight the highest-funded city.” | Numerical aggregate | Total `$7.35M`, highest District 9 $1.8M | Parse numbers (decimal tolerance 0.01) and confirm doc citation. |
-| `Q_SQL` | “Group KPI values by city and call out whoever exceeds 80.” | SQL-style grouping | Mentions each city once, highlights Harbor City 87. | Compare number of city mentions against table, ensure “Harbor City” + “87” present. |
+| `Q_SQL` | “While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need.” | SQL-style grouping | Mentions each city once, highlights Harbor City 87 + describes an action for the over-80 city. | Compare number of city mentions against table, ensure “Harbor City” + “87” present and guardrail guidance appears. |
 
 _All prompts run in blocking mode to keep assertions simple; streaming coverage already exists in reduced smoke tests._
 

@@ -156,6 +156,30 @@ def _runner(metrics):
     )
 
 
+def test_done_payload_includes_sql_row_count(db_session):
+    metrics = get_metrics_registry()
+    runner = _runner(metrics)
+    request = _chat_request()
+    base_state = runner._build_initial_state(request)
+    state = base_state.model_copy(
+        update={
+            "requires_sql": True,
+            "answer": "numeric",
+            "route": RouterRoute.NUMERICAL,
+            "citations": [],
+            "numerical_trace": {
+                "sql_queries": ["SELECT * FROM ledger"],
+                "executor": {"row_count": 4},
+                "table_results": [{"city": "Austin"}],
+            },
+            "numerical_result_rows": [{"city": "Austin"}],
+        }
+    )
+    payload = runner._build_done_payload(request, state)
+    assert payload["sql_row_count"] == 4
+    assert payload["table_results"] == [{"city": "Austin"}]
+
+
 def test_builds_numerical_table_from_markdown(db_session):
     metrics = get_metrics_registry()
     runner = _runner(metrics)
@@ -179,7 +203,7 @@ async def test_numerical_pipeline_executes_sql(db_session):
     state = base_state.model_copy(
         update={
             "normalized_input": _normalized_prompt(
-                "Group KPI values by city and call out whoever exceeds 80"
+                "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."
             ),
             "attachment_scope": AttachmentScope(documents=[_kpi_document()]),
             "requires_sql": True,

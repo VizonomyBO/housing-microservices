@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent_api.reduced_scope import ReducedScopeFlags
 from models.retrieval import NormalizedInput, TenantScope
 from state.agent_state import (
     AgentState,
@@ -105,3 +106,28 @@ async def test_guardrail_triggers_on_join() -> None:
     assert updates["guardrails_passed"] is False
     assert updates["next_subgraph"] == "human_gate"
     assert updates["guardrail_findings"][-1].code.value == "numerical_sql"
+
+
+@pytest.mark.asyncio
+async def test_requires_sql_bypasses_reduced_scope_skip() -> None:
+    result = SqlGenerationResult(
+        sql="SELECT country, gdp FROM gdp",
+        tables=["gdp"],
+        columns={"gdp": ["country", "gdp"]},
+        sql_queries=["SELECT country, gdp FROM gdp"],
+    )
+    node = TextToSQLNode(generator=StubGenerator(result))
+    state = _base_state().model_copy(
+        update={
+            "requires_sql": True,
+            "reduced_scope_flags": ReducedScopeFlags(
+                enabled=True,
+                text_only_chunks=True,
+                emit_demo_events=False,
+            ),
+        }
+    )
+
+    updates = await node(state)
+
+    assert updates["numerical_sql"].startswith("SELECT country")

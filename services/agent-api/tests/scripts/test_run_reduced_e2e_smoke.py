@@ -279,9 +279,12 @@ def _mock_success_flows(
             return_value=httpx.Response(200, json=attachment_listing)
         )
 
+        question_to_prompt_id = {prompt.question: prompt.id for prompt in fixtures.prompts()}
+
         def chat_handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
             body = json.loads(request.content.decode())
-            prompt_id = body["hints"].get("prompt_id")
+            question = body["message"]["content"]
+            prompt_id = question_to_prompt_id[question]
             answer = prompt_answers[prompt_id]
             doc_ids_for_prompt = [
                 attachment["document_id"] for attachment in body["message"]["attachments"]

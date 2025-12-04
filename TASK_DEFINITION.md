@@ -96,7 +96,7 @@ pytest tests/numerical/test_numerical_subgraph.py   # add/extend as part of work
      -H 'Content-Type: application/json' \
      -d '{
            "thread_id":"<conversation-id>",
-           "message":{"type":"user","content":"Group KPI values by city and call out whoever exceeds 80."},
+           "message":{"type":"user","content":"While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."},
            "constraints":{"country_code":"USA","auto_attach_base_docs":false}
          }' \
      "$AGENT_BASE_URL/v1/chat"

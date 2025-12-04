@@ -346,6 +346,8 @@ class LangGraphChatRunner:
             payload["table_results"] = trace.get("table_results") or list(
                 state.numerical_result_rows
             )
+            executor = trace.get("executor") or {}
+            payload["sql_row_count"] = executor.get("row_count")
         return payload
 
     def _build_messages(self, state: AgentState) -> list[dict[str, str]]:

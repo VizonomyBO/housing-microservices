@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent_api.reduced_scope import ReducedScopeFlags
 from guardrails import GuardrailContext, GuardrailEngine
 from guardrails.models import (
     GuardrailCode,
@@ -37,7 +38,11 @@ class StubGuardrailEngine(GuardrailEngine):
 
 
 def _agent_state(
-    prompt: str, *, intent_tags: list[str] | None = None, workflow_plan: WorkflowPlan | None = None
+    prompt: str,
+    *,
+    intent_tags: list[str] | None = None,
+    workflow_plan: WorkflowPlan | None = None,
+    reduced_scope_flags: ReducedScopeFlags | None = None,
 ) -> AgentState:
     normalized = NormalizedInput(
         normalized_prompt=prompt,
@@ -46,6 +51,7 @@ def _agent_state(
         attachment_refs=[],
         scope_hash="abc",
         intent_tags=intent_tags or [],
+        reduced_scope_flags=reduced_scope_flags or ReducedScopeFlags(),
     )
     return AgentState(
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
@@ -196,6 +202,30 @@ async def test_simple_addition_forces_numerical_route():
     assert result["route"] == RouterRoute.NUMERICAL
     assert result["requires_sql"] is True
     assert result["router_reason"] == "numerical_signal"
+
+
+@pytest.mark.asyncio
+async def test_percentage_comparison_triggers_numerical_route():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = "Which city exceeds the 80 percent KPI threshold?"
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
+
+
+@pytest.mark.asyncio
+async def test_reduced_scope_flags_do_not_skip_numerical_route():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    flags = ReducedScopeFlags(enabled=True, text_only_chunks=True, emit_demo_events=False)
+    state = _agent_state("Add the two KPI rows", reduced_scope_flags=flags)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
 
 
 @pytest.mark.asyncio

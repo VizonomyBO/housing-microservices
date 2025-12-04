@@ -31,9 +31,13 @@ class _SqlStub:
 
 
 def _base_state() -> AgentState:
+    question = (
+        "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point "
+        "stability trigger and explain what action they need."
+    )
     normalized = NormalizedInput(
-        normalized_prompt="Group KPI values by city",
-        raw_prompt="Group KPI values by city",
+        normalized_prompt=question,
+        raw_prompt=question,
         tenant_scope=TenantScope(conversation_id="conv-num", thread_id="thr-num"),
         attachment_refs=[],
         scope_hash="scope",
@@ -83,4 +87,5 @@ async def test_numerical_trace_covers_entire_subgraph() -> None:
     assert trace["sql_queries"] == ["SELECT city, utilization FROM ledger"]
     assert trace["table_specs"][0]["chunk_ids"] == ["chunk-9"]
     assert trace["executor"]["row_count"] == 2
+    assert trace["executor"]["sql_query"].startswith("SELECT city")
     assert trace["validator"]["status"] == "passed"

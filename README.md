@@ -89,8 +89,8 @@ make reduced-e2e-smoke            # optionally pass ARGS="--skip-pillars"
 The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which copies `.env` from `env.example` when missing, starts the reduced + LocalStack compose profile, waits for `/health` + `/v1/health`, runs the smoke CLI inside the `agent-api` container, then tears everything down. Set `KEEP_STACK=1` to leave containers running or `ARGS="--timeout-seconds 45"` to forward options to the CLI. Logs stream to `services/agent-api/logs/task_04/codex.log` for later review.
 
 ### Inspect SQL trace outputs
-- `scripts/prod_smoke_check.sh` now writes `requires_sql`, `sql_queries`, and `table_results` for each prompt in `prod_sample_run.json`. Quantitative prompts should show `requires_sql: true`, a non-empty SQL list, and preview rows that match the cited KPI values.
-- The `/v1/chat` `done` payloads mirror the same fields. When you run the reduced E2E CLI, the resulting `PromptRunResult` entries will embed the SQL query string and executor row count for auditing.
+- `scripts/prod_smoke_check.sh` now writes `requires_sql`, `sql_queries`, `sql_row_count`, and `table_results` for each prompt in `prod_sample_run.json`. Quantitative prompts should show `requires_sql: true`, a non-empty SQL list, row counts, and preview rows that match the cited KPI values.
+- The `/v1/chat` `done` payloads mirror the same fields (including `sql_row_count`). When you run the reduced E2E CLI, the resulting `PromptRunResult` entries will embed the SQL query string and executor row count for auditing.
 - Use these fields (plus the `[SQL_RESULT]` citation injected by the answer synthesizer) to prove every numeric answer was grounded in the Polars executor rather than free-form arithmetic.
 
 ## 5. Seed & Admin Utilities

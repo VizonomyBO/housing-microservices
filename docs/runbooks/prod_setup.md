@@ -70,6 +70,7 @@ If the user already exists, the endpoint returns 409; ignore it.
 4. Open `prod_sample_run.json` to confirm:
    - `requires_sql` is `true` for the KPI/table prompt and `false` elsewhere.
    - `sql_queries` contains the planner’s Polars SQL (mirrors what you’ll see in the executor logs).
+   - `sql_row_count` mirrors the executor’s row count so you can quickly spot empty/partial results.
    - `table_results` contains the preview rows streamed back by the Polars executor. These rows should match the cited KPI values in the final answer.
 5. Give the file a quick read to ensure the prose answer aligns with the SQL preview rows before handing the backend to the frontend team.
 
@@ -99,7 +100,7 @@ curl -N -H "Authorization: Bearer $TOKEN" -H 'Accept: text/event-stream' \
 The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above automatically routes through the numerical (Polars) subgraph—the router now detects KPI/threshold language without relying on explicit “SQL” hints—so you can watch `numerical_scope_builder`, `numerical_text_to_sql`, `numerical_polars_executor`, and `numerical_result_validator` events fire before `informational_answer_synthesizer` signs off. Look for:
 - `router` metadata that includes `requires_sql=true`.
 - `numerical_text_to_sql` events that log `table_alias=gdp` (or similar) plus the generated SQL.
-- `numerical_polars_executor` events that include the row count and emit `sql_cache_bypass` metadata.
+- `numerical_polars_executor` events that include the SQL text, row count, and the `numerical.sql.*` telemetry counters alongside `sql_cache_bypass` metadata.
 - `informational_answer_synthesizer` finishing with a `[SQL_RESULT]` citation tied to the executor output.
 
 A full sample transcript is available in [`docs/examples/prod_sse_walkthrough.md`](../examples/prod_sse_walkthrough.md).

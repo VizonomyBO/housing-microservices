@@ -81,7 +81,7 @@ done
 questions=(
   "What two guardrails did the latest housing memo add for voucher expansion?"
   "Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters."
-  "Group KPI values by city and call out whoever exceeds 80."
+  "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."
 )
 prompts=(
   "PROD_SIMPLE_RAG"
@@ -92,16 +92,14 @@ prompts=(
 for i in "${!questions[@]}"; do
   question="${questions[$i]}"
   prompt_id="${prompts[$i]}"
-  payload=$(jq -n \
-    --arg thread "$conversation_id" \
-    --arg question "$question" \
-    --arg country "$PROD_DEMO_COUNTRY" \
-    --arg prompt "$prompt_id" \
-    '{
+payload=$(jq -n \
+  --arg thread "$conversation_id" \
+  --arg question "$question" \
+  --arg country "$PROD_DEMO_COUNTRY" \
+  '{
       thread_id:$thread,
       message:{type:"user",content:$question},
       constraints:{country_code:$country,auto_attach_base_docs:false},
-      hints:{prompt_id:$prompt},
       response_mode:"blocking"
     }')
 
@@ -118,6 +116,13 @@ for i in "${!questions[@]}"; do
     citations:(.done.citations // .done.payload.citations // []),
     requires_sql:(.done.requires_sql // .done.payload.requires_sql // false),
     sql_queries:(.done.sql_queries // .done.payload.sql_queries // []),
+    sql_row_count:(
+      .done.sql_row_count //
+      .done.payload.sql_row_count //
+      .done.numerical_trace.executor.row_count //
+      .done.payload.numerical_trace.executor.row_count //
+      null
+    ),
     table_results:(.done.table_results // .done.payload.table_results // []),
     raw_response:.
   }' >> "$TMP_JSON"

@@ -70,6 +70,8 @@ class NumericalPromptBuilder:
             "You MUST return a SQL query that can run directly against the provided table specs.",
             "Never perform arithmetic or summarization outside SQL; do not answer in prose.",
             "Return only SQL without commentary.",
+            "If data is insufficient, emit a valid SQL query against the provided table alias that returns zero rows (for example, add `WHERE 1=0`).",
+            "Direct answers, natural-language explanations, or calculations outside SQL will be rejected.",
             f"User question: {normalized_prompt.strip()}",
             "Use the selected table only; joins are not yet supported.",
             f"Table alias: {table.alias}",
@@ -287,6 +289,10 @@ class TextToSQLNode:
         self, state: AgentState, sse_emitter: SSEEmitter | None
     ) -> dict[str, Any] | None:
         flags = state.reduced_scope_flags
+        if state.requires_sql:
+            if flags.should_skip_capability("numerical"):
+                add_metadata(reduced_scope_sql_override=True, capability="numerical")
+            return None
         if not flags.should_skip_capability("numerical"):
             return None
         if sse_emitter is not None and flags.emit_demo_events:

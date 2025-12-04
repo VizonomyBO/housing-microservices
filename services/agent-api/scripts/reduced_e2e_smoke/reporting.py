@@ -145,6 +145,9 @@ def format_console(summary: RunSummary) -> str:
                 lines.append(
                     f"      SQL rows={row_count} query={query[:80]}"
                 )
+                if prompt.sql_table_results:
+                    preview = prompt.sql_table_results[0]
+                    lines.append(f"      preview={preview}")
     if summary.telemetry:
         lines.append("")
         lines.append("Telemetry:")

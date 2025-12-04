@@ -132,3 +132,33 @@ async def test_sql_trace_adds_citation_when_required() -> None:
     sql_citations = [c for c in updates["citations"] if c.doc_id == "SQL_RESULT"]
     assert sql_citations
     assert sql_citations[0].metadata["table_id"] == "tbl-ledger"
+    assert "[SQL_ROWS]" in updates["answer"]
+    assert "city=Austin" in updates["answer"]
+
+
+@pytest.mark.asyncio
+async def test_sql_rows_appended_to_answer() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-sql-rows")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = True
+    rows = [
+        {"city": "Austin", "value": 82},
+        {"city": "Denton", "value": 71},
+    ]
+    state.numerical_trace = {
+        "sql_queries": ["SELECT city, value FROM ledger"],
+        "executor": {"row_count": len(rows)},
+        "table_specs": [{"table_id": "tbl-ledger", "alias": "ledger"}],
+        "table_results": rows,
+    }
+    state.numerical_result_rows = rows
+    composer = StubComposer(answer_text="Summary of KPI insights.")
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    answer = updates["answer"]
+    assert "[SQL_ROWS]" in answer
+    assert "city=Austin" in answer
+    assert "value=71" in answer

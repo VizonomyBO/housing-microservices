@@ -110,7 +110,7 @@
     },
     {
       "id": "Q_SQL",
-      "question": "Group KPI values by city and call out whoever exceeds 80.",
+      "question": "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need.",
       "capability": "table_reasoning",
       "document_aliases": ["DOC_KPI"],
       "expected_traits": ["mentions Harbor City 87", "lists every city once"],

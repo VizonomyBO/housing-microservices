@@ -587,7 +587,9 @@ async def _run_prompts(
             or []
         )
         executor = trace.get("executor") or {}
-        sql_row_count = executor.get("row_count")
+        sql_row_count = done_payload.get("sql_row_count")
+        if sql_row_count is None:
+            sql_row_count = executor.get("row_count")
         if verifier is not None:
             verifier.record_chat(prompt.id, completion.headers, completion.done_payload)
         validation = await validate_prompt(
@@ -644,10 +646,6 @@ def _build_chat_payload(
             "type": "user",
             "content": prompt.question,
             "attachments": attachments,
-        },
-        "hints": {
-            "expected_traits": prompt.expected_traits,
-            "prompt_id": prompt.id,
         },
         "constraints": {
             "country_code": country_code,

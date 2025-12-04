@@ -64,16 +64,21 @@ class PolarsExecutorNode:
                 raise PolarsExecutionError(message) from exc
             duration_ms = (perf_counter() - start) * 1000
             row_count = len(rows)
+            normalized_query = " ".join(query.split())
+            log_query = normalized_query if len(normalized_query) <= 400 else f"{normalized_query[:397]}..."
             logger.info(
-                "numerical SQL executed (tables=%s rows=%s)",
+                "numerical SQL executed (tables=%s rows=%s query=%s)",
                 ",".join(sorted(tables.keys())),
                 row_count,
+                log_query,
             )
             metrics = dict(state.subgraph_metrics)
             metrics.update(
                 {
                     "numerical.polars.execution_ms": round(duration_ms, 3),
                     "numerical.polars.row_count": row_count,
+                    "numerical.sql.executed": metrics.get("numerical.sql.executed", 0) + 1,
+                    "numerical.sql.rows": row_count,
                 }
             )
             result_metrics = dict(state.numerical_result_metrics)
@@ -82,12 +87,21 @@ class PolarsExecutorNode:
                     "execution_ms": round(duration_ms, 3),
                     "row_count": row_count,
                     "table_aliases": list(tables.keys()),
+                    "sql_query": query,
                 }
             )
-            add_metadata(execution_ms=round(duration_ms, 3), row_count=row_count)
+            add_metadata(
+                execution_ms=round(duration_ms, 3),
+                row_count=row_count,
+                sql_query=normalized_query,
+            )
             await emit_telemetry_snapshot(
                 sse_emitter,
-                metrics={"numerical.polars.execution_ms": round(duration_ms, 3)},
+                metrics={
+                    "numerical.polars.execution_ms": round(duration_ms, 3),
+                    "numerical.sql.executed": metrics["numerical.sql.executed"],
+                    "numerical.sql.rows": row_count,
+                },
                 labels={"table_aliases": ",".join(sorted(tables.keys()))},
             )
             trace = dict(state.numerical_trace)
@@ -97,6 +111,7 @@ class PolarsExecutorNode:
                 "table_aliases": list(tables.keys()),
                 "execution_ms": round(duration_ms, 3),
                 "result_preview": preview_rows,
+                "sql_query": query,
             }
             if not trace.get("sql_queries"):
                 trace["sql_queries"] = [query]
