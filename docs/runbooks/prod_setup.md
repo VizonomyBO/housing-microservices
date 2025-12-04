@@ -66,8 +66,12 @@ If the user already exists, the endpoint returns 409; ignore it.
    - Logs in with the demo user.
    - Creates a conversation and attaches all seeded documents.
    - Asks three questions (simple RAG, cross-doc reasoning, table/SQL) against `/v1/chat`. Quantitative prompts automatically fan out through the numerical/Polars planner—no need to mention “SQL” or “Polars” in the question.
-   - Stores the responses, citations, and raw payloads in `prod_sample_run.json` (gitignored).
-4. Open `prod_sample_run.json` to confirm the answers look correct before handing the backend to the frontend team.
+   - Stores the responses, citations, SQL trace metadata, and raw payloads in `prod_sample_run.json` (gitignored).
+4. Open `prod_sample_run.json` to confirm:
+   - `requires_sql` is `true` for the KPI/table prompt and `false` elsewhere.
+   - `sql_queries` contains the planner’s Polars SQL (mirrors what you’ll see in the executor logs).
+   - `table_results` contains the preview rows streamed back by the Polars executor. These rows should match the cited KPI values in the final answer.
+5. Give the file a quick read to ensure the prose answer aligns with the SQL preview rows before handing the backend to the frontend team.
 
 ## 7. Inspect Node-Level Logs
 Because `.env.prod` forces `UVICORN_LOG_LEVEL=info`, each `/v1/chat` call emits `task_start/task_end` SSE events. **Refresh the auth token right before you stream** (tokens only last ~15 minutes):
@@ -92,7 +96,13 @@ curl -N -H "Authorization: Bearer $TOKEN" -H 'Accept: text/event-stream' \
          }' \
      "$AGENT_BASE_URL/v1/chat"
 ```
-The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above automatically routes through the numerical (Polars) subgraph—the router now detects KPI/threshold language without relying on explicit “SQL” hints—so you can watch every `task_start`/`task_end` event in the stream. A full sample transcript is available in [`docs/examples/prod_sse_walkthrough.md`](../examples/prod_sse_walkthrough.md).
+The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above automatically routes through the numerical (Polars) subgraph—the router now detects KPI/threshold language without relying on explicit “SQL” hints—so you can watch `numerical_scope_builder`, `numerical_text_to_sql`, `numerical_polars_executor`, and `numerical_result_validator` events fire before `informational_answer_synthesizer` signs off. Look for:
+- `router` metadata that includes `requires_sql=true`.
+- `numerical_text_to_sql` events that log `table_alias=gdp` (or similar) plus the generated SQL.
+- `numerical_polars_executor` events that include the row count and emit `sql_cache_bypass` metadata.
+- `informational_answer_synthesizer` finishing with a `[SQL_RESULT]` citation tied to the executor output.
+
+A full sample transcript is available in [`docs/examples/prod_sse_walkthrough.md`](../examples/prod_sse_walkthrough.md).
 You can also tail the compose logs:
 ```bash
 COMPOSE_PROFILES=reduced,ops docker compose logs -f agent-api | grep informational_

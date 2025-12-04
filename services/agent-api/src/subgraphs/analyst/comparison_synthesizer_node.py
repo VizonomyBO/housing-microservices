@@ -72,6 +72,10 @@ class ComparisonSynthesizerNode:
             raise ComparisonSynthesisError(
                 "ComparisonSynthesizer requires analyst_plan in AgentState"
             )
+        if state.requires_sql and not (state.numerical_trace.get("sql_queries")):
+            raise ComparisonSynthesisError(
+                "Numeric response rejected: no SQL trace present for comparison output"
+            )
         normalized_prompt = (
             state.normalized_input.normalized_prompt if state.normalized_input else None
         )

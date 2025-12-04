@@ -116,6 +116,9 @@ for i in "${!questions[@]}"; do
     prompt_id:$prompt,
     answer:(.done.answer // .done.payload.answer // ""),
     citations:(.done.citations // .done.payload.citations // []),
+    requires_sql:(.done.requires_sql // .done.payload.requires_sql // false),
+    sql_queries:(.done.sql_queries // .done.payload.sql_queries // []),
+    table_results:(.done.table_results // .done.payload.table_results // []),
     raw_response:.
   }' >> "$TMP_JSON"
 

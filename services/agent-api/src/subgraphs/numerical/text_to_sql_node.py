@@ -40,6 +40,8 @@ class SqlGenerationResult:
     columns: dict[str, list[str]]
     reasoning: str | None = None
     confidence: float | None = None
+    table_specs: list[dict[str, Any]] = field(default_factory=list)
+    sql_queries: list[str] = field(default_factory=list)
 
 
 class SqlGeneratorProtocol(Protocol):
@@ -65,6 +67,8 @@ class NumericalPromptBuilder:
     ) -> str:
         lines: list[str] = [
             "You are a numerical analyst that emits Polars SQL queries.",
+            "You MUST return a SQL query that can run directly against the provided table specs.",
+            "Never perform arithmetic or summarization outside SQL; do not answer in prose.",
             "Return only SQL without commentary.",
             f"User question: {normalized_prompt.strip()}",
             "Use the selected table only; joins are not yet supported.",
@@ -111,6 +115,7 @@ class TextToSQLNode:
         if normalized is None:
             raise TextToSQLError("TextToSQL node requires normalized_input in AgentState")
         table = self._selected_table(state)
+        requires_sql = state.requires_sql
         maybe_skip = await self._maybe_skip_for_demo(state, sse_emitter)
         if maybe_skip is not None:
             return maybe_skip
@@ -136,6 +141,12 @@ class TextToSQLNode:
             )
             result = await self.generator.generate(request)
             guardrail_message = self._validate_result(table, result)
+            sql_queries = self._normalize_queries(result)
+            if requires_sql and not sql_queries:
+                raise TextToSQLError(
+                    "Router required SQL execution but SQL planner returned no queries"
+                )
+            table_specs = self._normalize_table_specs(table, result.table_specs)
             add_metadata(prompt_chars=len(prompt), retry_counter=state.retry_counter)
             if guardrail_message:
                 add_metadata(guardrail_triggered=True, guardrail_reason=guardrail_message)
@@ -149,10 +160,21 @@ class TextToSQLNode:
                 }
             )
             add_metadata(guardrail_triggered=False, table_count=len(result.tables))
+            trace = dict(state.numerical_trace)
+            trace.update(
+                {
+                    "table_specs": table_specs,
+                    "sql_queries": sql_queries,
+                    "planner_reasoning": result.reasoning,
+                }
+            )
+            if "chunk_ids" not in trace and table_specs:
+                trace["chunk_ids"] = table_specs[0].get("chunk_ids", [])
             return {
-                "numerical_sql": result.sql.strip(),
+                "numerical_sql": (sql_queries[0] if sql_queries else result.sql.strip()),
                 "numerical_sql_reasoning": result.reasoning,
                 "subgraph_metrics": metrics,
+                "numerical_trace": trace,
             }
 
     def _selected_table(self, state: AgentState) -> NumericalTable:
@@ -163,6 +185,44 @@ class TextToSQLNode:
             if alias in {table.alias, table.table_id}:
                 return table
         raise TextToSQLError(f"Selected table alias '{alias}' not found in numerical_tables")
+
+    def _normalize_table_specs(
+        self, table: NumericalTable, requested_specs: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        default_spec = self._default_table_spec(table)
+        if not requested_specs:
+            return [default_spec]
+        normalized: list[dict[str, Any]] = []
+        for spec in requested_specs:
+            merged = dict(default_spec)
+            merged.update(spec)
+            if not merged.get("chunk_ids"):
+                merged["chunk_ids"] = default_spec.get("chunk_ids", [])
+            if not merged.get("document_ids"):
+                merged["document_ids"] = default_spec.get("document_ids", [])
+            if not merged.get("column_names"):
+                merged["column_names"] = default_spec.get("column_names", [])
+            normalized.append(merged)
+        return normalized
+
+    def _default_table_spec(self, table: NumericalTable) -> dict[str, Any]:
+        metadata = dict(table.metadata or {})
+        document_ids = metadata.get("document_ids") or metadata.get("documents") or []
+        chunk_ids = metadata.get("chunk_ids") or metadata.get("chunks") or []
+        return {
+            "table_id": table.table_id,
+            "table_name": table.table_name,
+            "alias": table.alias,
+            "row_count": table.row_count,
+            "column_names": [column.name for column in table.columns],
+            "document_ids": document_ids,
+            "chunk_ids": chunk_ids,
+            "metadata": metadata,
+        }
+
+    def _normalize_queries(self, result: SqlGenerationResult) -> list[str]:
+        candidates = result.sql_queries or ([result.sql] if result.sql else [])
+        return [query.strip() for query in candidates if query and query.strip()]
 
     def _previous_error(self, state: AgentState) -> str | None:
         if not state.error_log:

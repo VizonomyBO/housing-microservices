@@ -73,10 +73,19 @@ class ResultValidatorNode:
                 }
             )
             add_metadata(validation="passed", row_count=len(rows))
+            trace = self._merge_trace(
+                state,
+                validator={
+                    "status": "passed",
+                    "row_count": len(rows),
+                    "table_id": table.table_id,
+                },
+            )
             return {
                 "guardrails_passed": True,
                 "numerical_artifacts": artifacts,
                 "subgraph_metrics": metrics,
+                "numerical_trace": trace,
             }
 
     def _selected_table(self, state: AgentState) -> NumericalTable:
@@ -158,12 +167,21 @@ class ResultValidatorNode:
         findings.append(violation)
         error_log = list(state.error_log)
         error_log.append(message)
+        trace = self._merge_trace(
+            state,
+            validator={
+                "status": "failed",
+                "table_id": table.table_id,
+                "violations": details,
+            },
+        )
         updates: dict[str, Any] = {
             "guardrail_findings": findings,
             "guardrails_passed": False,
             "error_log": error_log,
             "interrupt_reason": self.interrupt_reason,
             "next_subgraph": "human_gate",
+            "numerical_trace": trace,
         }
         annotated_state = state.model_copy(update=updates)
         if self.human_gate is None:
@@ -199,6 +217,12 @@ class ResultValidatorNode:
             "next_subgraph": "informational_subgraph",
             "guardrails_passed": True,
         }
+
+
+    def _merge_trace(self, state: AgentState, **entries: Any) -> dict[str, Any]:
+        trace = dict(state.numerical_trace)
+        trace.update(entries)
+        return trace
 
 
 def _is_number(value: Any) -> bool:

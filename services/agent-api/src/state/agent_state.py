@@ -578,6 +578,10 @@ class AgentState(BaseModel):
         default_factory=list,
         description="Serialized attachments (tables/charts) derived from numerical results.",
     )
+    numerical_trace: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured audit trail for numerical planner, executor, and validator nodes.",
+    )
     cache_metadata: CacheMetadata = Field(
         default_factory=CacheMetadata,
         description="Valkey interaction metadata used for observability (docs/overview/system_architecture.md §3).",
@@ -621,6 +625,10 @@ class AgentState(BaseModel):
     next_subgraph: str | None = Field(
         default=None,
         description="Graph node identifier scheduled to run next (HumanGate when guardrails fail).",
+    )
+    requires_sql: bool = Field(
+        default=False,
+        description="Indicates the router classified the prompt as requiring text-to-SQL execution.",
     )
     router_reason: str | None = Field(
         default=None,

@@ -573,6 +573,21 @@ async def _run_prompts(
         else:
             completion = await chat_blocking(client, token, payload)
         latency = (perf_counter() - run_start) * 1000
+        done_payload = completion.done_payload or {}
+        trace = done_payload.get("numerical_trace") or {}
+        requires_sql = bool(done_payload.get("requires_sql"))
+        sql_queries = list(
+            done_payload.get("sql_queries")
+            or trace.get("sql_queries")
+            or []
+        )
+        table_results = list(
+            done_payload.get("table_results")
+            or trace.get("table_results")
+            or []
+        )
+        executor = trace.get("executor") or {}
+        sql_row_count = executor.get("row_count")
         if verifier is not None:
             verifier.record_chat(prompt.id, completion.headers, completion.done_payload)
         validation = await validate_prompt(
@@ -596,6 +611,10 @@ async def _run_prompts(
                 judge_name=validation.judge_name,
                 judge_score=validation.judge_score,
                 judge_explanation=validation.judge_explanation,
+                requires_sql=requires_sql,
+                sql_queries=sql_queries,
+                sql_row_count=sql_row_count,
+                sql_table_results=table_results,
             )
         )
     return results

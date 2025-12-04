@@ -54,6 +54,7 @@ async def test_valid_results_emit_artifacts() -> None:
     assert updates["guardrails_passed"] is True
     assert len(updates["numerical_artifacts"]) >= 1
     assert updates["numerical_artifacts"][0].attachment_type == "table"
+    assert updates["numerical_trace"]["validator"]["status"] == "passed"
 
 
 @pytest.mark.asyncio
@@ -67,3 +68,4 @@ async def test_out_of_bounds_routes_to_human_gate() -> None:
     assert updates["guardrails_passed"] is False
     assert updates["next_subgraph"] == "human_gate"
     assert human_gate.calls == 1
+    assert updates["numerical_trace"]["validator"]["status"] == "failed"

@@ -45,9 +45,17 @@ NUMERICAL_KEYWORDS = {
     "percent",
     "threshold",
     "exceed",
-    "arrears",
-    "guardrail",
     "dashboard",
+    "sum",
+    "total",
+    "totals",
+    "difference",
+    "delta",
+    "compare",
+    "versus",
+    "vs",
+    "plus",
+    "minus",
 }
 ANALYST_KEYWORDS = {
     "plan",
@@ -55,7 +63,6 @@ ANALYST_KEYWORDS = {
     "roadmap",
     "trade-off",
     "risk",
-    "compare",
     "recommend",
 }
 VISION_KEYWORDS = {
@@ -123,10 +130,12 @@ class RouterNode:
                 )
 
             set_route(decision.route)
+            requires_sql = decision.route == RouterRoute.NUMERICAL
             add_metadata(
                 router_reason=decision.reason,
                 route_confidence=decision.confidence,
                 next_subgraph=decision.next_subgraph,
+                requires_sql=requires_sql,
             )
 
             return {
@@ -137,6 +146,7 @@ class RouterNode:
                 "guardrail_findings": guardrail_result.violations,
                 "guardrails_passed": guardrail_result.passed,
                 "cache_metadata": state.cache_metadata,
+                "requires_sql": requires_sql,
             }
 
     def _classify(self, state: AgentState, normalized_input: NormalizedInput) -> RouteDecision:
@@ -168,14 +178,17 @@ class RouterNode:
                 reason="vision_signal",
             )
 
+        arithmetic_expression = self._contains_arithmetic_expression(prompt)
+
         numerical_hint = (
             "polars" in workflow_hints
             or "sql" in workflow_hints
             or table_cues
             or digit_density >= 4
+            or arithmetic_expression
         )
 
-        if numerical_hint or numerical_score >= 2:
+        if numerical_hint or numerical_score >= 1:
             return RouteDecision(
                 route=RouterRoute.NUMERICAL,
                 confidence=self._confidence_from_score(
@@ -195,12 +208,11 @@ class RouterNode:
                 reason="analyst_signal",
             )
 
-        if analyst_score == 1 or numerical_score == 1:
-            route = RouterRoute.ANALYST if analyst_score == 1 else RouterRoute.NUMERICAL
+        if analyst_score == 1:
             return RouteDecision(
-                route=route,
+                route=RouterRoute.ANALYST,
                 confidence=self.default_confidence,
-                next_subgraph=ROUTE_TO_SUBGRAPH[route],
+                next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.ANALYST],
                 reason="single_keyword",
             )
 
@@ -282,6 +294,33 @@ class RouterNode:
         if "table" in prompt and ("kpi" in prompt or "score" in prompt):
             return True
         return "dashboard" in prompt and ("kpi" in prompt or "utilization" in prompt)
+
+    def _contains_arithmetic_expression(self, prompt: str) -> bool:
+        if re.search(r"\d+\s*(?:%|percent|percentage|basis points?|bps)", prompt):
+            return True
+        if re.search(r"\d+\s*(?:\+|-|/|\*)\s*\d+", prompt):
+            return True
+        arithmetic_tokens = {
+            "sum",
+            "total",
+            "difference",
+            "delta",
+            "ratio",
+            "rate",
+            "compare",
+            "versus",
+            "vs",
+            "plus",
+            "minus",
+            "greater than",
+            "less than",
+            "exceed",
+        }
+        for token in arithmetic_tokens:
+            pattern = rf"\b{re.escape(token)}\b"
+            if re.search(pattern, prompt):
+                return True
+        return False
 
     def _confidence_from_score(self, score: int, workflow_hit: bool = False) -> float:
         if workflow_hit and score >= 2:

@@ -90,6 +90,7 @@ async def test_numerical_keywords_drive_numerical_route():
 
     assert result["route"] == RouterRoute.NUMERICAL
     assert result["next_subgraph"] == ROUTE_TO_SUBGRAPH[RouterRoute.NUMERICAL]
+    assert result["requires_sql"] is True
 
 
 @pytest.mark.asyncio
@@ -104,9 +105,20 @@ async def test_vision_keywords_detected():
 
 
 @pytest.mark.asyncio
-async def test_analyst_keywords_default_when_prompt_is_plan():
+async def test_compare_keywords_force_numerical_route():
     router = RouterNode(guardrail_engine=StubGuardrailEngine())
     state = _agent_state("Draft a strategy plan that compares two programs")
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
+
+
+@pytest.mark.asyncio
+async def test_strategy_plan_without_compare_routes_to_analyst():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    state = _agent_state("Draft a strategy plan for District 9 partners")
 
     result = await router(state)
 
@@ -122,6 +134,7 @@ async def test_default_to_informational_when_no_signal():
 
     assert result["route"] == RouterRoute.INFORMATIONAL
     assert result["router_reason"] == "default"
+    assert result["requires_sql"] is False
 
 
 @pytest.mark.asyncio
@@ -154,6 +167,7 @@ async def test_kpi_question_triggers_numerical_path_without_hints():
 
     assert result["route"] == RouterRoute.NUMERICAL
     assert result["router_reason"] == "numerical_signal"
+    assert result["requires_sql"] is True
 
 
 @pytest.mark.asyncio
@@ -168,3 +182,30 @@ async def test_guardrail_policy_with_numbers_routes_to_numerical():
     result = await router(state)
 
     assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
+
+
+@pytest.mark.asyncio
+async def test_simple_addition_forces_numerical_route():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = "What is 40 + 2 from the KPI memo table?"
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
+    assert result["router_reason"] == "numerical_signal"
+
+
+@pytest.mark.asyncio
+async def test_percentage_thresholds_require_sql_path():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = "Which city exceeds 80 percent utilization this quarter?"
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["requires_sql"] is True
+    assert result["router_reason"] == "numerical_signal"

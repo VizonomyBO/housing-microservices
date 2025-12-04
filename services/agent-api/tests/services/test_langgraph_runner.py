@@ -10,11 +10,20 @@ from agent_api.http.schemas import ResponseMode
 from agent_api.reduced_scope import ReducedScopeFlags
 from cache import InMemoryValkeyClient
 from cache.response_serializer import CacheCitation
-from models.retrieval import ChatConstraints, ChatMessagePayload, ChatRequestContext
+from models.retrieval import (
+    AttachmentDocument,
+    AttachmentDocumentChunk,
+    AttachmentScope,
+    ChatConstraints,
+    ChatMessagePayload,
+    ChatRequestContext,
+    NormalizedInput,
+    TenantScope,
+)
 from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.utils.language import StubLanguageDetector
 from nodes.router.router_node import RouterRoute
-from services.langgraph_runner import LangGraphChatRunner
+from services.langgraph_runner import LangGraphChatRunner, RunnerContext
 from telemetry import CacheObservability, get_metrics_registry
 
 
@@ -106,3 +115,87 @@ async def test_runner_maps_node_errors(db_session):
             rate_limiter=None,
         )
     assert excinfo.value.status_code == 400
+
+
+def _kpi_document() -> AttachmentDocument:
+    table_text = """
+    ### KPI Table (Nov 2024)
+
+    | City / Zone | KPI | Value |
+    |-------------|-----|-------|
+    | Arroyo Vista | Housing Stability Score | 78 |
+    | Brookhaven | Housing Stability Score | 82 |
+    | District 9 Core | Housing Stability Score | 88 |
+    | District 9 East | Voucher Utilization % | 91 |
+    """.strip()
+    return AttachmentDocument(
+        document_id="doc-kpi",
+        canonical_name="District 9 KPI Dashboard",
+        access_scope="base",
+        chunks=[AttachmentDocumentChunk(chunk_id="chunk-1", text=table_text)],
+    )
+
+
+def _normalized_prompt(text: str) -> NormalizedInput:
+    return NormalizedInput(
+        normalized_prompt=text,
+        raw_prompt=text,
+        tenant_scope=TenantScope(conversation_id="conv-1", thread_id="thr-1"),
+        attachment_refs=[],
+        scope_hash="scope",
+    )
+
+
+def _runner(metrics):
+    return LangGraphChatRunner(
+        cache_client=InMemoryValkeyClient(),
+        cache_observability=CacheObservability(metrics=metrics),
+        language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
+        openai_client=None,
+        metrics=metrics,
+    )
+
+
+def test_builds_numerical_table_from_markdown(db_session):
+    metrics = get_metrics_registry()
+    runner = _runner(metrics)
+    state = runner._build_initial_state(_chat_request()).model_copy(
+        update={
+            "attachment_scope": AttachmentScope(documents=[_kpi_document()]),
+        }
+    )
+    tables = runner._build_numerical_tables(state)
+    assert tables
+    assert tables[0].row_count == 4
+    assert tables[0].columns[-1].name == "value"
+
+
+@pytest.mark.asyncio
+async def test_numerical_pipeline_executes_sql(db_session):
+    metrics = get_metrics_registry()
+    runner = _runner(metrics)
+    request = _chat_request()
+    base_state = runner._build_initial_state(request)
+    state = base_state.model_copy(
+        update={
+            "normalized_input": _normalized_prompt(
+                "Group KPI values by city and call out whoever exceeds 80"
+            ),
+            "attachment_scope": AttachmentScope(documents=[_kpi_document()]),
+            "requires_sql": True,
+        }
+    )
+    context = RunnerContext(
+        chat_request=request,
+        request_context=RequestContext(
+            request_id="req-1", traceparent=None, idempotency_key=None, headers={}
+        ),
+        auth_context=AuthContext(user_id="user-1"),
+        sse_emitter=None,
+        db_session=db_session,
+        reduced_scope=ReducedScopeFlags(),
+    )
+    state = await runner._run_numerical_pipeline(state, context)
+    assert state.numerical_result_rows
+    assert state.numerical_trace["executor"]["row_count"] == 3
+    assert "sql_queries" in state.numerical_trace

@@ -29,6 +29,10 @@ class PromptRunResult:
     judge_name: str | None = None
     judge_score: float | None = None
     judge_explanation: str | None = None
+    requires_sql: bool = False
+    sql_queries: list[str] = field(default_factory=list)
+    sql_row_count: int | None = None
+    sql_table_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -81,6 +85,10 @@ class RunSummary:
                     "judge_name": prompt.judge_name,
                     "judge_score": prompt.judge_score,
                     "judge_explanation": prompt.judge_explanation,
+                    "requires_sql": prompt.requires_sql,
+                    "sql_queries": prompt.sql_queries,
+                    "sql_row_count": prompt.sql_row_count,
+                    "sql_table_results": prompt.sql_table_results,
                 }
                 for prompt in self.prompts
             ],
@@ -129,6 +137,14 @@ def format_console(summary: RunSummary) -> str:
             )
             if prompt.judge_explanation and not prompt.success:
                 lines.append(f"      {prompt.judge_explanation}")
+            if prompt.requires_sql:
+                query = prompt.sql_queries[0] if prompt.sql_queries else "N/A"
+                row_count = prompt.sql_row_count
+                if row_count is None:
+                    row_count = len(prompt.sql_table_results)
+                lines.append(
+                    f"      SQL rows={row_count} query={query[:80]}"
+                )
     if summary.telemetry:
         lines.append("")
         lines.append("Telemetry:")

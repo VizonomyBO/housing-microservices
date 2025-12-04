@@ -11,6 +11,7 @@ from cache import (
 )
 from cache.response_serializer import CacheWorkflowPlanExcerpt
 from models.retrieval import NormalizedInput, TenantScope
+from nodes.retrieval.exceptions import NodeError
 from state.agent_state import AgentState, CacheMetadata, MessageSnapshot
 from subgraphs.informational.answer_synthesizer_node import (
     AnswerSynthesisContext,
@@ -95,3 +96,39 @@ async def test_generates_answer_on_cache_miss() -> None:
     assert updates["answer"] == "fresh answer"
     assert updates["quality_score"] == pytest.approx(0.92)
     assert updates["cache_metadata"].hit is False
+
+
+@pytest.mark.asyncio
+async def test_requires_sql_without_trace_raises() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-trace")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = True
+    composer = StubComposer()
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    with pytest.raises(NodeError):
+        await node(state)
+
+
+@pytest.mark.asyncio
+async def test_sql_trace_adds_citation_when_required() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-trace-present")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = True
+    state.numerical_trace = {
+        "sql_queries": ["SELECT city FROM ledger"],
+        "executor": {"row_count": 2},
+        "table_specs": [{"table_id": "tbl-ledger", "alias": "ledger"}],
+        "table_results": [{"city": "Austin"}],
+    }
+    state.numerical_result_rows = [{"city": "Austin"}]
+    composer = StubComposer()
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    sql_citations = [c for c in updates["citations"] if c.doc_id == "SQL_RESULT"]
+    assert sql_citations
+    assert sql_citations[0].metadata["table_id"] == "tbl-ledger"

@@ -39,9 +39,12 @@ curl -N -H "Authorization: Bearer $TOKEN" \
 | 3–4 | `task_start`/`task_end` (`input_normalizer`) | Normalizes the request, detects `language=tl` due to sample text, and reports attachments. |
 | 5–6 | `attachment_scope_loader` | Loads the four seeded documents (policy, guardrails, ledger, KPI dashboard).                  |
 | 7–11 | `graph_retriever` → `graph_summarizer` | Attempts to pull cached graph context; no entities exist so the summarizer falls back.    |
-| 12–13 | `router`            | Chooses the `informational` subgraph with 0.6 confidence once guardrails pass.                  |
-| 14–15 | `informational_answer_synthesizer` | Spends ~8 seconds synthesizing the answer, citing policy memo, KPIs, and ledger figures. |
-| 16 | `done`                | Emits the final markdown answer plus the four citations used.                                   |
+| 12–13 | `router`            | Sets `route=numerical` with `requires_sql=true` after spotting KPI/threshold cues.              |
+| 14  | `numerical_text_to_sql`   | Selects the KPI table, emits `table_specs`, and logs the Polars SQL in the metadata.         |
+| 15  | `numerical_polars_executor` | Runs the SQL in a threadpool, logs row counts, and emits `sql_cache_bypass=true`.           |
+| 16  | `numerical_result_validator` | Confirms row bounds + schema and attaches the table preview artifacts.                    |
+| 17  | `informational_answer_synthesizer` | Verifies the SQL trace is present, adds the `[SQL_RESULT]` citation, then drafts the prose answer. |
+| 18 | `done`                | Returns the final answer plus `requires_sql`, `sql_queries`, `table_results`, and citations.     |
 
 Full raw SSE payloads are shown below for reference:  
 <details>
@@ -55,5 +58,6 @@ Full raw SSE payloads are shown below for reference:
 
 ## 3. Takeaways
 
-- Expect the same node order whenever you ask a multi-document policy/KPI question: `input_normalizer → attachment_scope_loader → graph_retriever → router → informational_answer_synthesizer`.
+- Expect the same node order whenever you ask a multi-document policy/KPI question: `input_normalizer → attachment_scope_loader → graph_retriever → router (requires_sql) → numerical_scope_builder → numerical_text_to_sql → numerical_polars_executor → numerical_result_validator → informational_answer_synthesizer`.
+- The `done` payload now echoes the SQL trace (`requires_sql`, `sql_queries`, `table_results`). Compare these fields against `prod_sample_run.json` when you want to double-check that the numbers in the prose answer match the executor output.
 - If you want to watch a different scenario, re-run `./scripts/prod_smoke_check.sh` first so you have the latest `thread_id`, then replace the question in the curl body.

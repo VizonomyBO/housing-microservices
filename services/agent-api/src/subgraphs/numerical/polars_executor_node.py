@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from time import perf_counter
@@ -22,6 +23,8 @@ from streaming.with_sse import (
 LazyFrameMap = Mapping[str, pl.LazyFrame]
 TableResolver = Callable[[AgentState], LazyFrameMap | Awaitable[LazyFrameMap]]
 
+logger = logging.getLogger(__name__)
+
 
 class PolarsExecutionError(RuntimeError):
     """Raised when Polars execution fails."""
@@ -33,6 +36,7 @@ class PolarsExecutorNode:
 
     table_resolver: TableResolver
     interrupt_reason: str = "numerical_polars_error"
+    result_preview_rows: int = 5
 
     async def __call__(
         self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
@@ -60,6 +64,11 @@ class PolarsExecutorNode:
                 raise PolarsExecutionError(message) from exc
             duration_ms = (perf_counter() - start) * 1000
             row_count = len(rows)
+            logger.info(
+                "numerical SQL executed (tables=%s rows=%s)",
+                ",".join(sorted(tables.keys())),
+                row_count,
+            )
             metrics = dict(state.subgraph_metrics)
             metrics.update(
                 {
@@ -81,10 +90,27 @@ class PolarsExecutorNode:
                 metrics={"numerical.polars.execution_ms": round(duration_ms, 3)},
                 labels={"table_aliases": ",".join(sorted(tables.keys()))},
             )
+            trace = dict(state.numerical_trace)
+            preview_rows = rows[: self.result_preview_rows]
+            executor_trace = {
+                "row_count": row_count,
+                "table_aliases": list(tables.keys()),
+                "execution_ms": round(duration_ms, 3),
+                "result_preview": preview_rows,
+            }
+            if not trace.get("sql_queries"):
+                trace["sql_queries"] = [query]
+            trace.update(
+                {
+                    "executor": executor_trace,
+                    "table_results": preview_rows,
+                }
+            )
             return {
                 "numerical_result_rows": rows,
                 "numerical_result_metrics": result_metrics,
                 "subgraph_metrics": metrics,
+                "numerical_trace": trace,
             }
 
     async def _resolve_tables(self, state: AgentState) -> LazyFrameMap:

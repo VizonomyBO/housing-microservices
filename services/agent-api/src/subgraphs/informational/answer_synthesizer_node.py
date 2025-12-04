@@ -10,6 +10,7 @@ from cache.cache_writer import CacheShortCircuitResult, maybe_serve_from_cache
 from cache.response_serializer import CacheCitation, CacheWorkflowPlanExcerpt
 from cache.valkey_client import ValkeyCacheClientProtocol
 from models.retrieval import AttachmentScope
+from nodes.retrieval.exceptions import NodeError
 from state.agent_state import AgentState, GraphContext, GraphSummary, WorkflowPlan
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, emit_cache_hit, emit_cache_miss, lifecycle_span
@@ -76,6 +77,14 @@ class AnswerSynthesizerNode:
                 observability=self.cache_observability,
                 state=state,
             )
+            if state.requires_sql and cache_result.hit:
+                cache_result = CacheShortCircuitResult(
+                    cache_metadata=cache_result.cache_metadata,
+                    hit=False,
+                    payload=None,
+                    cache_key=cache_result.cache_key,
+                )
+                add_metadata(sql_cache_bypass=True)
             if cache_result.cache_key:
                 if cache_result.hit:
                     await emit_cache_hit(
@@ -103,6 +112,9 @@ class AnswerSynthesizerNode:
             result = await self.composer.compose(context)
             metadata = cache_result.cache_metadata
             add_metadata(cache_hit=False)
+            if state.requires_sql:
+                self._require_numerical_sql_trace(state)
+                self._ensure_sql_citation(result, state)
             return {
                 "answer": result.answer_text,
                 "citations": result.citations,
@@ -130,6 +142,71 @@ class AnswerSynthesizerNode:
             "quality_score": inferred_score,
             "cache_metadata": metadata,
         }
+
+    def _require_numerical_sql_trace(self, state: AgentState) -> None:
+        if not state.requires_sql:
+            return
+        trace = state.numerical_trace or {}
+        sql_queries = trace.get("sql_queries") or []
+        executor = trace.get("executor")
+        if not sql_queries or executor is None:
+            raise NodeError(
+                code="NUMERICAL_TRACE_MISSING",
+                message="Numeric response rejected: no SQL trace present",
+                details={"requires_sql": True},
+            )
+
+    def _ensure_sql_citation(self, result: AnswerSynthesisResult, state: AgentState) -> None:
+        if any(citation.doc_id == "SQL_RESULT" for citation in result.citations):
+            return
+        citation = self._build_sql_citation(state)
+        result.citations.append(citation)
+        if citation.chunk_id not in result.chunk_ids:
+            result.chunk_ids.append(citation.chunk_id)
+        metadata = dict(result.model_metadata or {})
+        sql_meta = dict(metadata.get("sql_trace") or {})
+        sql_meta.update(
+            {
+                "sql_queries": state.numerical_trace.get("sql_queries", []),
+                "row_count": state.numerical_trace.get("executor", {}).get("row_count"),
+                "table_id": citation.metadata.get("table_id"),
+            }
+        )
+        metadata["sql_trace"] = sql_meta
+        result.model_metadata = metadata
+
+    def _build_sql_citation(self, state: AgentState) -> CacheCitation:
+        trace = state.numerical_trace or {}
+        sql_queries = trace.get("sql_queries") or []
+        query = sql_queries[0] if sql_queries else ""
+        table_specs = trace.get("table_specs") or [{}]
+        table_id = str(table_specs[0].get("table_id") or table_specs[0].get("alias") or "sql")
+        executor = trace.get("executor") or {}
+        row_count = executor.get("row_count", len(state.numerical_result_rows))
+        sample = self._sql_sample_row(state)
+        snippet_parts = [f"[SQL_RESULT] {table_id} rows={row_count}"]
+        if sample:
+            snippet_parts.append(f"sample={sample}")
+        if query:
+            snippet_parts.append(f"query={query[:120]}")
+        snippet = " ".join(snippet_parts)
+        return CacheCitation(
+            doc_id="SQL_RESULT",
+            chunk_id=f"{table_id}:sql_result",
+            snippet=snippet,
+            metadata={
+                "sql_query": query,
+                "row_count": row_count,
+                "table_id": table_id,
+            },
+        )
+
+    def _sql_sample_row(self, state: AgentState) -> dict[str, Any] | None:
+        if state.numerical_result_rows:
+            return state.numerical_result_rows[0]
+        trace = state.numerical_trace or {}
+        table_results = trace.get("table_results") or []
+        return table_results[0] if table_results else None
 
 
 __all__ = [

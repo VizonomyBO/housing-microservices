@@ -37,6 +37,9 @@ async def test_executes_sql_and_records_metrics() -> None:
     assert updates["numerical_result_rows"] == [{"country": "GHA", "gdp": 3.4}]
     assert updates["subgraph_metrics"]["numerical.polars.row_count"] == 1
     assert updates["numerical_result_metrics"]["table_aliases"] == ["gdp"]
+    trace = updates["numerical_trace"]
+    assert trace["executor"]["row_count"] == 1
+    assert trace["table_results"] == [{"country": "GHA", "gdp": 3.4}]
 
 
 @pytest.mark.asyncio

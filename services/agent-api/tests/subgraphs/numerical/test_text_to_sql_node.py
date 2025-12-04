@@ -47,6 +47,7 @@ def _base_state() -> AgentState:
             NumericalTableColumn(name="gdp", data_type="float", min_value=0.0, max_value=100.0),
         ],
         sample_rows=[{"country": "LBR", "gdp": 12.1}],
+        metadata={"document_ids": ["doc-1"], "chunk_ids": ["chunk-1"]},
     )
     plan = WorkflowPlan(
         plan_id="wf-1",
@@ -72,6 +73,7 @@ async def test_generates_sql_when_schema_valid() -> None:
         tables=["gdp"],
         columns={"gdp": ["country", "gdp"]},
         reasoning="Need GDP order",
+        sql_queries=["SELECT country, gdp FROM gdp ORDER BY gdp DESC"],
     )
     node = TextToSQLNode(generator=StubGenerator(result), prompt_builder=NumericalPromptBuilder())
     state = _base_state()
@@ -81,6 +83,10 @@ async def test_generates_sql_when_schema_valid() -> None:
     assert updates["numerical_sql"] == "SELECT country, gdp FROM gdp ORDER BY gdp DESC"
     assert updates["numerical_sql_reasoning"] == "Need GDP order"
     assert updates["subgraph_metrics"]["numerical.text_to_sql.tables"] == 1
+    trace = updates["numerical_trace"]
+    assert trace["sql_queries"] == ["SELECT country, gdp FROM gdp ORDER BY gdp DESC"]
+    assert trace["table_specs"][0]["table_id"] == "tbl-gdp"
+    assert trace["table_specs"][0]["chunk_ids"] == ["chunk-1"]
 
 
 @pytest.mark.asyncio
@@ -89,6 +95,7 @@ async def test_guardrail_triggers_on_join() -> None:
         sql="SELECT a.country FROM gdp a JOIN other b ON a.country=b.country",
         tables=["gdp", "other"],
         columns={"gdp": ["country"], "other": ["country"]},
+        sql_queries=["SELECT a.country FROM gdp a JOIN other b ON a.country=b.country"],
     )
     node = TextToSQLNode(generator=StubGenerator(result))
     state = _base_state()

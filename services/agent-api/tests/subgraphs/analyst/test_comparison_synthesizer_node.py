@@ -17,6 +17,7 @@ from state.agent_state import (
 from subgraphs.analyst.comparison_synthesizer_node import (
     ComparisonResponseBuilder,
     ComparisonSynthesisContext,
+    ComparisonSynthesisError,
     ComparisonSynthesisResult,
     ComparisonSynthesizerNode,
 )
@@ -89,3 +90,15 @@ async def test_comparison_synthesizer_streams_and_writes_cache() -> None:
     assert cache_key is not None
     stored = await client.get(cache_key)
     assert stored is not None
+
+
+@pytest.mark.asyncio
+async def test_comparison_synthesizer_rejects_missing_sql_trace() -> None:
+    client = InMemoryValkeyClient()
+    writer = CacheWriter(client=client)
+    state = _state_with_plan()
+    state.requires_sql = True
+    node = ComparisonSynthesizerNode(builder=StubBuilder(), cache_writer=writer)
+
+    with pytest.raises(ComparisonSynthesisError):
+        await node(state)
