@@ -115,7 +115,125 @@ COMPOSE_PROFILES=reduced,ops docker compose --profile reduced down -v --remove-o
 ```
 This removes all containers, volumes (including Postgres/LocalStack data), and stray networks.
 
-## 9. Troubleshooting
+## 9. AWS Deployment Variant
+Use `.env.prod.aws` when you want the reduced stack to call real AWS services, SES/SMTP, and a managed Postgres instance instead of the local containers.
+
+1. **Prepare secrets**
+   - Copy the template and populate every `CHANGE_ME` in `.env.prod.aws` (real AWS keys, SES SMTP creds, production database passwords, public URLs).
+   - Point `DATABASE_URL` and `AUTH_DATABASE_URL` at your hosted Postgres/RDS endpoint.
+2. **Export the AWS env file**
+   ```bash
+   set -a && source .env.prod.aws && set +a
+   ```
+3. **Use the production override compose file** so the services read the remote connection strings and skip the local Postgres container:
+   ```bash
+   COMPOSE_PROFILES=reduced,ops \
+     docker compose \
+       -f docker-compose.yml \
+       -f docker-compose.prod.override.yml \
+       up -d --build
+   ```
+4. Run the same smoke/SSE checks (`./scripts/prod_smoke_check.sh`, `/v1/chat` SSE stream). The KPI prompt should now show `requires_sql=true` while the underlying AWS services (S3/SQS/etc.) and hosted Postgres handle the storage and messaging layers.
+
+> **Reminder:** `docker-compose.prod.override.yml` disables the local `postgres`/`db-shell` services. Re-enable them or switch back to `.env.prod` when you return to LocalStack mode.
+
+## 10. Full Flow via cURL (Docs → Conversation → Attachments → Advanced Prompt)
+Sometimes you need to rehearse the entire prod journey without the helper script. The commands below assume:
+- `jq` is installed.
+- `.env.prod` **or** `.env.prod.aws` has been sourced.
+- The demo user from step 5 already exists and can log in.
+- You are running from the repo root so the sample Markdown files are available.
+
+### 10.1 Obtain an access token
+```bash
+set -a && source .env.prod && set +a   # or .env.prod.aws
+TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"login\":\"$PROD_DEMO_EMAIL\",\"password\":\"$PROD_DEMO_PASSWORD\"}" \
+  | jq -r '.access_token')
+```
+
+### 10.2 Upload the demo documents via API
+Define a helper and upload the four Markdown artifacts that ship with the repo:
+```bash
+upload_doc() {
+  local file_path="$1"
+  local name="$2"
+  jq -n --rawfile content "$file_path" \
+    --arg name "$name" \
+    --arg country "$PROD_DEMO_COUNTRY" \
+    '{
+      document_name:$name,
+      content:$content,
+      content_type:"text/markdown",
+      chunk_type:"text",
+      access_scope:"user_shared",
+      country_code:$country,
+      language:"en",
+      tags:["demo","reduced_e2e"],
+      metadata:{scenario:"reduced_e2e",document_alias:$name}
+    }' \
+  | curl -sS -X POST "$AGENT_BASE_URL/v1/documents/upload" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d @- \
+  | jq -r '.document_id'
+}
+
+DOC_POLICY_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_policy.md DOC_POLICY)
+DOC_LEDGER_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_ledger.md DOC_LEDGER)
+DOC_KPI_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_kpi.md DOC_KPI)
+```
+
+### 10.3 Create a conversation
+```bash
+CONV_RESP=$(curl -sS -X POST "$AGENT_BASE_URL/v1/conversations" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "country_code":"'"$PROD_DEMO_COUNTRY"'",
+        "namespace":"prod-demo",
+        "tags":["demo","prod_cli"]
+      }')
+CONV_ID=$(echo "$CONV_RESP" | jq -r '.conversation.conversation_id')
+```
+
+### 10.4 Attach each uploaded document
+```bash
+for doc_id in "$DOC_POLICY_ID" "$DOC_LEDGER_ID" "$DOC_KPI_ID"; do
+  curl -sS -X POST "$AGENT_BASE_URL/v1/conversations/$CONV_ID/attachments" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"document_id\":\"$doc_id\",\"auto_attach_base_docs\":false}"
+done
+```
+
+### 10.5 Ask the advanced numerical prompt over SSE
+Use the richer quantitative question from Section 7 and capture the entire task/event stream:
+```bash
+ADVANCED_PROMPT="Using the guardrail memo, District 9 ledger, and KPI dashboard, identify which zones exceed the 80-point trigger and outline a two-step plan that pairs arrears relief with voucher guardrails for those renters. Cite KPI values and dollar figures."
+
+curl -N \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Accept: text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "thread_id":"'"$CONV_ID"'",
+        "message":{"type":"user","content":"'"$ADVANCED_PROMPT"'"},
+        "constraints":{"country_code":"'"$PROD_DEMO_COUNTRY"'","auto_attach_base_docs":false}
+      }' \
+  "$AGENT_BASE_URL/v1/chat" | tee sse_full_flow.log
+```
+
+The `sse_full_flow.log` transcript should show `task_start/task_end` events for `router`, `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`, and `informational_answer_synthesizer`. The final `done` payload will include `requires_sql=true`, the generated SQL, and the table preview rows so you can confirm the KPI math ran through the enforced SQL path.
+
+### 10.6 Optional cleanup
+Delete the conversation or documents when finished:
+```bash
+curl -X DELETE "$AGENT_BASE_URL/v1/conversations/$CONV_ID" -H "Authorization: Bearer $TOKEN"
+```
+
+## 11. Troubleshooting
 | Symptom | Remedy |
 | --- | --- |
 | `db-init` fails with auth errors | Double-check DB passwords in `.env.prod` match `scripts/init-databases.sh`. Run `docker compose run --rm db-init` after fixing env vars. |
