@@ -31,11 +31,23 @@ ROUTE_TO_SUBGRAPH = {
 NUMERICAL_KEYWORDS = {
     "calculate",
     "table",
+    "tables",
     "sql",
     "dataset",
+    "data set",
     "chart",
     "average",
     "median",
+    "kpi",
+    "score",
+    "utilization",
+    "percentage",
+    "percent",
+    "threshold",
+    "exceed",
+    "arrears",
+    "guardrail",
+    "dashboard",
 }
 ANALYST_KEYWORDS = {
     "plan",
@@ -51,7 +63,6 @@ VISION_KEYWORDS = {
     "photo",
     "picture",
     "diagram",
-    "figure",
     "screenshot",
 }
 
@@ -144,6 +155,8 @@ class RouterNode:
         analyst_score = self._score_prompt(prompt, ANALYST_KEYWORDS)
         vision_score = self._score_prompt(prompt, VISION_KEYWORDS)
         digit_density = len(re.findall(r"\d", prompt))
+        numerical_score += self._numerical_context_boost(prompt, digit_density)
+        table_cues = self._contains_table_cues(prompt)
 
         if "vision" in workflow_hints or vision_score:
             return RouteDecision(
@@ -155,16 +168,18 @@ class RouterNode:
                 reason="vision_signal",
             )
 
-        if (
+        numerical_hint = (
             "polars" in workflow_hints
             or "sql" in workflow_hints
-            or numerical_score >= 2
-            or digit_density > 6
-        ):
+            or table_cues
+            or digit_density >= 4
+        )
+
+        if numerical_hint or numerical_score >= 2:
             return RouteDecision(
                 route=RouterRoute.NUMERICAL,
                 confidence=self._confidence_from_score(
-                    numerical_score + (1 if digit_density > 6 else 0), workflow_hit=True
+                    numerical_score + (1 if numerical_hint else 0), workflow_hit=True
                 ),
                 next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.NUMERICAL],
                 reason="numerical_signal",
@@ -248,6 +263,25 @@ class RouterNode:
 
     def _score_prompt(self, prompt: str, keywords: set[str]) -> int:
         return sum(1 for keyword in keywords if keyword in prompt)
+
+    def _numerical_context_boost(self, prompt: str, digit_density: int) -> int:
+        boost = 0
+        if "kpi" in prompt or "utilization" in prompt or "score" in prompt:
+            boost += 1
+        if "dashboard" in prompt or "table" in prompt or "| value" in prompt:
+            boost += 1
+        if digit_density >= 2 and ("percent" in prompt or "%" in prompt or "threshold" in prompt):
+            boost += 1
+        if "guardrail" in prompt and ("plan" in prompt or "policy" in prompt):
+            boost += 1
+        return boost
+
+    def _contains_table_cues(self, prompt: str) -> bool:
+        if "|" in prompt and (" kpi " in prompt or "| value" in prompt):
+            return True
+        if "table" in prompt and ("kpi" in prompt or "score" in prompt):
+            return True
+        return "dashboard" in prompt and ("kpi" in prompt or "utilization" in prompt)
 
     def _confidence_from_score(self, score: int, workflow_hit: bool = False) -> float:
         if workflow_hit and score >= 2:

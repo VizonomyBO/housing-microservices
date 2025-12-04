@@ -139,3 +139,32 @@ async def test_workflow_hints_push_to_numerical():
 
     assert result["route"] == RouterRoute.NUMERICAL
     assert result["router_reason"] == "numerical_signal"
+
+
+@pytest.mark.asyncio
+async def test_kpi_question_triggers_numerical_path_without_hints():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = (
+        "Using the KPI dashboard and utilization table, identify who exceeds the 80 percent trigger "
+        "and summarize the plan."
+    )
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL
+    assert result["router_reason"] == "numerical_signal"
+
+
+@pytest.mark.asyncio
+async def test_guardrail_policy_with_numbers_routes_to_numerical():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = (
+        "How should we pair the voucher guardrails with arrears relief when scores exceed 80 "
+        "and renters owe 1,200 dollars?"
+    )
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["route"] == RouterRoute.NUMERICAL

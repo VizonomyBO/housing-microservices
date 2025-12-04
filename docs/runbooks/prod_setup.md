@@ -65,12 +65,20 @@ If the user already exists, the endpoint returns 409; ignore it.
 3. The script:
    - Logs in with the demo user.
    - Creates a conversation and attaches all seeded documents.
-   - Asks three questions (simple RAG, cross-doc reasoning, table/SQL) against `/v1/chat`.
+   - Asks three questions (simple RAG, cross-doc reasoning, table/SQL) against `/v1/chat`. Quantitative prompts automatically fan out through the numerical/Polars planner—no need to mention “SQL” or “Polars” in the question.
    - Stores the responses, citations, and raw payloads in `prod_sample_run.json` (gitignored).
 4. Open `prod_sample_run.json` to confirm the answers look correct before handing the backend to the frontend team.
 
 ## 7. Inspect Node-Level Logs
-Because `.env.prod` forces `UVICORN_LOG_LEVEL=info`, each `/v1/chat` call emits `task_start/task_end` SSE events. To watch them live:
+Because `.env.prod` forces `UVICORN_LOG_LEVEL=info`, each `/v1/chat` call emits `task_start/task_end` SSE events. **Refresh the auth token right before you stream** (tokens only last ~15 minutes):
+```bash
+set -a && source .env.prod && set +a
+TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"login\":\"$PROD_DEMO_EMAIL\",\"password\":\"$PROD_DEMO_PASSWORD\"}" \
+  | jq -r .access_token)
+```
+Then stream the request:
 ```bash
 curl -N -H "Authorization: Bearer $TOKEN" -H 'Accept: text/event-stream' \
      -H 'Content-Type: application/json' \
@@ -84,7 +92,7 @@ curl -N -H "Authorization: Bearer $TOKEN" -H 'Accept: text/event-stream' \
          }' \
      "$AGENT_BASE_URL/v1/chat"
 ```
-The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above forces the reduced stack to walk the advanced reasoning path (graph retrieval + KPI table lookup + policy memo) so you can watch every `task_start`/`task_end` event in the stream.
+The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above automatically routes through the numerical (Polars) subgraph—the router now detects KPI/threshold language without relying on explicit “SQL” hints—so you can watch every `task_start`/`task_end` event in the stream. A full sample transcript is available in [`docs/examples/prod_sse_walkthrough.md`](../examples/prod_sse_walkthrough.md).
 You can also tail the compose logs:
 ```bash
 COMPOSE_PROFILES=reduced,ops docker compose logs -f agent-api | grep informational_
