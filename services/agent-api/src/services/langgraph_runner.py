@@ -21,7 +21,7 @@ from agent_api.reduced_scope import ReducedScopeFlags
 from cache import ValkeyCacheClientProtocol
 from cache.response_serializer import CacheCitation
 from guardrails.engine import GuardrailEngine
-from models.retrieval import AttachmentDocument, AttachmentScope, ChatRequestContext
+from models.retrieval import AttachmentDocument, ChatRequestContext
 from nodes.retrieval import AttachmentScopeLoaderNode, InputNormalizerNode
 from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.graph.repository import GraphDataRepository
@@ -176,9 +176,20 @@ class LangGraphChatRunner:
 
     async def _run_router(self, state: AgentState, context: RunnerContext) -> AgentState:
         updates = await self._router(state, sse_emitter=context.sse_emitter)
-        return state.model_copy(update=updates)
+        next_state = state.model_copy(update=updates)
+        if next_state.requires_sql:
+            tables = self._build_numerical_tables(next_state)
+            if not tables:
+                logger.warning(
+                    "Router requested numerical mode but no tables are available; falling back to text answer",
+                    extra={"conversation_id": context.chat_request.thread_id},
+                )
+                next_state = next_state.model_copy(update={"requires_sql": False})
+        return next_state
 
-    async def _run_numerical_pipeline(self, state: AgentState, context: RunnerContext) -> AgentState:
+    async def _run_numerical_pipeline(
+        self, state: AgentState, context: RunnerContext
+    ) -> AgentState:
         tables = self._build_numerical_tables(state)
         if not tables:
             raise NodeError(code="NUMERICAL_TABLE_MISSING", message="No numerical tables available")
@@ -239,7 +250,7 @@ class LangGraphChatRunner:
                         data_type="float" if isinstance(sample_value, (int, float)) else "text",
                     )
                 )
-            alias = self._slugify(document.canonical_name or f"table_{len(tables)+1}")
+            alias = self._slugify(document.canonical_name or f"table_{len(tables) + 1}")
             tables.append(
                 NumericalTable(
                     table_id=f"tbl-{document.document_id}",
@@ -367,7 +378,7 @@ class HeuristicSqlGenerator(SqlGeneratorProtocol):
         threshold = self._extract_threshold(prompt)
         comparator = ">="
         if threshold is not None:
-            if any(word in prompt for word in {"below", "under", "less than"}):
+            if any(word in prompt for word in ("below", "under", "less than")):
                 comparator = "<="
             query += f" WHERE value {comparator} {threshold}"
         if threshold is not None or "order" in prompt or "exceed" in prompt:

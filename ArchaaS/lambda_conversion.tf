@@ -103,19 +103,20 @@ data "archive_file" "marker_converter" {
 resource "aws_lambda_function" "marker_converter" {
   function_name = "${var.project_name}-marker-converter-${var.environment}"
   role          = aws_iam_role.marker_converter_lambda.arn
-  
+
   filename         = data.archive_file.marker_converter.output_path
   source_code_hash = data.archive_file.marker_converter.output_base64sha256
-  
+
   runtime     = "python3.12"
   handler     = "handler.handler"
   timeout     = 120
   memory_size = 512
-  
+
   layers = [
-    aws_lambda_layer_version.python_deps.arn
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
   ]
-  
+
   environment {
     variables = {
       RAW_DOCUMENTS_BUCKET = aws_s3_bucket.raw_documents.id
@@ -124,11 +125,11 @@ resource "aws_lambda_function" "marker_converter" {
       ENVIRONMENT          = var.environment
     }
   }
-  
+
   tracing_config {
     mode = "Active"
   }
-  
+
   tags = {
     Name        = "${var.project_name}-marker-converter-${var.environment}"
     Environment = var.environment
@@ -217,28 +218,31 @@ resource "aws_lambda_function" "chunk_builder" {
   runtime          = "python3.12"
   filename         = data.archive_file.chunk_builder.output_path
   source_code_hash = data.archive_file.chunk_builder.output_base64sha256
-  
+
   timeout     = 60
   memory_size = 512
-  
-  layers = [aws_lambda_layer_version.python_deps.arn]
-  
+
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
+
   environment {
     variables = {
-      PROCESSED_BUCKET     = aws_s3_bucket.processed_artifacts.id
-      TARGET_CHUNK_TOKENS  = "500"
-      MAX_CHUNK_TOKENS     = "1000"
-      MIN_CHUNK_TOKENS     = "50"
-      OVERLAP_TOKENS       = "50"
-      LOG_LEVEL            = var.log_level
-      ENVIRONMENT          = var.environment
+      PROCESSED_BUCKET    = aws_s3_bucket.processed_artifacts.id
+      TARGET_CHUNK_TOKENS = "500"
+      MAX_CHUNK_TOKENS    = "1000"
+      MIN_CHUNK_TOKENS    = "50"
+      OVERLAP_TOKENS      = "50"
+      LOG_LEVEL           = var.log_level
+      ENVIRONMENT         = var.environment
     }
   }
-  
+
   tracing_config {
     mode = "Active"
   }
-  
+
   tags = {
     Name        = "${var.project_name}-chunk-builder-${var.environment}"
     Environment = var.environment
@@ -337,32 +341,32 @@ resource "aws_lambda_function" "table_normalizer" {
   runtime          = "python3.12"
   filename         = data.archive_file.table_normalizer.output_path
   source_code_hash = data.archive_file.table_normalizer.output_base64sha256
-  
+
   timeout     = 120
   memory_size = 512
-  
+
   layers = [
     aws_lambda_layer_version.python_deps.arn,
     aws_lambda_layer_version.shared_data_layer.arn,
   ]
-  
+
   environment {
     variables = {
-      PROCESSED_BUCKET = aws_s3_bucket.processed_artifacts.id
-      DATABASE_HOST    = aws_instance.microservices.public_ip
-      DATABASE_PORT    = var.database_port
-      DATABASE_NAME    = var.database_name
-      DATABASE_USER    = var.database_username
+      PROCESSED_BUCKET  = aws_s3_bucket.processed_artifacts.id
+      DATABASE_HOST     = aws_instance.microservices.public_ip
+      DATABASE_PORT     = var.database_port
+      DATABASE_NAME     = var.database_name
+      DATABASE_USER     = var.database_username
       DATABASE_PASSWORD = var.database_password
-      LOG_LEVEL        = var.log_level
-      ENVIRONMENT      = var.environment
+      LOG_LEVEL         = var.log_level
+      ENVIRONMENT       = var.environment
     }
   }
-  
+
   tracing_config {
     mode = "Active"
   }
-  
+
   tags = {
     Name        = "${var.project_name}-table-normalizer-${var.environment}"
     Environment = var.environment
@@ -403,6 +407,11 @@ resource "aws_lambda_function" "figure_captioner" {
   timeout     = 30
   memory_size = 128
 
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
+
   tags = {
     Name        = "${var.project_name}-figure-captioner-${var.environment}"
     Environment = var.environment
@@ -429,25 +438,27 @@ resource "aws_lambda_function" "embedding_writer" {
 
   runtime     = "python3.12"
   handler     = "handler.handler"
-  timeout     = 300  # 5 min for large documents
+  timeout     = 300 # 5 min for large documents
   memory_size = 512
 
   layers = [
-    aws_lambda_layer_version.python_deps.arn
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
   ]
 
   environment {
     variables = {
-      VOYAGE_API_KEY     = var.voyage_api_key
-      VOYAGE_MODEL       = "voyage-3-lite"
-      PROCESSED_BUCKET   = aws_s3_bucket.processed_artifacts.id
-      DATABASE_HOST      = aws_instance.microservices.public_ip
-      DATABASE_PORT      = "5432"
-      DATABASE_NAME      = "housing"
-      DATABASE_USER      = "vizonomy_user"
-      DATABASE_PASSWORD  = var.database_password
+      VOYAGE_API_KEY       = var.voyage_api_key
+      VOYAGE_MODEL         = "voyage-3"
+      PROCESSED_BUCKET     = aws_s3_bucket.processed_artifacts.id
+      DATABASE_HOST        = aws_instance.microservices.public_ip
+      DATABASE_PORT        = "5432"
+      DATABASE_NAME        = "housing"
+      DATABASE_USER        = "vizonomy_user"
+      DATABASE_PASSWORD    = var.database_password
       EMBEDDING_BATCH_SIZE = "32"
-      LOG_LEVEL          = var.log_level
+      EMBEDDING_DIMENSION  = "1024"
+      LOG_LEVEL            = var.log_level
     }
   }
 
@@ -480,6 +491,23 @@ resource "aws_lambda_function" "index_refresher" {
   timeout     = 30
   memory_size = 128
 
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
+
+  environment {
+    variables = {
+      LOG_LEVEL          = var.log_level
+      DATABASE_HOST      = aws_instance.microservices.public_ip
+      DATABASE_PORT      = var.database_port
+      DATABASE_NAME      = var.database_name
+      DATABASE_USER      = var.database_username
+      DATABASE_PASSWORD  = var.database_password
+      DATABASE_SECRET_ARN = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
+    }
+  }
+
   tags = {
     Name        = "${var.project_name}-index-refresher-${var.environment}"
     Environment = var.environment
@@ -508,6 +536,23 @@ resource "aws_lambda_function" "ingestion_finalizer" {
   handler     = "handler.handler"
   timeout     = 30
   memory_size = 128
+
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
+
+  environment {
+    variables = {
+      LOG_LEVEL          = var.log_level
+      DATABASE_HOST      = aws_instance.microservices.public_ip
+      DATABASE_PORT      = var.database_port
+      DATABASE_NAME      = var.database_name
+      DATABASE_USER      = var.database_username
+      DATABASE_PASSWORD  = var.database_password
+      DATABASE_SECRET_ARN = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
+    }
+  }
 
   tags = {
     Name        = "${var.project_name}-ingestion-finalizer-${var.environment}"
@@ -544,4 +589,3 @@ output "table_normalizer_lambda_name" {
   description = "Name of the Table Normalizer Lambda"
   value       = aws_lambda_function.table_normalizer.function_name
 }
-
