@@ -54,6 +54,11 @@ output "service_endpoints" {
   }
 }
 
+output "ingest_api_endpoint" {
+  description = "Base URL for the ingestion API (use as INGEST_BASE_URL)"
+  value       = aws_apigatewayv2_stage.main.invoke_url
+}
+
 # =============================================================================
 # Connection Strings (Sensitive)
 # =============================================================================
@@ -90,7 +95,7 @@ output "quick_start" {
     ────────────────────────────────────────────────────────────────────────────────
     SSH into EC2:
     ────────────────────────────────────────────────────────────────────────────────
-    ssh -i ~/.ssh/${var.ec2_key_pair_name}.pem ec2-user@${var.create_elastic_ip && var.ec2_public_ip ? aws_eip.microservices[0].public_ip : aws_instance.microservices.public_ip}
+    ssh -i ${var.ec2_key_pair_name != "" ? "~/.ssh/${var.ec2_key_pair_name}.pem" : local.ec2_private_key_path} ec2-user@${var.create_elastic_ip && var.ec2_public_ip ? aws_eip.microservices[0].public_ip : aws_instance.microservices.public_ip}
 
     ────────────────────────────────────────────────────────────────────────────────
     Run Database Migration (on EC2):
@@ -129,4 +134,15 @@ output "quick_start" {
       }'
     
   EOT
+}
+
+output "ec2_private_key_path" {
+  description = "Local filesystem path for the generated EC2 SSH private key (empty when using a pre-existing key pair)."
+  value       = local.ec2_generated_key_enabled ? local_sensitive_file.ec2_private_key[0].filename : ""
+}
+
+output "ec2_private_key_pem" {
+  description = "Generated EC2 SSH private key PEM (sensitive). Empty when bringing your own key pair."
+  sensitive   = true
+  value       = local.ec2_generated_key_enabled ? tls_private_key.ec2_generated[0].private_key_pem : ""
 }

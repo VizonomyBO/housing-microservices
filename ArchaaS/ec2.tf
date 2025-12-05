@@ -17,11 +17,43 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
+# Optional self-generated SSH key pair for EC2 access
+locals {
+  ec2_generated_key_enabled = var.ec2_key_pair_name == ""
+  ec2_generated_key_name    = "${var.project_name}-ec2-${var.environment}"
+  ec2_private_key_path      = "${path.module}/dist/${local.ec2_generated_key_name}.pem"
+}
+
+resource "tls_private_key" "ec2_generated" {
+  count     = local.ec2_generated_key_enabled ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "ec2_generated" {
+  count      = local.ec2_generated_key_enabled ? 1 : 0
+  key_name   = local.ec2_generated_key_name
+  public_key = tls_private_key.ec2_generated[0].public_key_openssh
+
+  tags = {
+    Name        = "${local.ec2_generated_key_name}-key"
+    Environment = var.environment
+  }
+}
+
+resource "local_sensitive_file" "ec2_private_key" {
+  count                = local.ec2_generated_key_enabled ? 1 : 0
+  filename             = local.ec2_private_key_path
+  content              = tls_private_key.ec2_generated[0].private_key_pem
+  file_permission      = "0600"
+  directory_permission = "0750"
+}
+
 # EC2 Instance
 resource "aws_instance" "microservices" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = var.ec2_instance_type
-  key_name                    = var.ec2_key_pair_name
+  key_name                    = var.ec2_key_pair_name != "" ? var.ec2_key_pair_name : aws_key_pair.ec2_generated[0].key_name
   vpc_security_group_ids      = [aws_security_group.ec2_microservices.id]
   subnet_id                   = var.ec2_subnet_id != "" ? var.ec2_subnet_id : (length(var.private_subnet_ids) > 0 ? var.private_subnet_ids[0] : null)
   associate_public_ip_address = var.ec2_public_ip
@@ -65,7 +97,7 @@ resource "aws_instance" "microservices" {
   lifecycle {
     ignore_changes = [
       user_data,
-      ami  # Also ignore AMI updates to preserve data
+      ami # Also ignore AMI updates to preserve data
     ]
     create_before_destroy = true
   }
@@ -286,4 +318,3 @@ output "auth_database_connection_string" {
   value       = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.private_ip}:5432/${var.auth_database_name}"
   sensitive   = true
 }
-

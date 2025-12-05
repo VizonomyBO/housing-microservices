@@ -229,10 +229,10 @@ if [ -d "$FRONTEND_DIR" ]; then
 fi
 
 # Replace main nginx.conf (our config is a full config, not a partial)
-aws s3 cp s3://$S3_BUCKET/configs/nginx.conf /etc/nginx/nginx.conf
+aws s3 cp s3://$S3_BUCKET/configs/nginx.conf /etc/nginx/conf.d/vizonomy.conf
 nginx -t
-systemctl start nginx
 systemctl enable nginx
+systemctl restart nginx
 
 # =============================================================================
 # 7. CREATE SYSTEMD SERVICE (auto-restart on reboot)
