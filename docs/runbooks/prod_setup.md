@@ -1,218 +1,164 @@
 # Production (Reduced Scope) Runbook
 
-This guide captures everything you need to bring up the reduced-scope backend for a real frontend demo, whether you are pointing at LocalStack or real AWS services.
+End-to-end checklist for bringing up the reduced stack, deploying the full ingestion pipeline (API Gateway → S3 → Step Functions → Postgres), and verifying the numerical SSE flow through `/v1/chat`. These steps apply to both LocalStack and real AWS; only the terraform workspace, compose overrides, and credentials change.
 
 ## 1. Prerequisites
-- Ubuntu/AlmaLinux host or EC2 instance with Docker Engine v25+ and Compose V2 (`docker compose`).
-- Open outbound internet access for OpenAI/Voyage API calls.
-- A copy of `.env.prod` populated with production secrets (see below).
-- Optional but recommended: `jq` (used by the verification script) and `curl`.
+- Ubuntu/AlmaLinux host or EC2 instance with Docker Engine v25+, Compose V2, `curl`, `jq`, and Terraform 1.7+.
+- Python 3.11+ with `uv` if you need to run FastAPI locally.
+- LocalStack Pro license for Step Functions **or** an AWS account with access to S3/Lambda/Step Functions/API Gateway.
+- Populated `.env.prod` (LocalStack) and/or `.env.prod.aws` (real AWS).
 
-## 2. Prepare `.env.prod`
-1. Copy the template and edit secrets:
+## 2. Environment Files & Key Variables
+1. Copy secrets templates and edit every placeholder (`CHANGE_ME`):
    ```bash
    cp env.example .env.prod
-   nano .env.prod            # replace every placeholder before running
+   cp env.example .env.prod.aws
    ```
-2. Always set unique values for:
-   - `POSTGRES_PASSWORD`, `AGENT_API_DB_PASSWORD`, `JWT_SECRET_KEY`, `SECRET_KEY`, `AUTH_SHARED_SECRET`.
-   - `OPENAI_API_KEY`, `VOYAGE_API_KEY` (real paid accounts).
-3. Optional networking tweaks:
-   - If exposing behind an ALB/NGINX, update `AGENT_BASE_URL` / `AUTH_BASE_URL` to the public DNS name.
-   - Keep the container ports (8000/5001) unless you also change `docker-compose.yml`.
-4. Whenever you run commands that rely on these variables (Compose, smoke script, cURL helpers), export them into your shell with:
+2. Always export the environment before running compose, terraform, or helper scripts:
    ```bash
-   set -a && source .env.prod && set +a
+   set -a && source .env.prod && set +a          # LocalStack
+   # or
+   set -a && source .env.prod.aws && set +a      # AWS
    ```
-   This mirrors the `.env` file that Docker Compose reads and keeps CI-safe defaults in `.env.prod`.
+3. New ingestion-specific variables:
+   - `INGEST_BASE_URL`: API Gateway invoke URL (e.g., `https://abc123.execute-api.us-east-1.amazonaws.com/prod` or `http://localhost.localstack.cloud:4566/restapis/.../prod/_user_request_`).
+   - `INGEST_UPLOAD_API_KEY` (optional): attach with `-H "x-api-key: $INGEST_UPLOAD_API_KEY"` if your gateway enforces API keys.
+   - `USE_LOCALSTACK`: keep `1` for LocalStack, set `0` when pointing at AWS.
 
-## 3. LocalStack vs Real AWS
-`USE_LOCALSTACK` is the single toggle:
-- `USE_LOCALSTACK=1` (default) – Docker brings up the LocalStack container and all services talk to it. `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` can remain the dummy values shipped with `.env.prod`.
-- `USE_LOCALSTACK=0` – The backend will call real AWS endpoints. **You must** provide real AWS credentials + region and leave `AWS_ENDPOINT_URL` blank so boto/httpx auto-discover the real services.
-- Nothing else changes: OpenAI/Voyage LLM calls run the same way in both modes.
-
-## 4. Start the Backend
+## 3. Start the Core Compose Stack
 ```bash
 set -a && source .env.prod && set +a
-COMPOSE_PROFILES=reduced,ops docker compose --profile reduced up -d --build
-COMPOSE_PROFILES=reduced,ops docker compose --profile reduced logs -f agent-api
+COMPOSE_PROFILES=reduced,ops docker compose up -d --build
 ```
-- `db-init` runs migrations + seeds the reduced-scope fixtures.
-- Health checks to verify readiness:
-  ```bash
-  curl $AGENT_BASE_URL/health
-  curl $AGENT_BASE_URL/v1/health
-  curl $AUTH_BASE_URL/v1/health
-  ```
-
-## 5. Create/Verify Demo User & Documents
-The reduced stack seeds four sample documents automatically (Housing Stability overview, Voucher Guardrails fiscal memo, District 9 ledger, and a KPI dashboard table). Those sources contain the guardrail, intervention, and KPI data referenced by `scripts/prod_smoke_check.sh`, so the smoke answers are grounded in text. To ensure the demo user exists (and to reset their password), run:
+For AWS, source `.env.prod.aws` and include the override:
 ```bash
-curl -X POST "$AUTH_BASE_URL/v1/auth/register" \
-     -H 'Content-Type: application/json' \
-     -d "{\"email\":\"$PROD_DEMO_EMAIL\",\"username\":\"$PROD_DEMO_USERNAME\",\"password\":\"$PROD_DEMO_PASSWORD\",\"first_name\":\"$PROD_DEMO_FIRST_NAME\",\"last_name\":\"$PROD_DEMO_LAST_NAME\"}"
+COMPOSE_PROFILES=reduced,ops \
+  docker compose \
+    -f docker-compose.yml \
+    -f docker-compose.prod.override.yml \
+    up -d --build
 ```
-If the user already exists, the endpoint returns 409; ignore it.
-
-## 6. Run the Prod Smoke Script
-1. Ensure the stack is running (`docker compose ps`).
-2. Execute the bundled verifier:
-   ```bash
-   set -a && source .env.prod && set +a
-   ./scripts/prod_smoke_check.sh
-   ```
-3. The script:
-   - Logs in with the demo user.
-   - Creates a conversation and attaches all seeded documents.
-   - Asks three questions (simple RAG, cross-doc reasoning, table/SQL) against `/v1/chat`. Quantitative prompts automatically fan out through the numerical/Polars planner—no need to mention “SQL” or “Polars” in the question.
-   - Stores the responses, citations, SQL trace metadata, and raw payloads in `prod_sample_run.json` (gitignored).
-4. Open `prod_sample_run.json` to confirm:
-   - `requires_sql` is `true` for the KPI/table prompt and `false` elsewhere.
-   - `sql_queries` contains the planner’s Polars SQL (mirrors what you’ll see in the executor logs).
-   - `sql_row_count` mirrors the executor’s row count so you can quickly spot empty/partial results.
-   - `table_results` contains the preview rows streamed back by the Polars executor. These rows should match the cited KPI values in the final answer.
-5. Give the file a quick read to ensure the prose answer aligns with the SQL preview rows before handing the backend to the frontend team.
-
-## 7. Inspect Node-Level Logs
-Because `.env.prod` forces `UVICORN_LOG_LEVEL=info`, each `/v1/chat` call emits `task_start/task_end` SSE events. **Refresh the auth token right before you stream** (tokens only last ~15 minutes):
+Health checks:
 ```bash
-set -a && source .env.prod && set +a
-TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
-  -H 'Content-Type: application/json' \
-  -d "{\"login\":\"$PROD_DEMO_EMAIL\",\"password\":\"$PROD_DEMO_PASSWORD\"}" \
-  | jq -r .access_token)
+curl $AGENT_BASE_URL/health
+curl $AGENT_BASE_URL/v1/health
+curl $AUTH_BASE_URL/v1/health
 ```
-Then stream the request:
+
+## 4. Deploy the ArchaaS Ingestion Stack
+All terraform commands run from `ArchaaS/`.
+
+### 4.1 LocalStack deployment
 ```bash
-curl -N -H "Authorization: Bearer $TOKEN" -H 'Accept: text/event-stream' \
-     -H 'Content-Type: application/json' \
-     -d '{
-           "thread_id":"...",
-           "message":{
-             "type":"user",
-             "content":"Using the guardrail memo, District 9 ledger, and KPI dashboard, identify which zones exceed the 80-point trigger and outline a two-step plan that pairs arrears relief with voucher guardrails for those renters. Cite KPI values and dollar figures."
-           },
-           "constraints":{"country_code":"USA","auto_attach_base_docs":false}
-         }' \
-     "$AGENT_BASE_URL/v1/chat"
+cd ArchaaS
+terraform init
+terraform workspace select localstack || terraform workspace new localstack
+terraform apply -var-file=configs/localstack.tfvars
 ```
-The `thread_id` is the conversation ID printed by `./scripts/prod_smoke_check.sh` (e.g., `[prod_smoke_check] Using conversation f233848f-8832-5969-9ca0-877f9e2af652`). The richer question above automatically routes through the numerical (Polars) subgraph—the router now detects KPI/threshold language without relying on explicit “SQL” hints—so you can watch `numerical_scope_builder`, `numerical_text_to_sql`, `numerical_polars_executor`, and `numerical_result_validator` events fire before `informational_answer_synthesizer` signs off. Look for:
-- `router` metadata that includes `requires_sql=true`.
-- `numerical_text_to_sql` events that log `table_alias=gdp` (or similar) plus the generated SQL.
-- `numerical_polars_executor` events that include the SQL text, row count, and the `numerical.sql.*` telemetry counters alongside `sql_cache_bypass` metadata.
-- `informational_answer_synthesizer` finishing with a `[SQL_RESULT]` citation tied to the executor output.
-
-A full sample transcript is available in [`docs/examples/prod_sse_walkthrough.md`](../examples/prod_sse_walkthrough.md).
-You can also tail the compose logs:
+Outputs include `ingest_api_endpoint`; export it:
 ```bash
-COMPOSE_PROFILES=reduced,ops docker compose logs -f agent-api | grep informational_
+export INGEST_BASE_URL=$(terraform output -raw ingest_api_endpoint)
 ```
-Expect to see `input_normalizer`, `attachment_scope_loader`, `graph_retriever`, `graph_summarizer`, `router`, `informational_answer_synthesizer` for every chat message.
+LocalStack uses the bundled gateway at `localhost.localstack.cloud:4566`, so Terraform wires API Gateway, Lambdas, Step Functions, and S3 into the compose network automatically.
 
-## 8. Tear Down / Reset
+### 4.2 AWS deployment
 ```bash
-COMPOSE_PROFILES=reduced,ops docker compose --profile reduced down -v --remove-orphans
+cd ArchaaS
+terraform init
+terraform workspace select prod || terraform workspace new prod
+terraform apply -var-file=configs/prod.tfvars
 ```
-This removes all containers, volumes (including Postgres/LocalStack data), and stray networks.
+The apply step creates:
+- API Gateway + custom domain (if configured).
+- Lambdas for document upload, preflight, conversion, chunking, embedding, indexing, finalization.
+- Step Functions state machine (`document_ingestion_workflow`).
+- S3 buckets for raw + processed artifacts.
+Capture the `ingest_api_endpoint` output and export it as `INGEST_BASE_URL`. If API keys are enabled, set `INGEST_UPLOAD_API_KEY` to the value terraform produced.
 
-## 9. AWS Deployment Variant
-Use `.env.prod.aws` when you want the reduced stack to call real AWS services, SES/SMTP, and a managed Postgres instance instead of the local containers.
+## 5. Full cURL Workflow (Register → Upload → Poll → Attach → Ask)
+The commands below work for both environments once `INGEST_BASE_URL`, `$AGENT_BASE_URL`, and auth credentials are exported.
 
-1. **Prepare secrets**
-   - Copy the template and populate every `CHANGE_ME` in `.env.prod.aws` (real AWS keys, SES SMTP creds, production database passwords, public URLs).
-   - Point `DATABASE_URL` and `AUTH_DATABASE_URL` at your hosted Postgres/RDS endpoint.
-2. **Export the AWS env file**
-   ```bash
-   set -a && source .env.prod.aws && set +a
-   ```
-3. **Use the production override compose file** so the services read the remote connection strings and skip the local Postgres container:
-   ```bash
-   COMPOSE_PROFILES=reduced,ops \
-     docker compose \
-       -f docker-compose.yml \
-       -f docker-compose.prod.override.yml \
-       up -d --build
-   ```
-4. Run the same smoke/SSE checks (`./scripts/prod_smoke_check.sh`, `/v1/chat` SSE stream). The KPI prompt should now show `requires_sql=true` while the underlying AWS services (S3/SQS/etc.) and hosted Postgres handle the storage and messaging layers.
-
-> **Reminder:** `docker-compose.prod.override.yml` disables the local `postgres`/`db-shell` services. Re-enable them or switch back to `.env.prod` when you return to LocalStack mode.
-
-## 10. Full Flow via cURL (Docs → Conversation → Attachments → Advanced Prompt)
-Sometimes you need to rehearse the entire prod journey without the helper script. The commands below assume:
-- `jq` is installed.
-- `.env.prod` **or** `.env.prod.aws` has been sourced.
-- The demo user from step 5 already exists and can log in.
-- You are running from the repo root so the sample Markdown files are available.
-
-### 10.1 Obtain an access token
+### 5.1 Obtain a session token
 ```bash
-set -a && source .env.prod && set +a   # or .env.prod.aws
 TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
   -H 'Content-Type: application/json' \
   -d "{\"login\":\"$PROD_DEMO_EMAIL\",\"password\":\"$PROD_DEMO_PASSWORD\"}" \
   | jq -r '.access_token')
 ```
 
-### 10.2 Upload the demo documents via API
-Define a helper and upload the four Markdown artifacts that ship with the repo:
+### 5.2 Request a presigned upload (API Gateway / Lambda)
 ```bash
-upload_doc() {
-  local file_path="$1"
-  local name="$2"
-  jq -n --rawfile content "$file_path" \
-    --arg name "$name" \
-    --arg country "$PROD_DEMO_COUNTRY" \
-    '{
-      document_name:$name,
-      content:$content,
-      content_type:"text/markdown",
-      chunk_type:"text",
-      access_scope:"user_shared",
-      country_code:$country,
-      language:"en",
-      tags:["demo","reduced_e2e"],
-      metadata:{scenario:"reduced_e2e",document_alias:$name}
-    }' \
-  | curl -sS -X POST "$AGENT_BASE_URL/v1/documents/upload" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H 'Content-Type: application/json' \
-      -d @- \
-  | jq -r '.document_id'
-}
+FILE=services/agent-api/tests/data/reduced_e2e/doc_policy.pdf   # real PDF, avoids broken test PDFs
+FILE_SIZE=$(stat -c%s "$FILE")
 
-DOC_POLICY_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_policy.md DOC_POLICY)
-DOC_LEDGER_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_ledger.md DOC_LEDGER)
-DOC_KPI_ID=$(upload_doc services/agent-api/tests/data/reduced_e2e/doc_kpi.md DOC_KPI)
-```
+UPLOAD_REQ=$(jq -n \
+  --arg name "Prod Smoke $(date +%s)" \
+  --arg country "$PROD_DEMO_COUNTRY" \
+  '{
+     document_name:$name,
+     source_type:"pdf",
+     country_code:$country,
+     language:"en",
+     file_size_bytes:$ENV.FILE_SIZE | tonumber,
+     tags:["demo","ingestion"],
+     metadata:{scenario:"full_ingestion"}
+   }')
 
-### 10.3 Create a conversation
-```bash
-CONV_RESP=$(curl -sS -X POST "$AGENT_BASE_URL/v1/conversations" \
-  -H "Authorization: Bearer $TOKEN" \
+UPLOAD_RESP=$(echo "$UPLOAD_REQ" | curl -sS -X POST "$INGEST_BASE_URL/v1/documents/upload" \
   -H 'Content-Type: application/json' \
-  -d '{
-        "country_code":"'"$PROD_DEMO_COUNTRY"'",
-        "namespace":"prod-demo",
-        "tags":["demo","prod_cli"]
-      }')
-CONV_ID=$(echo "$CONV_RESP" | jq -r '.conversation.conversation_id')
+  -H "Authorization: Bearer $TOKEN" \
+  ${INGEST_UPLOAD_API_KEY:+-H "x-api-key: $INGEST_UPLOAD_API_KEY"} \
+  -d @-)
+echo "$UPLOAD_RESP" | jq .
+DOC_ID=$(echo "$UPLOAD_RESP" | jq -r '.document_id')
+UPLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.upload.url')
+UPLOAD_FIELDS=$(echo "$UPLOAD_RESP" | jq -r '.upload.fields')
 ```
 
-### 10.4 Attach each uploaded document
+### 5.3 Upload the binary to S3
 ```bash
-for doc_id in "$DOC_POLICY_ID" "$DOC_LEDGER_ID" "$DOC_KPI_ID"; do
-  curl -sS -X POST "$AGENT_BASE_URL/v1/conversations/$CONV_ID/attachments" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H 'Content-Type: application/json' \
-    -d "{\"document_id\":\"$doc_id\",\"auto_attach_base_docs\":false}"
+CONTENT_TYPE=$(echo "$UPLOAD_FIELDS" | jq -r '."Content-Type" // "application/pdf"')
+FORM_ARGS=()
+while IFS=$'\t' read -r key val; do
+  FORM_ARGS+=(-F "$key=$val")
+done < <(echo "$UPLOAD_FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv')
+FORM_ARGS+=(-F "file=@${FILE};type=${CONTENT_TYPE}")
+
+curl -sSf -X POST "$UPLOAD_URL" "${FORM_ARGS[@]}"
+```
+On LocalStack, the upload triggers the S3 event immediately. In AWS the Lambda fires as soon as the object lands in the raw bucket.
+
+**Note:** Use the real PDF at `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf` (added to avoid corrupt test PDFs). If you swap files, ensure the `file_size_bytes` and SHA256 hash reflect the exact upload.
+
+### 5.4 Poll Agent API for ingest status
+```bash
+FILE_HASH=$(sha256sum "$FILE" | awk '{print $1}')
+until curl -sS "$AGENT_BASE_URL/v1/documents?page=1&page_size=50&content_hash=$FILE_HASH" \
+  -H "Authorization: Bearer $TOKEN" \
+  | tee /tmp/doc_status.json \
+  | jq -e --arg doc "$DOC_ID" '.documents[] | select(.document_id == $doc) | select(.status=="active")'; do
+    echo "waiting for ingestion..."; sleep 5;
 done
 ```
+The list endpoint exposes the document’s status/ingestion stage even before attachments are allowed. While ingestion runs, attempts to attach the document respond with `DOCUMENT_NOT_READY` (HTTP 409). The poll exits once the matching row reports `status=active` and `ingestion_stage=activate`.
 
-### 10.5 Ask the advanced numerical prompt over SSE
-Use the richer quantitative question from Section 7 and capture the entire task/event stream:
+### 5.5 Create a conversation and attach the document
 ```bash
-ADVANCED_PROMPT="Using the guardrail memo, District 9 ledger, and KPI dashboard, identify which zones exceed the 80-point trigger and outline a two-step plan that pairs arrears relief with voucher guardrails for those renters. Cite KPI values and dollar figures."
+CONV_ID=$(curl -sS -X POST "$AGENT_BASE_URL/v1/conversations" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"country_code":"'"$PROD_DEMO_COUNTRY"'","namespace":"prod-demo"}' \
+  | jq -r '.conversation.conversation_id')
+
+curl -sS -X POST "$AGENT_BASE_URL/v1/conversations/$CONV_ID/attachments" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"document_id":"'"$DOC_ID"'","auto_attach_base_docs":false}'
+```
+
+### 5.6 Stream the numerical SSE flow
+```bash
+ADV_PROMPT="Using the uploaded PDF and KPI dashboard, identify which zones exceed the 80-point trigger and outline a two-step arrears relief plan with voucher guardrails. Cite KPI values."
 
 curl -N \
   -H "Authorization: Bearer $TOKEN" \
@@ -220,26 +166,59 @@ curl -N \
   -H 'Content-Type: application/json' \
   -d '{
         "thread_id":"'"$CONV_ID"'",
-        "message":{"type":"user","content":"'"$ADVANCED_PROMPT"'"},
+        "message":{"type":"user","content":"'"$ADV_PROMPT"'"},
         "constraints":{"country_code":"'"$PROD_DEMO_COUNTRY"'","auto_attach_base_docs":false}
       }' \
   "$AGENT_BASE_URL/v1/chat" | tee sse_full_flow.log
 ```
+Verify the SSE transcript includes:
+- `router` events with `requires_sql=true`.
+- `numerical_text_to_sql`, `numerical_polars_executor`, and `numerical_result_validator`.
+- Final payload citing `[SQL_RESULT]` with matching table rows.
 
-The `sse_full_flow.log` transcript should show `task_start/task_end` events for `router`, `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`, and `informational_answer_synthesizer`. The final `done` payload will include `requires_sql=true`, the generated SQL, and the table preview rows so you can confirm the KPI math ran through the enforced SQL path.
+### 5.7 Known-good AWS example (2025-12-05)
+- Env: `.env.prod.aws` with `USE_LOCALSTACK=0`, `INGEST_BASE_URL=https://gs6w1i52n4.execute-api.us-east-1.amazonaws.com/dev2`, Postgres host `44.216.103.232`.
+- Upload file: `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf` copied to `/tmp/aws_smoke_step9/doc_policy_smoke_md_1764941879_fix.md` (unique tag appended).
+- Commands: `SMOKE_UPLOAD_FILE=/tmp/aws_smoke_step9/doc_policy_smoke_md_1764941879_fix.md ./scripts/prod_smoke_check.sh`
+- Result: Document `bae6eef5-7776-4a78-9333-dfb61d8ec65f` -> `active`; conversation `e079ab22-b664-5d41-9d34-320e1b3ff204`; chat answers and SQL evidence recorded in `prod_sample_run.json`; run log `/tmp/aws_smoke_step9/prod_smoke_check_1764941879.log`.
 
-### 10.6 Optional cleanup
-Delete the conversation or documents when finished:
+## 6. Smoke Tests
+The helper script continues to validate seeded documents plus your freshly ingested artifacts:
 ```bash
-curl -X DELETE "$AGENT_BASE_URL/v1/conversations/$CONV_ID" -H "Authorization: Bearer $TOKEN"
+./scripts/prod_smoke_check.sh
 ```
+It logs into the demo account, uploads the configured `SMOKE_UPLOAD_FILE`, attaches required docs (skipping any still ingesting), fires three `/v1/chat` prompts, and writes `prod_sample_run.json`. Check that the KPI prompt shows `requires_sql=true`, contains SQL text, and includes `table_results`.  
+When `INGEST_BASE_URL` is defined the script will request a presigned URL from the ingestion API; otherwise it streams the Markdown directly to `POST /v1/documents/upload` so the reduced-stack pipeline still exercises the real HTTP flow.
 
-## 11. Troubleshooting
+## 7. AWS vs LocalStack Differences
+| Concern | LocalStack | AWS |
+| --- | --- | --- |
+| Compose | `docker compose up -d --build` | add `docker-compose.prod.override.yml` |
+| Terraform workspace | `localstack` | `prod` |
+| API Gateway URL | `localhost.localstack.cloud:4566/...` | `https://<id>.execute-api.<region>.amazonaws.com/<stage>` |
+| Credentials | dummy locals (`localstack/localstack`) | real IAM access keys |
+| SSE verification | identical | identical |
+| Tear down | `terraform destroy -var-file=configs/localstack.tfvars` | `terraform destroy -var-file=configs/prod.tfvars` |
+
+## 8. Troubleshooting
 | Symptom | Remedy |
 | --- | --- |
-| `db-init` fails with auth errors | Double-check DB passwords in `.env.prod` match `scripts/init-databases.sh`. Run `docker compose run --rm db-init` after fixing env vars. |
-| `localstack` container flaps | Set `LOCALSTACK_DEBUG=1` and tail `docker compose logs -f localstack`. If talking to real AWS, ensure `USE_LOCALSTACK=0` and credentials are exported. |
-| Smoke script exits early | Inspect `prod_sample_run.json` (partial file) and `docker compose logs agent-api`. Usually caused by missing demo docs—rerun `make reduced-e2e-smoke ARGS="--use-real-tools --verify-real-tools --cleanup-only"`. |
-| Frontend CORS errors | Populate `CORS_ORIGINS` with the frontend domain once you’re ready to enforce browser calls. |
+| `DOCUMENT_NOT_READY` when attaching | The document is still ingesting. Poll `GET /v1/documents?page=1&page_size=5&content_hash=<SHA256>` (use `sha256sum` on the upload file) and retry once the matching row reports `status=active`. |
+| Step Function never starts | Confirm preflight Lambda logs in CloudWatch (or `docker compose logs preflight-validator` in LocalStack). Ensure S3 notification rules exist and the raw bucket matches `.env`. |
+| `embedding_writer` failures about pgvector | Run Postgres migrations (compose `db-init`) so the `embedding` column and pgvector extension exist. |
+| SSE lacks numerical nodes | Verify the uploaded document was attached, the conversation `country_code` matches, and the prompt references KPIs/thresholds. |
+| Terraform destroy hangs | Make sure compose services that talk to LocalStack are stopped before running `terraform destroy` to avoid dangling resources. |
 
-Refer back to this runbook whenever you need to recreate or reset the production demo environment.
+## 9. Cleanup
+```bash
+# Tear down terraform resources
+cd ArchaaS
+terraform workspace select localstack && terraform destroy -var-file=configs/localstack.tfvars
+# or
+terraform workspace select prod && terraform destroy -var-file=configs/prod.tfvars
+
+# Stop containers
+cd ..
+COMPOSE_PROFILES=reduced,ops docker compose down -v --remove-orphans
+```
+Delete any uploaded PDFs from the raw bucket if you do not want them retained in S3.
