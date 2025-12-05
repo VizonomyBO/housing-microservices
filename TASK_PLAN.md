@@ -85,6 +85,21 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 14. **LocalStack Verification (last)** – After AWS + EC2 deployment, bring up a LocalStack-based stack (or docker-based emulation if LocalStack Pro is unavailable) and rerun terraform, compose, curl flow, and `scripts/prod_smoke_check.sh`.
 15. **Quality Gates & Cleanup** – Run `uv run ruff format`, `uv run ruff check --fix`, `uv run ty check`, and `uv run pytest -n auto`; once complete remove the plan + tracker files per AGENTS.md.
 
+## Task 10 Plan – Harden AWS-mode compose for auth/user services (auto-approved)
+_Plan auto-approved; per user direction keep plan/tracker files after completion._
+
+- **Goal:** Ensure `auth-service` and `user-service` run locally against the AWS Postgres host so JWT login works without manual tokens when `USE_LOCALSTACK=0`.
+- **Scope:** Update compose overrides/env (`docker-compose.prod.override.yml`, `.env.prod.aws`, related helpers) to point auth/user at the remote `auth_db` / `housing` databases on `44.216.103.232:5432`. Validate with `/v1/auth/login` and `/v1/health` using demo creds (`demo.client@example.com` / `ChangeMe!123`).
+- **Impacted files:** `.env.prod.aws`, `docker-compose.prod.override.yml`, `services/auth-service` and `services/user-service` compose env wiring, any helper scripts sourcing `.env.prod.aws`, tracker (`TASK_PLAN_PROGRESS.md`), future prompt notes (`task_prompts/11_env_switching.md`) if defaults change.
+- **Ordered steps:**
+  1. Inspect current AWS-mode env/compose wiring for auth/user (`.env.prod.aws`, `docker-compose.prod.override.yml`) to confirm which DB host/DB names they use when `USE_LOCALSTACK=0`.
+  2. Align auth/user DB env vars to the AWS Postgres host (`44.216.103.232`, `auth_db` for auth-service, `housing` where applicable) and ensure credentials come from `.env.prod.aws`; propagate any new vars to helper scripts that source this file.
+  3. Restart only auth-service and user-service in AWS mode (no LocalStack) and verify health (`/v1/health`) plus login (`/v1/auth/login`) returns a JWT using the remote DB.
+  4. Update tracker row #10 with commands/evidence; if env defaults change, append a brief delta note to `task_prompts/11_env_switching.md`.
+  5. Re-run any affected smoke commands if necessary to confirm compose AWS mode remains healthy; document verification in the tracker.
+- **Risks / mitigations:** Remote DB auth_db may be missing migrations—rerun `scripts/setup_remote_databases.sh` if login fails; compose may cache old env—force container recreate for auth/user; ensure we don’t disturb agent-api AWS wiring.
+- **Sources:** Internal runbooks `docs/runbooks/prod_setup.md` (compose AWS mode, login curl) and existing compose override `.env.prod.aws` conventions.
+
 ## Research Notes / Sources
 - AWS EC2 key pairs cannot be recovered; private keys must be generated client-side and stored securely ([AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html)).
 - Terraform can generate SSH keys using `tls_private_key` and register them via `aws_key_pair` for EC2 access without manual `.pem` handling ([Terraform AWS key pair resource](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/key_pair), [`tls_private_key` resource](https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key)).
