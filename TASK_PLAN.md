@@ -11,6 +11,29 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 - **Scope:** Resolve the `/v1/documents` empty listing by ensuring every component—auth-service, Lambdas, shared_data_layer, and agent-api—shares the same UUID string per user. This session owns tracker Steps 7–9: fix auth identity, prove `/v1/documents` works in AWS mode, and capture the curl walkthrough evidence (LocalStack remains deferred per user instructions).
 - **Primary blocker:** Auth-service still persists numeric `user_id` values while ingestion Lambdas promote them to UUIDs via `int_to_uuid`, so listings filter on the wrong key. Tokens, refresh rows, and demo seeds all assume integers.
 
+### Session Checklist – 2025‑01‑?? (Step 8 deep dive)
+1. **Prep remote auth DB** – Re-run `scripts/setup_remote_databases.sh` (leveraging `.venv.tooling`) so the migrated UUID schema + demo reseed land in AWS (`docs/runbooks/prod_setup.md` §3.3 for env vars).
+2. **Rebuild & restart compose (AWS mode)** – Use `.env.prod.aws` with `docker compose -f docker-compose.yml -f docker-compose.prod.override.yml up -d --build auth-service user-service agent-api` so refreshed tokens flow through agent-api (`docs/runbooks/prod_setup.md` §4.2).
+3. **AWS curl walkthrough** – Follow `docs/runbooks/prod_setup.md` §5 (or `/tmp/aws_flow.sh`) to:
+   - Fetch demo token, confirm JWT `user_id` is UUID.
+   - Upload sample PDF through API Gateway, poll `/v1/documents?content_hash=…` until `active`.
+   - Attach the document to a conversation and capture SSE logs.
+4. **Tracker updates + evidence** – Record commands/output snippets in `TASK_PLAN_PROGRESS.md` once `/v1/documents` shows the ingested doc; defer Step 9 (smoke script) per user note unless time allows.
+5. **Lambda layer strategy (Dec 2025 directive)** – Per the latest user instruction we will **stop trimming per-function dependencies** and instead rebuild each ingestion Lambda so it always includes both shared layers (`aws_lambda_layer_version.python_deps`, `aws_lambda_layer_version.shared_data_layer`). Treat this as a hard requirement for Step 8: whenever layers change, rerun the full rebuild/terraform/apply sequence so every Lambda picks up the “bloated” bundle (common helper code + dependencies) even if the function only needs a subset. Optimization is explicitly deferred until after we prove the pipeline works end-to-end.
+6. **State-machine data retention (Dec 2025 directive)** – Capture the original document-upload payload at the top of `document_ingestion_workflow.asl.json` (e.g., `Pass` state that writes `$.request = $`) and reference optional inputs such as `callback_url` from `$.request`. This keeps DeadLetter / EmitFailureEvent / ingestion_finalizer from crashing when later tasks overwrite the root input, matching AWS Step Functions guidance on `ResultPath`.
+7. **AWS run discipline** – `/tmp/aws_flow.sh` uploads a document every invocation. After a timeout or failure, **do not re-upload**; instead continue polling `/v1/documents?content_hash=…` with the last hash, inspect the existing Step Functions execution via `aws stepfunctions describe-execution`, and pull Lambda CloudWatch logs. Only register a new document once we intentionally reset the test or change inputs.
+
+## Session Focus – 2025‑02‑?? (Step 9: AWS Smoke Script + Evidence)
+- **Scope:** Finish tracker Step 9 by running the documented AWS curl walkthrough plus `scripts/prod_smoke_check.sh` against the real stack (no LocalStack fallback this round). Compose already targets AWS; reuse `.env.prod.aws` as-is.
+- **Plan references:** `docs/runbooks/prod_setup.md` §§5–6 (curl + smoke walkthrough), `scripts/prod_smoke_check.sh` inline docs, and `prod_sample_run.json` for prior evidence expectations.
+- **Key tasks:**
+  1. Generate a unique PDF for the run (e.g., copy `/tmp/sample.pdf` and append a timestamp) so ingestion bypasses content-hash dedupe.
+  2. Execute the manual curl flow end-to-end (login, upload, poll `/v1/documents`, attach, SSE). Capture output snippets plus doc/conversation IDs for the tracker.
+  3. Run `scripts/prod_smoke_check.sh` in AWS mode; if it initially times out, inspect Step Functions + document status, adjust the helper (poll windows, dedupe bypass) per findings, and re-run until it succeeds.
+  4. Update `prod_sample_run.json` with fresh evidence (doc IDs, timestamps, SSE summary) and log the filesystem paths under `/tmp/aws_ingest_logs/` (or new dir) for reviewers.
+  5. Record results—including commands, hashes, and any tweaks—in `TASK_PLAN_PROGRESS.md` row #9 so the next session can move on to Step 10+.
+  6. Quirk note (Dec 2025): The old test PDFs were corrupt and triggered “No /Root object” placeholder content. Use the real PDF at `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf` (or a timestamped copy) for AWS smoke. Presigned uploads require parsing the fields safely and preserving `Content-Type`; see `docs/runbooks/prod_setup.md` and `scripts/prod_smoke_check.sh` for the fixed curl pattern. Evidence for the successful AWS smoke: doc `bae6eef5-7776-4a78-9333-dfb61d8ec65f`, conversation `e079ab22-b664-5d41-9d34-320e1b3ff204`, log `/tmp/aws_smoke_step9/prod_smoke_check_1764941879.log`.
+
 ### Ordered Steps (auto-approved for Session Scope)
 1. **Reconfirm tracker + scope.** Keep Step 7 focused on schema + token changes, Step 8 on compose verification, Step 9 on AWS curls; annotate tracker as milestones finish so the next session can resume quickly.
 2. **Research UUID storage + migration.** Capture references covering (a) SQLAlchemy’s backend-agnostic GUID type decorator and (b) Postgres’ `uuid-ossp` helpers for deterministic `uuid_generate_v5`, ensuring our conversions match the Lambda `int_to_uuid` logic.
