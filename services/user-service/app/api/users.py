@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -109,16 +110,16 @@ async def search_users(
 
 
 @router.get("/{user_id}")
-async def get_user(user_id: int, request: Request, session: DatabaseSession) -> JSONResponse:
+async def get_user(user_id: UUID, request: Request, session: DatabaseSession) -> JSONResponse:
     """Return a user profile by ID. Admins can view any user; others can only view themselves."""
     user_ctx = await _require_user_context(request)
     roles = user_ctx.roles or []
-    if "admin" not in [r.lower() for r in roles] and user_ctx.user_id != user_id:
+    if "admin" not in [r.lower() for r in roles] and user_ctx.user_id != str(user_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     logger.info(
         "Get user request",
-        extra={"requested_user_id": user_id, "request_user_id": user_ctx.user_id},
+        extra={"requested_user_id": str(user_id), "request_user_id": user_ctx.user_id},
     )
     user = UserService.get_user_by_id(session, user_id)
     if not user:
@@ -161,7 +162,7 @@ async def list_users(
 @router.put("/{user_id}")
 @router.patch("/{user_id}")
 async def update_user(
-    user_id: int, request: Request, payload: UserAdminUpdate, session: DatabaseSession
+    user_id: UUID, request: Request, payload: UserAdminUpdate, session: DatabaseSession
 ) -> JSONResponse:
     """Admin update endpoint."""
     user_ctx = await _require_user_context(request)
@@ -177,7 +178,7 @@ async def update_user(
         "Admin updating user",
         extra={
             "admin_id": user_ctx.user_id,
-            "target_user_id": user_id,
+            "target_user_id": str(user_id),
             "fields": list(update_data),
         },
     )
@@ -196,12 +197,12 @@ async def update_user(
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: int, request: Request, session: DatabaseSession) -> JSONResponse:
+async def delete_user(user_id: UUID, request: Request, session: DatabaseSession) -> JSONResponse:
     """Delete a user (admin only)."""
     user_ctx = await _require_user_context(request)
     _require_admin(user_ctx)
 
-    if user_ctx.user_id == user_id:
+    if user_ctx.user_id == str(user_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account")
 
     success, error = UserService.delete_user(session, user_id)

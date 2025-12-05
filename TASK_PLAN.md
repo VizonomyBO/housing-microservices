@@ -7,6 +7,28 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 
 **New requirement (May 2025):** Automatically provision the EC2 SSH key pair inside Terraform so automation on this workstation can destroy/recreate the instance, capture the generated `.pem`, and immediately run the remote database bootstrap without manual SSH setup.
 
+## Session Focus – 2025‑01‑?? (Steps 7–9: Auth UUID Alignment + AWS Verification)
+- **Scope:** Resolve the `/v1/documents` empty listing by ensuring every component—auth-service, Lambdas, shared_data_layer, and agent-api—shares the same UUID string per user. This session owns tracker Steps 7–9: fix auth identity, prove `/v1/documents` works in AWS mode, and capture the curl walkthrough evidence (LocalStack remains deferred per user instructions).
+- **Primary blocker:** Auth-service still persists numeric `user_id` values while ingestion Lambdas promote them to UUIDs via `int_to_uuid`, so listings filter on the wrong key. Tokens, refresh rows, and demo seeds all assume integers.
+
+### Ordered Steps (auto-approved for Session Scope)
+1. **Reconfirm tracker + scope.** Keep Step 7 focused on schema + token changes, Step 8 on compose verification, Step 9 on AWS curls; annotate tracker as milestones finish so the next session can resume quickly.
+2. **Research UUID storage + migration.** Capture references covering (a) SQLAlchemy’s backend-agnostic GUID type decorator and (b) Postgres’ `uuid-ossp` helpers for deterministic `uuid_generate_v5`, ensuring our conversions match the Lambda `int_to_uuid` logic.
+3. **Update auth-service schema + data path.** Replace BigInt identifiers with UUID columns (users, refresh_tokens, foreign keys, Pydantic schemas, middleware, services, tests). Ensure new users default to UUIDv4 while legacy users migrate via deterministic v5 transformation so documents written by existing Lambdas continue to match.
+4. **Reseed demo + automation scripts.** Update `scripts/setup_remote_databases.sh` (and any helper) so the remote auth DB reenforces UUID columns, installs `uuid-ossp`, reseeds the demo credentials with the canonical UUID, and keeps future applies idempotent.
+5. **Align ingestion + agent-api edge cases.** Allow Lambdas to skip the int conversion once tokens already contain UUID strings while retaining a fallback for stale tokens.
+6. **AWS verification + evidence.** Restart compose in AWS mode, reseed/obtain a demo token, run the curl walkthrough (docs/runbooks §5), ensure `/v1/documents` shows uploaded docs, attach them, capture SSE transcript, and note commands/output in the tracker.
+
+### Risks / Mitigations
+- **Layer rebuild permissions:** Previous Docker runs created root-owned artifacts, preventing cleanup. Mitigate by running `sudo rm -rf ArchaaS/lambdas/layer_package` if the script errors out, then rerun the build.
+- **Terraform drift:** Another teammate might run Terraform concurrently. Always review the plan output before apply and be prepared to target only the layer + dependent lambdas.
+- **Ingestion latency:** AWS Step Functions may take a few minutes; ensure polling logic has sufficient patience and capture logs if ingestion exceeds expectations.
+
+### Research Sources
+- Pydantic docs – “AWS Lambda” integration guide explains `no module named 'pydantic_core._pydantic_core'` stems from OS/CPU mismatches and recommends building dependencies for the Lambda platform (e.g., `--platform manylinux2014_x86_64` or a linux Docker image). <https://docs.pydantic.dev/latest/integrations/aws_lambda/>
+- SQLAlchemy docs – Backend-agnostic GUID `TypeDecorator` ensures UUID columns stay compatible across PostgreSQL + SQLite, matching our need to store UUID primary keys while keeping unit tests on SQLite. <https://docs.sqlalchemy.org/en/20/core/custom_types.html#backend-agnostic-guid-type>
+- PostgreSQL docs – `uuid-ossp` extension exposes `uuid_generate_v5(namespace uuid, name text)` so we can deterministically map legacy integer IDs to UUIDs that match the Lambda `int_to_uuid` helper. <https://www.postgresql.org/docs/current/uuid-ossp.html>
+
 ## Impacted Areas
 - `ArchaaS/` Terraform modules + tfvars
 - `.env.prod.aws` (or variant) for compose

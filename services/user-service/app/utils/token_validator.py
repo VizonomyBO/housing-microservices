@@ -5,6 +5,7 @@ Direct token validation helper used by AuthMiddleware.
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Any
 
 import jwt
@@ -55,10 +56,18 @@ def verify_token_direct(token: str) -> ValidationResult:
         token_roles = []
 
     user_id = payload.get("user_id")
-    if isinstance(user_id, int):
+    user_uuid = None
+    if user_id is not None:
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+            payload["user_id"] = str(user_uuid)
+        except (ValueError, TypeError):
+            logger.warning("Token payload contained invalid user_id", extra={"user_id": user_id})
+
+    if user_uuid is not None:
         session = get_session()
         try:
-            user = session.query(User).filter_by(user_id=user_id).first()
+            user = session.query(User).filter_by(user_id=user_uuid).first()
             if user:
                 # Enrich payload with database data, but preserve roles from token
                 payload.setdefault("username", user.username)
@@ -78,7 +87,8 @@ def verify_token_direct(token: str) -> ValidationResult:
                         payload["role"] = token_role
             else:
                 logger.warning(
-                    "User not found for token payload, using token data", extra={"user_id": user_id}
+                    "User not found for token payload, using token data",
+                    extra={"user_id": str(user_uuid)},
                 )
                 # Use roles from token
                 payload["roles"] = (
@@ -91,7 +101,7 @@ def verify_token_direct(token: str) -> ValidationResult:
         finally:
             session.close()
     else:
-        # Ensure roles is set even if user_id is not an int
+        # Ensure roles is set even if user_id is missing/invalid
         payload["roles"] = (
             token_roles if isinstance(token_roles, list) else [token_roles] if token_roles else []
         )

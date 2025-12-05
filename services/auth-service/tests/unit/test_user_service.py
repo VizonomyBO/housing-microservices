@@ -3,6 +3,7 @@ Unit tests for UserService
 """
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import pytest
 
@@ -128,7 +129,7 @@ class TestGetUser:
 
     def test_get_user_by_id_not_found(self, db_session):
         """Test getting non-existent user by ID"""
-        user = UserService.get_user_by_id(db_session, 99999)
+        user = UserService.get_user_by_id(db_session, uuid4())
 
         assert user is None
 

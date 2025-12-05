@@ -1,6 +1,6 @@
-"""
-Unit tests for UserService
-"""
+"""Unit tests for UserService."""
+
+from uuid import uuid4
 
 import pytest
 
@@ -20,7 +20,7 @@ class TestUserService:
 
     def test_get_user_by_id_not_found(self, db_session):
         """Test getting non-existent user"""
-        user = UserService.get_user_by_id(db_session, 99999)
+        user = UserService.get_user_by_id(db_session, uuid4())
         assert user is None
 
     def test_get_user_by_email(self, db_session, sample_user):
@@ -93,7 +93,7 @@ class TestUserService:
 
     def test_delete_user_not_found(self, db_session):
         """Test deleting non-existent user"""
-        success, error = UserService.delete_user(db_session, 99999)
+        success, error = UserService.delete_user(db_session, uuid4())
         assert success is False
         assert "not found" in error
 

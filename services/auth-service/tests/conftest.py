@@ -154,10 +154,11 @@ def generate_token(client):
     secret = client.app.state.config.JWT_SECRET_KEY
 
     def _generate_token(user_id, role="public", email=None, username=None):
+        user_id_str = str(user_id)
         payload = {
-            "user_id": user_id,
-            "email": email or f"user{user_id}@example.com",
-            "username": username or f"user{user_id}",
+            "user_id": user_id_str,
+            "email": email or f"user{user_id_str}@example.com",
+            "username": username or f"user{user_id_str}",
             "role": role,
             "roles": [role],
             "type": "access",

@@ -1,9 +1,8 @@
-"""
-User management service layer
-"""
+"""User management service layer."""
 
 import os
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -15,7 +14,6 @@ from app.utils.validators import (
     validate_password,
     validate_username,
 )
-
 
 AUTO_ACTIVATE_USERS = os.getenv("AUTO_ACTIVATE_USERS", "1").lower() in {
     "1",
@@ -120,9 +118,13 @@ class UserService:
             return None, f"Failed to create user: {e!s}"
 
     @staticmethod
-    def get_user_by_id(session: Session, user_id: int) -> User | None:
+    def get_user_by_id(session: Session, user_id: UUID | str) -> User | None:
         """Get user by ID"""
-        result = session.query(User).filter_by(user_id=user_id, status="active").first()
+        try:
+            user_uuid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        except ValueError:
+            return None
+        result = session.query(User).filter_by(user_id=user_uuid, status="active").first()
         return result
 
     @staticmethod

@@ -1,24 +1,15 @@
-"""
-User model for authentication and account management
-"""
+"""User model for authentication and account management."""
 
+from __future__ import annotations
+
+import uuid
 from datetime import datetime
 
-from sqlalchemy import (
-    CHAR,
-    BigInteger,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-)
+from sqlalchemy import CHAR, Boolean, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.models.types import GUID
 
 
 class User(Base):  # type: ignore[misc,valid-type]
@@ -27,7 +18,9 @@ class User(Base):  # type: ignore[misc,valid-type]
     __tablename__ = "users"
 
     user_id = Column(
-        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+        GUID(),
+        primary_key=True,
+        default=uuid.uuid4,
     )
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
@@ -46,7 +39,7 @@ class User(Base):  # type: ignore[misc,valid-type]
     )
 
     created_by = Column(
-        BigInteger().with_variant(Integer, "sqlite"),
+        GUID(),
         ForeignKey("users.user_id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -75,7 +68,7 @@ class User(Base):  # type: ignore[misc,valid-type]
     @property
     def id(self):
         """Alias for user_id for backward compatibility"""
-        return self.user_id
+        return str(self.user_id) if self.user_id is not None else None
 
     @property
     def username(self):
@@ -118,9 +111,15 @@ class User(Base):  # type: ignore[misc,valid-type]
 
     def to_dict(self, include_sensitive=False):
         """Convert user to dictionary"""
+
+        def _as_str(value):
+            if value is None:
+                return None
+            return str(value)
+
         data = {
-            "id": self.id,
-            "user_id": self.user_id,
+            "id": _as_str(self.user_id),
+            "user_id": _as_str(self.user_id),
             "username": self.username,
             "first_name": self.first_name,
             "last_name": self.last_name,
@@ -135,7 +134,7 @@ class User(Base):  # type: ignore[misc,valid-type]
             "date_modified": self.date_modified.isoformat() if self.date_modified else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "created_by": self.created_by,
+            "created_by": _as_str(self.created_by),
         }
 
         if include_sensitive:

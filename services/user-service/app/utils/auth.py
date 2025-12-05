@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class UserContext:
     """User context extracted from JWT token"""
 
-    user_id: int
+    user_id: str
     roles: list[str]
     country_code: str
     username: str | None = None
@@ -66,8 +66,14 @@ async def validate_token(request: Request, auth_service_url: str) -> UserContext
             if response.status_code == status.HTTP_200_OK:
                 data = response.json()
                 if data.get("valid"):
+                    user_id = data.get("user_id")
+                    if user_id is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Token payload missing user_id",
+                        )
                     return UserContext(
-                        user_id=data.get("user_id"),
+                        user_id=str(user_id),
                         roles=data.get("roles", [data.get("role")] if data.get("role") else []),
                         country_code=data.get("country_code", "USA"),
                         username=data.get("username"),

@@ -111,4 +111,78 @@ print("Auth-service schema ready.")
 PY
 )
 
+echo "Installing uuid-ossp extension (auth DB)..."
+PGPASSWORD="$DB_ADMIN_PASSWORD" "${PSQL_BASE[@]}" "$AUTH_DB" -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null
+
+echo "Ensuring auth-service user IDs are stored as UUIDs..."
+PGPASSWORD="$DB_ADMIN_PASSWORD" "${PSQL_BASE[@]}" "$AUTH_DB" <<'SQL'
+DO $$
+DECLARE
+    needs_migration BOOLEAN := FALSE;
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'user_id'
+          AND data_type <> 'uuid'
+    ) THEN
+        needs_migration := TRUE;
+    END IF;
+
+    IF NOT needs_migration THEN
+        RETURN;
+    END IF;
+
+    -- Drop foreign keys that reference users.user_id so we can alter types
+    IF to_regclass('public.refresh_tokens_user_id_fkey') IS NOT NULL THEN
+        ALTER TABLE IF EXISTS refresh_tokens DROP CONSTRAINT refresh_tokens_user_id_fkey;
+    END IF;
+    IF to_regclass('public.users_created_by_fkey') IS NOT NULL THEN
+        ALTER TABLE IF EXISTS users DROP CONSTRAINT users_created_by_fkey;
+    END IF;
+
+    -- Convert primary key to UUIDs using the deterministic namespace used by Lambdas
+    ALTER TABLE users ALTER COLUMN user_id DROP DEFAULT;
+    ALTER TABLE users
+        ALTER COLUMN user_id TYPE uuid
+        USING uuid_generate_v5('6ba7b810-9dad-11d1-80b4-00c04fd430c8'::uuid, 'user:' || user_id::text);
+    ALTER TABLE users ALTER COLUMN user_id SET DEFAULT uuid_generate_v4();
+
+    -- Convert created_by references (may be NULL)
+    ALTER TABLE users
+        ALTER COLUMN created_by TYPE uuid
+        USING CASE
+            WHEN created_by IS NULL THEN NULL
+            ELSE uuid_generate_v5('6ba7b810-9dad-11d1-80b4-00c04fd430c8'::uuid, 'user:' || created_by::text)
+        END;
+
+    -- Convert refresh_tokens.user_id if the table exists
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'refresh_tokens' AND column_name = 'user_id'
+    ) THEN
+        ALTER TABLE refresh_tokens
+            ALTER COLUMN user_id TYPE uuid
+            USING uuid_generate_v5('6ba7b810-9dad-11d1-80b4-00c04fd430c8'::uuid, 'user:' || user_id::text);
+    END IF;
+
+    -- Recreate foreign keys
+    ALTER TABLE users
+        ADD CONSTRAINT users_created_by_fkey FOREIGN KEY (created_by)
+        REFERENCES users(user_id) ON DELETE SET NULL;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'refresh_tokens'
+    ) THEN
+        ALTER TABLE refresh_tokens
+            ADD CONSTRAINT refresh_tokens_user_id_fkey FOREIGN KEY (user_id)
+            REFERENCES users(user_id) ON DELETE CASCADE;
+    END IF;
+END;
+$$;
+SQL
+
 echo "Remote databases are ready for use."

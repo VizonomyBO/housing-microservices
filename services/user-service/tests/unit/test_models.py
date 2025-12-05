@@ -31,7 +31,7 @@ class TestUserModel:
 
     def test_user_properties(self, sample_user):
         """Test user properties"""
-        assert sample_user.id == sample_user.user_id
+        assert sample_user.id == str(sample_user.user_id)
         assert sample_user.username == "john.doe"
         assert sample_user.is_active is True
         assert sample_user.is_verified is True
