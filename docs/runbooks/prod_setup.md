@@ -103,13 +103,13 @@ The commands below run entirely against the live AWS endpoints and the new inges
    UPLOAD_FIELDS=$(echo "$UPLOAD_RESP" | jq -c '.upload.fields')
    ```
 4. **POST the binary to ingestion service form endpoint**  
-   (The FastAPI service returns an HMAC-signed form; upload directly to its `/v1/documents/upload/complete` URL. No S3 POST/fields juggling needed.)
+   (The FastAPI service returns an HMAC-signed form; upload directly to its `/v1/documents/upload/complete` URL with your bearer token. No S3 POST/fields juggling needed.)
    ```bash
    FORM_ARGS=()
    while IFS=$'\t' read -r key val; do FORM_ARGS+=(-F "$key=$val"); done \
      < <(echo "$UPLOAD_FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv')
    FORM_ARGS+=(-F "file=@${FILE}")
-   curl -sSf -X POST "$UPLOAD_URL" "${FORM_ARGS[@]}"
+   curl -sSf -X POST "$UPLOAD_URL" -H "Authorization: Bearer $TOKEN" "${FORM_ARGS[@]}"
    ```
 5. **Poll Agent API until active (or failed)**
    ```bash
