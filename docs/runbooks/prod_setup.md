@@ -171,3 +171,21 @@ ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(da
   COMPOSE_PROFILES=reduced,ops docker compose down -v --remove-orphans
   ```
   (LocalStack destroy is the same with workspace `localstack` and `configs/localstack.tfvars` if needed later.)
+  - Data reset (AWS) before final deploy:
+    ```bash
+    # housing DB – remove smoke docs/chats and cascades
+    set -a && source .env.active && set +a
+    PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB \
+      -c "begin; delete from conversations; delete from documents; commit;"
+
+    # auth_db – drop stale refresh tokens
+    PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $AUTH_DB \
+      -c "begin; delete from refresh_tokens; commit;"
+    ```
+  - Quality gates (services/agent-api):
+    ```bash
+    uv run ruff format .
+    uv run ruff check --fix .
+    uv run ty check .
+    uv run pytest -n auto
+    ```
