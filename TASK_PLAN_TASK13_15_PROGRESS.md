@@ -7,7 +7,7 @@ _Tracker for TASK_PLAN_TASK13_15.md (plan auto-approved). Leave in place per ses
 - [x] Step 4: Verify/enforce converter fail-on-parse behavior.
 - [x] Step 5: Refresh README links to runbook/endpoint reference.
 - [x] Step 6: Run AWS smoke with unique PDFs, capture evidence, update tracker.
-- [ ] Step 7: Prepare commit/staging (prod-ready), leave plan/tracker files.
+- [x] Step 7: Prepare commit/staging (prod-ready), leave plan/tracker files.
 
 Notes / evidence:
 - Commands/logs: `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh |& tee /tmp/prod_smoke_latest.log`
