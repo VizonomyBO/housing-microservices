@@ -9,6 +9,7 @@ A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gatew
 - Production setup, curl walkthrough, and frontend endpoint reference: `docs/runbooks/prod_setup.md`
 - Idempotent prod deploy (Terraform + EC2 compose): `scripts/deploy_prod_stack.sh`
 - AWS smoke helper (uploads policy/ledger/KPI PDFs via ingestion service): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` (see runbook §6)
+- Numeric routing: Numeric cues (digits, arithmetic, KPI/ledger language) auto-set `requires_sql=true`. Prose-only attachments are lifted into a numeric-fact table (label/value/unit with doc/chunk provenance) before Text→SQL→Polars execution, keeping citations intact.
 
 ## Service Inventory
 | Service | Language | Host Port | Profiles | Notes |
