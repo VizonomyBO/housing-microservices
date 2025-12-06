@@ -144,6 +144,30 @@ async def test_default_to_informational_when_no_signal():
 
 
 @pytest.mark.asyncio
+async def test_numeric_prompt_overrides_informational_hint():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = "Provide 2024 budget totals and compare to last year"
+    state = _agent_state(prompt, intent_tags=["route:informational"])
+
+    result = await router(state)
+
+    assert result["requires_sql"] is True
+    assert result["route"] == RouterRoute.NUMERICAL
+
+
+@pytest.mark.asyncio
+async def test_ledger_language_without_digits_requires_sql():
+    router = RouterNode(guardrail_engine=StubGuardrailEngine())
+    prompt = "Summarize the budget ledger balances by program"
+    state = _agent_state(prompt)
+
+    result = await router(state)
+
+    assert result["requires_sql"] is True
+    assert result["route"] == RouterRoute.NUMERICAL
+
+
+@pytest.mark.asyncio
 async def test_workflow_hints_push_to_numerical():
     router = RouterNode(guardrail_engine=StubGuardrailEngine())
     workflow = WorkflowPlan(

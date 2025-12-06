@@ -154,7 +154,7 @@ ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(da
 ```
 - Output: updates `prod_sample_run.json` with answers + `requires_sql` fields; smoke log captured via `tee`.
 - Override a single upload: `SMOKE_UPLOAD_FILE=/tmp/custom.pdf ENV_FILE=.env.active bash scripts/prod_smoke_check.sh`.
-- Expectations: KPI/ledger prompts show `requires_sql:true`, non-empty `sql_queries`, and `table_results` rows.
+- Expectations: KPI/ledger prompts show `requires_sql:true`, non-empty `sql_queries`, and `table_results` rows. Numeric prompts in prose (no markdown table) are auto-routed to SQL via the synthesized numeric-fact table, so `requires_sql` should still be `true` when digits/ledger/KPI language appears.
 
 ## 7) Troubleshooting & cleanup
 - `DOCUMENT_NOT_READY` on attach → keep polling `/v1/documents` until `status=active`.

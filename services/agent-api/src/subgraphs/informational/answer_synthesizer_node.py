@@ -185,6 +185,8 @@ class AnswerSynthesizerNode:
         executor = trace.get("executor") or {}
         row_count = executor.get("row_count", len(state.numerical_result_rows))
         sample = self._sql_sample_row(state)
+        document_ids = table_specs[0].get("document_ids") or []
+        chunk_ids = table_specs[0].get("chunk_ids") or []
         snippet_parts = [f"[SQL_RESULT] {table_id} rows={row_count}"]
         if sample:
             snippet_parts.append(f"sample={sample}")
@@ -199,6 +201,8 @@ class AnswerSynthesizerNode:
                 "sql_query": query,
                 "row_count": row_count,
                 "table_id": table_id,
+                "document_ids": document_ids,
+                "chunk_ids": chunk_ids,
             },
         )
 

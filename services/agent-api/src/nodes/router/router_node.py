@@ -57,6 +57,20 @@ NUMERICAL_KEYWORDS = {
     "plus",
     "minus",
 }
+LEDGER_KEYWORDS = {
+    "ledger",
+    "balance",
+    "budget",
+    "revenue",
+    "expense",
+    "expenses",
+    "cost",
+    "costs",
+    "profit",
+    "loss",
+    "spend",
+    "spending",
+}
 ANALYST_KEYWORDS = {
     "plan",
     "strategy",
@@ -114,6 +128,9 @@ class RouterNode:
                 guardrail_violation_count=len(guardrail_result.violations),
             )
 
+            workflow_hints = self._collect_workflow_hints(state)
+            prompt_text = normalized_input.normalized_prompt.lower()
+
             if not guardrail_result.passed:
                 decision = RouteDecision(
                     route=RouterRoute.ESCALATE,
@@ -122,15 +139,33 @@ class RouterNode:
                     reason="guardrail_violation",
                 )
             else:
-                decision = self._classify(state, normalized_input)
+                decision = self._classify(state, normalized_input, workflow_hints)
                 decision = await self._apply_reduced_scope_guard(
                     state=state,
                     decision=decision,
                     sse_emitter=sse_emitter,
                 )
 
+            reduced_scope_skip = (
+                state.reduced_scope_flags.enabled
+                and state.reduced_scope_flags.should_skip_capability(RouterRoute.NUMERICAL.value)
+            )
+            requires_sql_signal = self._requires_sql_signal(prompt_text, workflow_hints)
+            requires_sql = decision.route == RouterRoute.NUMERICAL or (
+                requires_sql_signal and not reduced_scope_skip
+            )
+            if requires_sql and decision.route not in {
+                RouterRoute.NUMERICAL,
+                RouterRoute.VISION,
+                RouterRoute.ESCALATE,
+            }:
+                decision = RouteDecision(
+                    route=RouterRoute.NUMERICAL,
+                    confidence=max(self.strong_signal_confidence, decision.confidence),
+                    next_subgraph=ROUTE_TO_SUBGRAPH[RouterRoute.NUMERICAL],
+                    reason="numerical_signal",
+                )
             set_route(decision.route)
-            requires_sql = decision.route == RouterRoute.NUMERICAL
             add_metadata(
                 router_reason=decision.reason,
                 route_confidence=decision.confidence,
@@ -149,7 +184,9 @@ class RouterNode:
                 "requires_sql": requires_sql,
             }
 
-    def _classify(self, state: AgentState, normalized_input: NormalizedInput) -> RouteDecision:
+    def _classify(
+        self, state: AgentState, normalized_input: NormalizedInput, workflow_hints: set[str]
+    ) -> RouteDecision:
         prompt = normalized_input.normalized_prompt.lower()
         intent_route = self._extract_intent_route(normalized_input.intent_tags)
         if intent_route:
@@ -160,7 +197,6 @@ class RouterNode:
                 reason="hint",
             )
 
-        workflow_hints = self._collect_workflow_hints(state)
         numerical_score = self._score_prompt(prompt, NUMERICAL_KEYWORDS)
         analyst_score = self._score_prompt(prompt, ANALYST_KEYWORDS)
         vision_score = self._score_prompt(prompt, VISION_KEYWORDS)
@@ -326,6 +362,32 @@ class RouterNode:
             if re.search(pattern, prompt):
                 return True
         return False
+
+    def _requires_sql_signal(self, prompt: str, workflow_hints: set[str]) -> bool:
+        prompt = prompt.lower()
+        digit_count = len(re.findall(r"\d", prompt))
+        arithmetic_expression = self._contains_arithmetic_expression(prompt)
+        table_cues = self._contains_table_cues(prompt)
+        normalized_hints = {hint.lower() for hint in workflow_hints}
+        workflow_signal = bool(normalized_hints & {"sql", "polars"})
+        ledger_signal = any(keyword in prompt for keyword in LEDGER_KEYWORDS)
+        numerical_keyword_score = self._score_prompt(prompt, NUMERICAL_KEYWORDS)
+        threshold_phrase = re.search(
+            r"(greater than|less than|at least|at most|over|under|no more than)", prompt
+        )
+        percent_signal = "%" in prompt or "percent" in prompt or "percentage" in prompt
+        numeric_language = numerical_keyword_score >= 1 or ledger_signal or table_cues
+        digit_signal = digit_count >= 2 or (
+            digit_count >= 1 and (percent_signal or threshold_phrase or numeric_language)
+        )
+        language_signal = numeric_language and digit_count == 0
+        return bool(
+            arithmetic_expression
+            or workflow_signal
+            or table_cues
+            or digit_signal
+            or language_signal
+        )
 
     def _confidence_from_score(self, score: int, workflow_hit: bool = False) -> float:
         if workflow_hit and score >= 2:

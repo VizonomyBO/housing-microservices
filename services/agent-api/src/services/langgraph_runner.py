@@ -21,6 +21,7 @@ from agent_api.reduced_scope import ReducedScopeFlags
 from cache import ValkeyCacheClientProtocol
 from cache.response_serializer import CacheCitation
 from guardrails.engine import GuardrailEngine
+from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from models.retrieval import AttachmentDocument, ChatRequestContext
 from nodes.retrieval import AttachmentScopeLoaderNode, InputNormalizerNode
 from nodes.retrieval.exceptions import NodeError
@@ -32,6 +33,7 @@ from nodes.router.router_node import RouterNode
 from repositories.conversation_scope_repository import ConversationScopeRepository
 from services.answer_composer import OpenAIAnswerComposer
 from services.model_clients import OpenAIChatClientProtocol
+from services.numerical_fact_extractor import NumericFactExtractor
 from state.agent_state import (
     AgentState,
     MessageSnapshot,
@@ -72,6 +74,7 @@ class LangGraphChatRunner:
         language_detector: LanguageDetectorProtocol,
         openai_client: OpenAIChatClientProtocol | None,
         metrics: MetricsRegistry,
+        fact_extractor: NumericFactExtractor | None = None,
     ) -> None:
         self._cache_client = cache_client
         self._cache_observability = cache_observability
@@ -80,6 +83,7 @@ class LangGraphChatRunner:
         self._router = RouterNode(guardrail_engine=GuardrailEngine())
         self._metrics = metrics
         self._sql_generator = HeuristicSqlGenerator()
+        self._fact_extractor = fact_extractor or NumericFactExtractor(client=openai_client)
 
     async def run_chat(
         self,
@@ -176,23 +180,18 @@ class LangGraphChatRunner:
 
     async def _run_router(self, state: AgentState, context: RunnerContext) -> AgentState:
         updates = await self._router(state, sse_emitter=context.sse_emitter)
-        next_state = state.model_copy(update=updates)
-        if next_state.requires_sql:
-            tables = self._build_numerical_tables(next_state)
-            if not tables:
-                logger.warning(
-                    "Router requested numerical mode but no tables are available; falling back to text answer",
-                    extra={"conversation_id": context.chat_request.thread_id},
-                )
-                next_state = next_state.model_copy(update={"requires_sql": False})
-        return next_state
+        return state.model_copy(update=updates)
 
     async def _run_numerical_pipeline(
         self, state: AgentState, context: RunnerContext
     ) -> AgentState:
-        tables = self._build_numerical_tables(state)
+        tables = list(state.numerical_tables or [])
         if not tables:
-            raise NodeError(code="NUMERICAL_TABLE_MISSING", message="No numerical tables available")
+            tables = await self._build_numerical_tables(state)
+        if not tables:
+            return self._numerical_fallback(
+                state, "Numeric prompt but no numerical tables were found"
+            )
         state = state.model_copy(
             update={
                 "numerical_tables": tables,
@@ -221,7 +220,26 @@ class LangGraphChatRunner:
         updates = await answer_node(state, sse_emitter=context.sse_emitter)
         return state.model_copy(update=updates)
 
-    def _build_numerical_tables(self, state: AgentState) -> list[NumericalTable]:
+    def _numerical_fallback(self, state: AgentState, message: str) -> AgentState:
+        findings = list(state.guardrail_findings)
+        findings.append(
+            GuardrailViolation(
+                code=GuardrailCode.NUMERICAL_SQL,
+                severity=GuardrailSeverity.WARNING,
+                message=message,
+                details={"reason": "missing_tables"},
+            )
+        )
+        error_log = list(state.error_log)
+        error_log.append(message)
+        updates = {
+            "requires_sql": False,
+            "guardrail_findings": findings,
+            "error_log": error_log,
+        }
+        return state.model_copy(update=updates)
+
+    async def _build_numerical_tables(self, state: AgentState) -> list[NumericalTable]:
         scope = state.attachment_scope
         if scope is None or not scope.documents:
             return []
@@ -235,7 +253,8 @@ class LangGraphChatRunner:
                     column_names = self._normalize_columns(headers)
                     fact_rows = self._rows_from_markdown(column_names, rows)
             if not fact_rows:
-                fact_rows = self._extract_numeric_facts(document)
+                facts = await self._fact_extractor.extract(document)
+                fact_rows = [fact.to_row() for fact in facts]
             if not fact_rows:
                 continue
 
@@ -246,6 +265,16 @@ class LangGraphChatRunner:
                 columns.append(NumericalTableColumn(name=name, data_type=data_type))
 
             alias = self._slugify(document.canonical_name or f"table_{len(tables) + 1}")
+            chunk_ids = {
+                row.get("source_chunk")
+                for row in fact_rows
+                if isinstance(row, dict) and row.get("source_chunk")
+            }
+            fallback_chunks = [
+                chunk.chunk_id for chunk in (document.chunks or []) if chunk.chunk_id
+            ][:1]
+            if not chunk_ids:
+                chunk_ids = set(fallback_chunks)
             tables.append(
                 NumericalTable(
                     table_id=f"tbl-{document.document_id}",
@@ -256,14 +285,16 @@ class LangGraphChatRunner:
                     sample_rows=fact_rows[:5],
                     metadata={
                         "document_ids": [document.document_id],
-                        "chunk_ids": [chunk.chunk_id for chunk in document.chunks][:1],
+                        "chunk_ids": sorted(chunk_ids),
                         "rows": fact_rows,
                     },
                 )
             )
         return tables
 
-    def _rows_from_markdown(self, column_names: list[str], rows: list[list[str]]) -> list[dict[str, Any]]:
+    def _rows_from_markdown(
+        self, column_names: list[str], rows: list[list[str]]
+    ) -> list[dict[str, Any]]:
         converted_rows: list[dict[str, Any]] = []
         for row_values in rows:
             converted: dict[str, Any] = {}
@@ -303,45 +334,6 @@ class LangGraphChatRunner:
             seen[base] = count + 1
             normalized.append(f"{base}_{count}" if count else base)
         return normalized
-
-    def _extract_numeric_facts(self, document: AttachmentDocument) -> list[dict[str, Any]]:
-        """Extract loose numeric facts from arbitrary text so we always have a table."""
-        facts: list[dict[str, Any]] = []
-        for chunk in document.chunks or []:
-            for line in chunk.text.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                matches = re.finditer(
-                    r"(?P<label>[^0-9]{0,80}?)(?P<number>[-+]?[0-9]+(?:\\.[0-9]+)?)(?P<suffix>[kKmMbB%]?)",
-                    line,
-                )
-                for match in matches:
-                    number = match.group("number")
-                    suffix = match.group("suffix")
-                    label = match.group("label").strip() or "value"
-                    try:
-                        value = float(number)
-                        if suffix.lower() == "k":
-                            value *= 1_000
-                        elif suffix.lower() == "m":
-                            value *= 1_000_000
-                        elif suffix.lower() == "b":
-                            value *= 1_000_000_000
-                        elif suffix == "%":
-                            value = value
-                    except ValueError:
-                        continue
-                    facts.append(
-                        {
-                            "label": label[:120],
-                            "value": int(value) if value.is_integer() else value,
-                            "unit": "%" if suffix == "%" else "",
-                            "source_doc": document.document_id,
-                            "raw": line[:240],
-                        }
-                    )
-        return facts
 
     def _convert_cell_value(self, value: str) -> Any:
         stripped = value.strip()

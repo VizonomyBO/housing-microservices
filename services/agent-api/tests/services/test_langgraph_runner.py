@@ -24,7 +24,16 @@ from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.utils.language import StubLanguageDetector
 from nodes.router.router_node import RouterRoute
 from services.langgraph_runner import LangGraphChatRunner, RunnerContext
+from services.numerical_fact_extractor import NumericFact
 from telemetry import CacheObservability, get_metrics_registry
+
+
+class StubFactExtractor:
+    def __init__(self, facts: list[NumericFact]):
+        self._facts = facts
+
+    async def extract(self, document):
+        return self._facts
 
 
 def _chat_request() -> ChatRequestContext:
@@ -146,13 +155,14 @@ def _normalized_prompt(text: str) -> NormalizedInput:
     )
 
 
-def _runner(metrics):
+def _runner(metrics, *, fact_extractor=None):
     return LangGraphChatRunner(
         cache_client=InMemoryValkeyClient(),
         cache_observability=CacheObservability(metrics=metrics),
         language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
         openai_client=None,
         metrics=metrics,
+        fact_extractor=fact_extractor,
     )
 
 
@@ -180,7 +190,8 @@ def test_done_payload_includes_sql_row_count(db_session):
     assert payload["table_results"] == [{"city": "Austin"}]
 
 
-def test_builds_numerical_table_from_markdown(db_session):
+@pytest.mark.asyncio
+async def test_builds_numerical_table_from_markdown(db_session):
     metrics = get_metrics_registry()
     runner = _runner(metrics)
     state = runner._build_initial_state(_chat_request()).model_copy(
@@ -188,10 +199,77 @@ def test_builds_numerical_table_from_markdown(db_session):
             "attachment_scope": AttachmentScope(documents=[_kpi_document()]),
         }
     )
-    tables = runner._build_numerical_tables(state)
+    tables = await runner._build_numerical_tables(state)
     assert tables
     assert tables[0].row_count == 4
     assert tables[0].columns[-1].name == "value"
+
+
+@pytest.mark.asyncio
+async def test_builds_table_from_fact_extractor(db_session):
+    metrics = get_metrics_registry()
+    facts = [
+        NumericFact(
+            label="evictions",
+            value=12,
+            unit="",
+            source_doc="doc-raw",
+            source_chunk="chunk-raw",
+            raw="evictions reached 12",
+        )
+    ]
+    runner = _runner(metrics, fact_extractor=StubFactExtractor(facts))
+    document = AttachmentDocument(
+        document_id="doc-raw",
+        canonical_name="Ledger summary",
+        access_scope="base",
+        chunks=[AttachmentDocumentChunk(chunk_id="chunk-raw", text="evictions reached 12 people")],
+    )
+    state = runner._build_initial_state(_chat_request()).model_copy(
+        update={"attachment_scope": AttachmentScope(documents=[document])}
+    )
+    tables = await runner._build_numerical_tables(state)
+    assert tables
+    table = tables[0]
+    assert table.row_count == 1
+    assert table.metadata.get("chunk_ids") == ["chunk-raw"]
+    assert any(column.name == "value" for column in table.columns)
+
+
+@pytest.mark.asyncio
+async def test_numerical_pipeline_falls_back_when_no_tables(db_session):
+    metrics = get_metrics_registry()
+    runner = _runner(metrics, fact_extractor=StubFactExtractor([]))
+    request = _chat_request()
+    base_state = runner._build_initial_state(request)
+    document = AttachmentDocument(
+        document_id="doc-empty",
+        canonical_name="Empty",
+        access_scope="base",
+        chunks=[AttachmentDocumentChunk(chunk_id="chunk-empty", text="No numeric content here")],
+    )
+    state = base_state.model_copy(
+        update={
+            "normalized_input": _normalized_prompt("Calculate totals even if none available"),
+            "attachment_scope": AttachmentScope(documents=[document]),
+            "requires_sql": True,
+        }
+    )
+    context = RunnerContext(
+        chat_request=request,
+        request_context=RequestContext(
+            request_id="req-1", traceparent=None, idempotency_key=None, headers={}
+        ),
+        auth_context=AuthContext(user_id="user-1"),
+        sse_emitter=None,
+        db_session=db_session,
+        reduced_scope=ReducedScopeFlags(),
+    )
+
+    new_state = await runner._run_numerical_pipeline(state, context)
+
+    assert new_state.requires_sql is False
+    assert new_state.guardrail_findings
 
 
 @pytest.mark.asyncio
