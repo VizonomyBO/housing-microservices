@@ -1,6 +1,14 @@
 # Housing Microservices Platform
 
-A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gateway) with the legacy authentication, user, marker, and swagger services. The repo now ships a single root `docker-compose.yml` that can start either a reduced Agent API demo or the full stack with LocalStack-backed AWS emulation.
+A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gateway) with the legacy authentication, user, and swagger services. The repo now ships a single root `docker-compose.yml` that can start either a reduced Agent API demo or the full stack with LocalStack-backed AWS emulation.
+
+> Note: `marker-service` has been removed (legacy). It is no longer built or shipped; ignore it in all flows unless explicitly resurrecting historical behavior.
+> Rule of thumb: ignore unused/legacy services unless a task explicitly asks for them.
+
+## Quick links (AWS-first)
+- Production setup, curl walkthrough, and frontend endpoint reference: `docs/runbooks/prod_setup.md`
+- Idempotent prod deploy (Terraform + EC2 compose): `scripts/deploy_prod_stack.sh`
+- AWS smoke helper (uploads policy/ledger/KPI PDFs to S3): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` (see runbook §6)
 
 ## Service Inventory
 | Service | Language | Host Port | Profiles | Notes |
@@ -11,7 +19,6 @@ A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gatew
 | `auth-service` | Flask | `${AUTH_SERVICE_PORT:-5001}` | default | Issues JWTs for the UI + downstream services.
 | `user-service` | Flask | `${USER_SERVICE_PORT:-5002}` | default | Depends on auth-service for token validation.
 | `swagger-service` | Node/Express | `${SWAGGER_SERVICE_PORT:-3000}` | default | Aggregates OpenAPI docs for every public service.
-| `marker-service` | FastAPI | `${MARKER_SERVICE_PORT:-8004}` | `full` | Exercises LocalStack S3/EventBridge flows during ingestion tasks.
 | `localstack` | LocalStack | `${LOCALSTACK_EDGE_PORT:-4566}` | default, `agent-api`, `full`, `aws-mock` | Emulates AWS endpoints when `USE_LOCALSTACK=1`.
 | `valkey` | Valkey 7 | `${VALKEY_PORT:-6379}` | `full` | Cache/rate-limit placeholder until the queue workers return.
 | `otel-collector` | OpenTelemetry | `${OTEL_COLLECTOR_GRPC_PORT:-4317}` | `full` | Optional traces/metrics collector.
@@ -36,7 +43,7 @@ Update `.env` with non-default passwords, JWT secrets, and any AWS credentials n
 | Use Case | STACK_PROFILE | Compose Flag | What Starts |
 | --- | --- | --- | --- |
 | Reduced Agent API demo | `reduced` | `docker compose --profile reduced up agent-api` | `postgres`, `db-init`, `agent-api`, `db-shell`, `localstack` (for S3 mocks).
-| Full platform | `full` | `docker compose --profile full up` | Everything above plus auth-service, user-service, swagger-service, marker-service, valkey, otel-collector.
+| Full platform | `full` | `docker compose --profile full up` | Everything above plus auth-service, user-service, swagger-service, valkey, otel-collector. (Marker-service removed/legacy.) |
 | Default legacy stack | `reduced` or `full` | `docker compose up` | `postgres`, auth-service, user-service, swagger-service, localstack.
 
 You can also set `COMPOSE_PROFILES` in `.env` or your shell (e.g., `COMPOSE_PROFILES=reduced,ops`). Compose always includes services without an explicit `profiles` entry (`postgres`, auth-service, user-service, swagger-service).
@@ -116,13 +123,13 @@ The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which 
   1. Set `USE_LOCALSTACK=0`.
   2. Provide real `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN`.
   3. Clear `AWS_ENDPOINT_URL` so SDKs resolve actual AWS endpoints.
-  4. Restart any containers that talk to AWS (`docker compose restart agent-api marker-service`).
+  4. Restart any containers that talk to AWS (`docker compose restart agent-api`).
 - LocalStack data lives in the `localstack_data` volume. Remove it with `docker volume rm housing-microservices_localstack_data` or `docker compose down -v` if you need a clean slate.
 
 ## 7. Production Mode with Compose
 Use this workflow when you need the full stack with production-like settings, real secrets, and optional AWS access.
 
-> Need a turnkey reduced-scope deployment (`.env.prod` + verification script) for demos? Follow [`docs/runbooks/prod_setup.md`](docs/runbooks/prod_setup.md).
+> AWS ingestion, curl walkthrough, and frontend endpoint reference live in [`docs/runbooks/prod_setup.md`](docs/runbooks/prod_setup.md). For a one-shot prod deploy (Terraform + EC2 compose), use `scripts/deploy_prod_stack.sh`.
 
 1. **Prep environment files**
    ```bash
@@ -136,7 +143,8 @@ Use this workflow when you need the full stack with production-like settings, re
 
 2. **Decide on LocalStack vs AWS**
    - Keep `USE_LOCALSTACK=1` to emulate AWS. Ensure `AWS_ENDPOINT_URL=http://localstack:4566` (containers) or `http://localhost.localstack.cloud:4566` (host tooling), and reuse the default credentials baked into `env.example`.
-   - Set `USE_LOCALSTACK=0` when you want the stack to talk to real AWS. Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN` plus the target region. Clear `AWS_ENDPOINT_URL` so SDKs auto-discover AWS endpoints and restart affected services (`docker compose restart agent-api marker-service`).
+   - Set `USE_LOCALSTACK=0` when you want the stack to talk to real AWS. Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN` plus the target region. Clear `AWS_ENDPOINT_URL` so SDKs auto-discover AWS endpoints and restart affected services (`docker compose restart agent-api`).
+   - Prefer `scripts/use_env.sh aws` to copy your prod env into `.env.active` before running compose, `scripts/prod_smoke_check.sh`, or deployment helpers.
 
 3. **Launch the full profile**
    ```bash
@@ -145,7 +153,7 @@ Use this workflow when you need the full stack with production-like settings, re
      docker compose --profile full up --build
    ```
    - The `ops` profile pulls in `db-shell` for manual SQL inspections.
-   - Expect longer start times; keep `docker compose logs -f agent-api marker-service localstack` streaming in another terminal.
+   - Expect longer start times; keep `docker compose logs -f agent-api localstack` streaming in another terminal.
 
 4. **Run smoke/validation hooks**
    - Execute `make reduced-e2e-smoke` from the repo root to run the reduced-profile automation against the same secrets before rolling out changes. Override `KEEP_STACK=1` if you want the reduced stack to stay up for debugging.

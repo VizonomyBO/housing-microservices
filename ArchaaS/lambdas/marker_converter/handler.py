@@ -1,8 +1,7 @@
-"""
-Document Converter Lambda - Using pdfplumber
+"""Document Converter Lambda - Using MarkItDown (pdfs -> markdown).
 
-Converts PDF to Markdown using pdfplumber (lightweight).
-Extracts text and tables without ML dependencies.
+Conversion errors are treated as fatal so the ingestion pipeline marks the
+document failed instead of emitting placeholder content.
 """
 
 import json
@@ -13,11 +12,7 @@ import tempfile
 from typing import Any
 
 import boto3
-import pdfplumber
-import pypdf
-from pdfminer.pdfparser import PDFSyntaxError
-from pdfplumber.utils.exceptions import PdfminerException
-from pypdf.errors import PdfReadError
+from markitdown import FileConversionException, MarkItDown, UnsupportedFormatException
 
 # Configure logging
 logger = logging.getLogger()
@@ -30,135 +25,43 @@ PROCESSED_BUCKET = os.environ.get("PROCESSED_BUCKET", "")
 # Initialize S3 client
 s3 = boto3.client("s3")
 
+# Single MarkItDown instance reused across invocations
+markitdown = MarkItDown()
+
+
+class MarkdownConversionError(Exception):
+    """Raised when MarkItDown returns empty content."""
+
 
 def extract_pdf_to_markdown(pdf_path: str) -> tuple[str, int, int]:
-    """
-    Extract PDF content to Markdown format.
-    Returns (markdown_content, tables_count, pages_count)
-    """
-    primary_error: Exception | None = None
+    """Extract PDF content to Markdown using MarkItDown."""
+    result = markitdown.convert(pdf_path)
+    markdown_content = result.text_content or ""
 
-    try:
-        return _extract_with_pdfplumber(pdf_path)
-    except (PdfminerException, PDFSyntaxError) as err:
-        primary_error = err
-        logger.warning(
-            "pdfplumber failed (%s); falling back to pypdf", err, exc_info=False
-        )
-    except Exception as err:  # pragma: nocover - defensive guard rail
-        primary_error = err
-        logger.warning("pdfplumber crashed (%s); trying pypdf fallback", err, exc_info=True)
+    # Some converters populate metadata; fall back to zeros if missing.
+    meta = getattr(result, "metadata", {}) or {}
+    pages = _safe_int(meta.get("pages")) if isinstance(meta, dict) else 0
+    tables = _safe_int(meta.get("tables")) if isinstance(meta, dict) else 0
 
-    try:
-        return _extract_with_pypdf(pdf_path)
-    except PdfReadError as err:
-        if primary_error is None:
-            primary_error = err
-        logger.warning("pypdf fallback failed (%s); generating placeholder", err, exc_info=False)
-    except Exception as err:  # pragma: nocover - defensive guard rail
-        if primary_error is None:
-            primary_error = err
-        logger.warning("pypdf crashed (%s); generating placeholder", err, exc_info=True)
+    cleaned = clean_text(markdown_content)
+    if not cleaned:
+        raise MarkdownConversionError("Empty content after MarkItDown conversion")
 
-    return _build_placeholder_markdown(primary_error)
-
-
-def _extract_with_pdfplumber(pdf_path: str) -> tuple[str, int, int]:
-    """Primary extractor leveraging pdfplumber for tables + text."""
-    markdown_parts: list[str] = []
-    tables_count = 0
-
-    with pdfplumber.open(pdf_path) as pdf:
-        pages_count = len(pdf.pages)
-
-        for i, page in enumerate(pdf.pages):
-            markdown_parts.append(f"\n## Page {i + 1}\n")
-
-            tables = page.extract_tables()
-            if tables:
-                for table in tables:
-                    tables_count += 1
-                    markdown_parts.append(table_to_markdown(table))
-                    markdown_parts.append("\n")
-
-            text = page.extract_text()
-            if text:
-                markdown_parts.append(clean_text(text))
-                markdown_parts.append("\n")
-
-    return "\n".join(markdown_parts), tables_count, pages_count
-
-
-def _extract_with_pypdf(pdf_path: str) -> tuple[str, int, int]:
-    """Fallback extractor using pypdf when pdfplumber cannot parse the file."""
-    markdown_parts: list[str] = []
-    reader = pypdf.PdfReader(pdf_path, strict=False)
-    pages_count = len(reader.pages)
-
-    for i, page in enumerate(reader.pages):
-        markdown_parts.append(f"\n## Page {i + 1}\n")
-        text = page.extract_text() or ""
-        cleaned = clean_text(text)
-        if cleaned:
-            markdown_parts.append(cleaned)
-            markdown_parts.append("\n")
-
-    return "\n".join(markdown_parts), 0, pages_count
-
-
-def table_to_markdown(table: list) -> str:
-    """Convert a table to Markdown format."""
-    if not table or not table[0]:
-        return ""
-
-    lines = []
-    # Header
-    header = [str(cell or "").strip() for cell in table[0]]
-    lines.append("| " + " | ".join(header) + " |")
-    lines.append("|" + "|".join(["---"] * len(header)) + "|")
-
-    # Rows
-    for row in table[1:]:
-        cells = [str(cell or "").strip().replace("|", "\\|") for cell in row]
-        # Pad if row has fewer cells
-        while len(cells) < len(header):
-            cells.append("")
-        lines.append("| " + " | ".join(cells[: len(header)]) + " |")
-
-    return "\n".join(lines)
+    return cleaned, tables, pages
 
 
 def clean_text(text: str) -> str:
-    """Clean extracted text."""
-    # Remove excessive whitespace
+    """Normalize whitespace in markdown content."""
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r" {2,}", " ", text)
     return text.strip()
 
 
-def _build_placeholder_markdown(error: Exception | None) -> tuple[str, int, int]:
-    """Return a minimal markdown payload when both converters fail."""
-    logger.error(
-        "Conversion failed after all fallbacks; emitting placeholder content (%s)",
-        error,
-        exc_info=False,
-    )
-    message_lines = [
-        "# Document Conversion Error",
-        "",
-        "The ingestion pipeline could not parse this PDF with pdfplumber or pypdf.",
-        "A placeholder artifact was generated so downstream steps can complete.",
-        "",
-        "Please re-upload the original document if you need actual content.",
-    ]
-    if error:
-        message_lines.extend(
-            [
-                "",
-                f"> Conversion error: {error}",
-            ]
-        )
-    return "\n".join(message_lines), 0, 0
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -196,8 +99,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             local_path = tmp.name
 
         # Convert to markdown
-        logger.info(f"Converting {document_id} with pdfplumber")
-        markdown_content, tables_count, pages_count = extract_pdf_to_markdown(local_path)
+        logger.info(f"Converting {document_id} with MarkItDown")
+        try:
+            markdown_content, tables_count, pages_count = extract_pdf_to_markdown(local_path)
+        except (UnsupportedFormatException, FileConversionException, MarkdownConversionError) as err:
+            logger.error("Conversion failed for %s: %s", document_id, err, exc_info=True)
+            raise RuntimeError(f"Conversion failed for {document_id}: {err}") from err
 
         # Upload markdown to S3
         output_prefix = f"processed/{document_id}"
@@ -211,7 +118,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             Metadata={
                 "document_id": document_id,
                 "source_type": source_type,
-                "converter": "pdfplumber",
+                "converter": "markitdown",
             },
         )
         logger.info(f"Uploaded markdown to s3://{PROCESSED_BUCKET}/{markdown_key}")
@@ -221,7 +128,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "document_id": document_id,
             "ingestion_id": ingestion_id,
             "source_type": source_type,
-            "converter": "pdfplumber",
+            "converter": "markitdown",
             "markdown_key": markdown_key,
             "content_length": len(markdown_content),
             "pages_count": pages_count,

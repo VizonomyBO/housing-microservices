@@ -11,6 +11,16 @@ require_var() {
   fi
 }
 
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+DEFAULT_ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.active"}
+if [[ -f "$DEFAULT_ENV_FILE" ]]; then
+  log "Loading env from $DEFAULT_ENV_FILE"
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEFAULT_ENV_FILE"
+  set +a
+fi
+
 require_var AGENT_BASE_URL
 require_var AUTH_BASE_URL
 require_var PROD_DEMO_EMAIL
@@ -18,10 +28,60 @@ require_var PROD_DEMO_PASSWORD
 require_var PROD_DEMO_COUNTRY
 require_var PROD_DEMO_TAG
 
-SMOKE_UPLOAD_FILE=${SMOKE_UPLOAD_FILE:-services/agent-api/tests/data/reduced_e2e/doc_policy.md}
-if [[ ! -f "$SMOKE_UPLOAD_FILE" ]]; then
-  log "Upload file $SMOKE_UPLOAD_FILE not found"
+# ---------------------------------------------------------------------------
+# Upload sources
+# If SMOKE_UPLOAD_FILE is provided, ingest just that file. Otherwise ingest the
+# PDF exports for the reduced_e2e scenario (policy, ledger, KPI).
+# ---------------------------------------------------------------------------
+DEFAULT_UPLOAD_DIR="$ROOT_DIR/services/agent-api/tests/data/reduced_e2e"
+DEFAULT_UPLOAD_BASENAMES=("doc_policy.pdf" "doc_ledger.pdf" "doc_kpi.pdf")
+upload_files=()
+upload_names=()
+cleanup_upload=0
+
+if [[ -n "${SMOKE_UPLOAD_FILE:-}" ]]; then
+  if [[ ! -f "$SMOKE_UPLOAD_FILE" ]]; then
+    log "Upload file $SMOKE_UPLOAD_FILE not found"
+    exit 1
+  fi
+  ext="${SMOKE_UPLOAD_FILE##*.}"
+  tmp_copy="$(mktemp /tmp/prod_smoke_upload_XXXX.${ext})"
+  cp "$SMOKE_UPLOAD_FILE" "$tmp_copy"
+  stamp="$(date -Iseconds)"
+  if [[ "${ext,,}" == "pdf" ]]; then
+    printf '\n%% smoke-run %s\n' "$stamp" >>"$tmp_copy"
+  else
+    printf '\n<!-- smoke-run %s -->\n' "$stamp" >>"$tmp_copy"
+  fi
+  upload_files=("$tmp_copy")
+  upload_names=("Prod Smoke Upload $(date +%s)")
+  cleanup_upload=1
+  log "Copied $SMOKE_UPLOAD_FILE to $tmp_copy with smoke stamp to avoid dedupe"
+else
+  ts="$(date +%s)"
+  for base in "${DEFAULT_UPLOAD_BASENAMES[@]}"; do
+    src="$DEFAULT_UPLOAD_DIR/$base"
+    if [[ ! -f "$src" ]]; then
+      log "Default upload file $src not found"
+      exit 1
+    fi
+    tmp_copy="$(mktemp /tmp/prod_smoke_upload_XXXX.pdf)"
+    cp "$src" "$tmp_copy"
+    stamp="$(date -Iseconds)"
+    printf '\n%% smoke-run %s\n' "$stamp" >>"$tmp_copy"
+    upload_files+=("$tmp_copy")
+    upload_names+=("Prod Smoke ${base%.*} ${ts}")
+    cleanup_upload=1
+    log "Using stamped copy of $src at $tmp_copy to avoid dedupe"
+  done
+fi
+
+if [[ ${#upload_files[@]} -eq 0 ]]; then
+  log "No upload files configured"
   exit 1
+fi
+if [[ $cleanup_upload -eq 1 ]]; then
+  trap 'rm -f "${upload_files[@]}"' EXIT
 fi
 
 USE_INGEST_API=0
@@ -268,35 +328,22 @@ fi
 log "Using conversation $conversation_id"
 
 uploaded_doc_ids=()
-source_ext="${SMOKE_UPLOAD_FILE##*.}"
-upload_name="Prod Smoke Upload $(date +%s)"
-if [[ $USE_INGEST_API -eq 1 ]]; then
-  new_doc_id=$(ingest_upload_document "$SMOKE_UPLOAD_FILE" "$upload_name" "$source_ext")
-  log "Uploaded document via ingestion API: $new_doc_id"
-else
-  new_doc_id=$(agent_upload_document "$SMOKE_UPLOAD_FILE" "$upload_name")
-  log "Uploaded document via Agent API: $new_doc_id"
-fi
-uploaded_doc_ids+=("$new_doc_id")
+for idx in "${!upload_files[@]}"; do
+  file_path="${upload_files[$idx]}"
+  upload_name="${upload_names[$idx]}"
+  source_ext="${file_path##*.}"
+  if [[ $USE_INGEST_API -eq 1 ]]; then
+    new_doc_id=$(ingest_upload_document "$file_path" "$upload_name" "$source_ext")
+    log "Uploaded document via ingestion API: $new_doc_id"
+  else
+    new_doc_id=$(agent_upload_document "$file_path" "$upload_name")
+    log "Uploaded document via Agent API: $new_doc_id"
+  fi
+  uploaded_doc_ids+=("$new_doc_id")
+done
 
-# Fetch seeded documents matching the reduced-e2e tags
-log "Fetching seeded documents"
-docs_resp=$(curl -sS "$AGENT_URL/v1/documents?page=1&page_size=50&tags=$PROD_DEMO_TAG&tags=demo" \
-  -H "Authorization: Bearer $access_token")
-existing_doc_ids=($(echo "$docs_resp" | jq -r '.documents[].document_id'))
-if [[ ${#existing_doc_ids[@]} -eq 0 && ${#uploaded_doc_ids[@]} -eq 0 ]]; then
-  echo "$docs_resp" | jq '.' >&2
-  log "No documents found. Seed the reduced fixtures before running."
-  exit 1
-fi
-
-doc_ids=()
-if [[ ${#uploaded_doc_ids[@]} -gt 0 ]]; then
-  doc_ids+=("${uploaded_doc_ids[@]}")
-fi
-if [[ ${#existing_doc_ids[@]} -gt 0 ]]; then
-  doc_ids+=("${existing_doc_ids[@]}")
-fi
+# Use only freshly uploaded documents to avoid legacy/placeholder noise.
+doc_ids=("${uploaded_doc_ids[@]}")
 
 for doc_id in "${doc_ids[@]}"; do
   attach_payload=$(jq -n --arg doc "$doc_id" '{document_id:$doc, auto_attach_base_docs:false}')
@@ -310,11 +357,13 @@ done
 questions=(
   "What two guardrails did the latest housing memo add for voucher expansion?"
   "Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters."
+  "Sum the total rental assistance disbursed this quarter and highlight the highest-funded city."
   "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."
 )
 prompts=(
   "PROD_SIMPLE_RAG"
   "PROD_REASONING"
+  "PROD_AGGREGATE"
   "PROD_TABLE_SQL"
 )
 
