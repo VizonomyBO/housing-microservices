@@ -1,10 +1,10 @@
 """Database session management for Lambda functions."""
 
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Database configuration from environment
 DATABASE_HOST = os.environ.get("DATABASE_HOST", "localhost")
@@ -23,12 +23,12 @@ def get_database_url() -> str:
 
 
 @asynccontextmanager
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_session() -> AsyncGenerator[AsyncSession]:
     """
     Async context manager for database sessions.
-    
+
     Creates a fresh engine per invocation to avoid event loop issues in Lambda.
-    
+
     Usage:
         async with get_async_session() as session:
             # Use session with shared_data_layer repositories
@@ -42,13 +42,13 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         pool_size=1,
         max_overflow=0,
     )
-    
+
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    
+
     async with session_factory() as session:
         try:
             yield session
@@ -58,4 +58,3 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await engine.dispose()
-

@@ -195,36 +195,6 @@ services:
       - microservices-net
       - public-edge
 
-  marker-service:
-    <<: *service-defaults
-    build:
-      <<: *monorepo-build
-      context: ./services/marker-service
-      dockerfile: Dockerfile
-    profiles:
-      - full
-    ports:
-      - "${MARKER_SERVICE_PORT:-8004}:8004"
-    depends_on:
-      auth-service:
-        condition: service_healthy
-      localstack:
-        condition: service_healthy
-    environment:
-      RAW_DOCUMENTS_BUCKET: ${RAW_DOCUMENTS_BUCKET:-vizonomy-raw-docs-dev}
-      PROCESSED_BUCKET: ${PROCESSED_BUCKET:-vizonomy-processed-dev}
-      USE_LOCALSTACK: ${USE_LOCALSTACK:-1}
-      LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}
-      LOCALSTACK_EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    networks:
-      - microservices-net
-      - localstack-net
-
   localstack:
     <<: *service-defaults
     image: localstack/localstack:latest

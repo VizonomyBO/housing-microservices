@@ -14,9 +14,3 @@ services:
   db-init:
     environment:
       DATABASE_URL: ${DATABASE_URL}
-
-  postgres:
-    profiles: ["disabled"]
-
-  db-shell:
-    profiles: ["disabled"]

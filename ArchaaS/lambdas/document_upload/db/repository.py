@@ -3,16 +3,17 @@ Document Repository for database operations.
 
 Uses asyncpg for async PostgreSQL operations.
 """
+
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import asyncpg
-
 from core.exceptions import DatabaseError
 from core.logging import get_logger
 
 logger = get_logger(__name__)
+
 
 # Database configuration from environment
 def _get_database_url() -> str:
@@ -25,18 +26,19 @@ def _get_database_url() -> str:
     db = os.environ.get("DATABASE_NAME", "housing")
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
+
 DATABASE_URL = _get_database_url()
 
 
 class DocumentRepository:
     """
     Repository for document database operations.
-    
+
     Implements async database access using asyncpg connection pool.
     """
-    
-    _pool: Optional[asyncpg.Pool] = None
-    
+
+    _pool: asyncpg.Pool | None = None
+
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create the connection pool."""
         if self._pool is None:
@@ -51,27 +53,27 @@ class DocumentRepository:
                 logger.error(f"Failed to create database pool: {e}")
                 raise DatabaseError(f"Database connection failed: {e}")
         return self._pool
-    
+
     async def find_by_owner_and_hash(
         self,
         owner_user_id: str,
         content_hash: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Find document by owner_user_id and content_hash for deduplication.
-        
+
         This implements the hash-based deduplication check per the schema:
         Unique constraint on (owner_user_id, content_hash) for user docs.
-        
+
         Args:
             owner_user_id: The document owner's user ID
             content_hash: SHA-256 hash of document content (stored exactly as provided)
-        
+
         Returns:
             Document record if found, None otherwise
         """
         pool = await self._get_pool()
-        
+
         # Full column list per database_schema_persistence_rules.md
         query = """
             SELECT 
@@ -103,32 +105,32 @@ class DocumentRepository:
               AND status NOT IN ('failed', 'archived')
             LIMIT 1
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, owner_user_id, content_hash)
-                
+
                 if row:
                     return dict(row)
                 return None
         except Exception as e:
             logger.error(f"Database query failed: {e}")
             raise DatabaseError(f"Failed to query documents: {e}")
-    
+
     async def create_document(self, document_data: dict[str, Any]) -> dict[str, Any]:
         """
         Create a new document record.
-        
+
         Full column list per database_schema_persistence_rules.md
-        
+
         Args:
             document_data: Document data dictionary with all required fields
-        
+
         Returns:
             Created document record
         """
         pool = await self._get_pool()
-        
+
         query = """
             INSERT INTO documents (
                 id,
@@ -154,7 +156,7 @@ class DocumentRepository:
             )
             RETURNING *
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -177,9 +179,9 @@ class DocumentRepository:
                     json.dumps(document_data.get("metadata", {})),  # Serialize dict to JSON string
                     document_data["created_at"],
                 )
-                
+
                 logger.info(
-                    f"Created document record",
+                    "Created document record",
                     extra={"document_id": document_data["id"]},
                 )
                 return dict(row)
@@ -192,25 +194,25 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to create document: {e}")
             raise DatabaseError(f"Failed to create document: {e}")
-    
+
     async def delete_document(self, document_id: str) -> bool:
         """
         Delete a document record (hard delete for rollback scenarios).
-        
+
         Args:
             document_id: The document ID to delete
-        
+
         Returns:
             True if deleted, False if not found
         """
         pool = await self._get_pool()
-        
+
         query = """
             DELETE FROM documents
             WHERE id = $1
             RETURNING id
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 result = await conn.fetchrow(query, document_id)
@@ -218,26 +220,26 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to delete document: {e}")
             raise DatabaseError(f"Failed to delete document: {e}")
-    
+
     async def update_document_status(
         self,
         document_id: str,
         status: str,
-        ingestion_stage: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        ingestion_stage: str | None = None,
+    ) -> dict[str, Any] | None:
         """
         Update document status and optionally the ingestion stage.
-        
+
         Args:
             document_id: The document ID to update
             status: New status value
             ingestion_stage: Optional new ingestion stage
-        
+
         Returns:
             Updated document record or None if not found
         """
         pool = await self._get_pool()
-        
+
         if ingestion_stage:
             query = """
                 UPDATE documents
@@ -257,7 +259,7 @@ class DocumentRepository:
                 RETURNING *
             """
             params = (document_id, status)
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, *params)
@@ -265,10 +267,9 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to update document status: {e}")
             raise DatabaseError(f"Failed to update document: {e}")
-    
+
     async def close(self) -> None:
         """Close the connection pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
-

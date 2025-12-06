@@ -28,7 +28,12 @@ from agent_api.http.schemas import (
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
 from repositories.conversation_scope_repository import ConversationDocumentRecord
-from services import AttachmentResult, AttachmentService, AttachmentStatus
+from services import (
+    AttachmentResult,
+    AttachmentService,
+    AttachmentStatus,
+    DocumentNotReadyError,
+)
 
 router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 
@@ -87,6 +92,18 @@ async def attach_document(  # pragma: no cover - exercised via HTTP tests
             code="NOT_FOUND",
             message=str(exc),
             status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except DocumentNotReadyError as exc:
+        await db_session.rollback()
+        raise GatewayError(
+            code="DOCUMENT_NOT_READY",
+            message="Document not ready",
+            status_code=status.HTTP_409_CONFLICT,
+            details={
+                "document_id": str(exc.document_id),
+                "status": exc.status,
+                "ingestion_stage": exc.stage,
+            },
         ) from exc
     except ValueError as exc:
         await db_session.rollback()

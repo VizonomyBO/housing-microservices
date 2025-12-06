@@ -41,8 +41,8 @@ resource "aws_lambda_function" "preflight_validator" {
 
   runtime     = "python3.12"
   handler     = "handler.handler"
-  timeout     = 60  # Longer timeout for S3 operations and hash computation
-  memory_size = 1024  # More memory for file processing
+  timeout     = 60   # Longer timeout for S3 operations and hash computation
+  memory_size = 1024 # More memory for file processing
 
   role = aws_iam_role.preflight_validator_lambda.arn
 
@@ -63,17 +63,17 @@ resource "aws_lambda_function" "preflight_validator" {
       PROCESSED_ARTIFACTS_BUCKET = aws_s3_bucket.processed_artifacts.id
       MAX_FILE_SIZE_BYTES        = var.max_file_size_bytes
       # Step Function for document processing
-      STEP_FUNCTION_ARN          = aws_sfn_state_machine.document_ingestion.arn
+      STEP_FUNCTION_ARN = aws_sfn_state_machine.document_ingestion.arn
       # EventBridge for progress events
-      EVENT_BUS_NAME             = aws_cloudwatch_event_bus.ingestion.name
+      EVENT_BUS_NAME = aws_cloudwatch_event_bus.ingestion.name
       # Database connection (using public IP - EC2 SG allows 5432 from 0.0.0.0/0)
-      DATABASE_URL               = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.public_ip}:${var.database_port}/${var.database_name}"
-      DATABASE_HOST              = aws_instance.microservices.public_ip
-      DATABASE_PORT              = var.database_port
-      DATABASE_NAME              = var.database_name
-      DATABASE_USER              = var.database_username
-      DATABASE_PASSWORD          = var.database_password
-      DATABASE_SECRET_ARN        = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
+      DATABASE_URL        = "postgresql://${var.database_username}:${var.database_password}@${aws_instance.microservices.public_ip}:${var.database_port}/${var.database_name}"
+      DATABASE_HOST       = aws_instance.microservices.public_ip
+      DATABASE_PORT       = var.database_port
+      DATABASE_NAME       = var.database_name
+      DATABASE_USER       = var.database_username
+      DATABASE_PASSWORD   = var.database_password
+      DATABASE_SECRET_ARN = var.create_database_secret ? aws_secretsmanager_secret.database[0].arn : ""
     }
   }
 
@@ -92,6 +92,7 @@ resource "aws_lambda_function" "preflight_validator" {
     aws_iam_role_policy_attachment.preflight_validator_basic,
     aws_iam_role_policy_attachment.preflight_validator_vpc,
     aws_lambda_layer_version.python_deps,
+    aws_lambda_layer_version.shared_data_layer,
   ]
 }
 
@@ -184,7 +185,7 @@ resource "aws_iam_role_policy" "preflight_validator_s3" {
         Action = [
           "s3:GetObject",
           "s3:HeadObject",
-          "s3:DeleteObject"  # For deleting duplicate files
+          "s3:DeleteObject" # For deleting duplicate files
         ]
         Resource = [
           "${aws_s3_bucket.raw_documents.arn}/*"
@@ -298,4 +299,3 @@ output "processed_artifacts_bucket_arn" {
   description = "ARN of the processed artifacts S3 bucket"
   value       = aws_s3_bucket.processed_artifacts.arn
 }
-

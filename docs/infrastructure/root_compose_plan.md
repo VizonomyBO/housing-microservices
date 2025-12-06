@@ -6,6 +6,7 @@
   - `full`: boots Postgres + auth-service + user-service + swagger-service + agent-api + marker-service + shared dependencies (Valkey, LocalStack, telemetry exporters).
   - `reduced`: limits startup to agent-api, its `db-init` helper, and Postgres with the Epic 3.5 feature flags to keep text-only, no-Valkey mode.
 - Keep parity with the legacy reduced-scope experience (seed scripts, `uv` runtime, pgvector) while paving the path to retire the old service-scoped reduced Compose file.
+- Marker-service is legacy—keep it off by default unless a task explicitly calls for that legacy flow.
 
 ## 2. Service & Dependency Inventory
 | Component | Runtime / Image | Ports | Build Context | Critical Dependencies | Notes |
@@ -16,7 +17,6 @@
 | `auth-service` | Python 3.11 Flask | 5000 (host 5001) | `services/auth-service` | Postgres `auth_db`, Argon2/libpq packages | Already exposes health endpoint for Compose healthcheck; reuse.
 | `user-service` | Python 3.11 Flask | 5001 (host 5002) | `services/user-service` | Depends on auth-service API + Postgres `auth_db` | Share JWT + CORS envs with auth-service.
 | `swagger-service` | Node 20 | 3000 | `services/swagger-service` | Depends on auth-service + user-service HTTP endpoints | Provide optional dev profile for hot reload stack.
-| `marker-service` | Python 3.12 FastAPI | 8004 | `services/marker-service` | S3 via boto3, OpenAI API | Requires LocalStack endpoints for S3/EventBridge in local mode.
 | `localstack` | `localstack/localstack` | 4566 edge | root (new) | AWS emulation for S3, EventBridge, SES, SQS | Toggle through `USE_LOCALSTACK` and route SDKs via `localhost.localstack.cloud`/shared network.¹
 | `valkey` (future) | `valkey/valkey` or AWS serverless proxy | 6379 | root (new) | Agent API caching, rate limiting | Keep container gated behind `full` profile until queues/worker tasks return.
 | `otel-collector` (optional) | OpenTelemetry collector | 4317 | root (new) | Receives traces/metrics from services | Helps keep architecture parity with production monitoring.
@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | `default` | Postgres + auth + user + swagger (maintains todays behavior). | `postgres`, `auth-service`, `user-service`, `swagger-service`.
 | `agent-api` | Reduced Epic 3.5 demo stack. | `postgres`, `db-init`, `agent-api` (+ optional `db-shell`).
-| `full` | All services plus LocalStack, Valkey, observability. | `default` services + `agent-api`, `marker-service`, `valkey`, `localstack`, `otel-collector`.
+| `full` | All services plus LocalStack, Valkey, observability. | `default` services + `agent-api`, `valkey`, `localstack`, `otel-collector`. (Marker removed.) |
 | `aws-mock` | Enables LocalStack without the rest of `full`. | `localstack` (reusable for CI smoke tests).
 | `ops` | Long-running helpers (db-shell, seed-only jobs). | `db-shell`, `db-init` reruns, migration runners.
 
@@ -90,7 +90,7 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
   - `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` use dummy values when `USE_LOCALSTACK=1`.
   - `LOCALSTACK_HOST=localstack`, `LOCALSTACK_EDGE_PORT=4566`, `AWS_ENDPOINT_URL=http://localstack:4566` (or `http://localhost.localstack.cloud:4566` for host tools).¹
 - Services that currently touch AWS:
-  - `marker-service`: S3 uploads via boto3 → set `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
+  - Marker-service removed (legacy).
   - Future restoration of ingestion Lambdas/agent workers: plan placeholders for EventBridge/S3/SQS.
 - Networking considerations: attach application services and LocalStack to the same user-defined bridge so DNS `localstack` resolves correctly.¹
 
@@ -116,7 +116,7 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
 - Secrets governance: once LocalStack toggles land, need a plan for storing AWS credentials for prod vs dev to avoid leaking real keys into `.env`.
 
 ## 8. Testing & Validation Approach
-- `docker compose --profile agent-api config` (lint), `docker compose --profile agent-api up --build agent-api db-init` (demo smoke), `docker compose --profile full up marker-service localstack valkey` (AWS mock smoke).
+- `docker compose --profile agent-api config` (lint), `docker compose --profile agent-api up --build agent-api db-init` (demo smoke).
 - Reuse existing scripts:
   - `services/agent-api/scripts/verify_reduced_scope_compose.sh` should wrap the root compose file.
   - Future Task 02 should add a root-level `scripts/verify_root_compose.sh` that runs `docker compose config` + targeted pytest suites.

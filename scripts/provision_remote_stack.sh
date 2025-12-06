@@ -7,7 +7,16 @@ set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TF_DIR="$ROOT_DIR/ArchaaS"
-ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.prod.aws"}
+DEFAULT_ENV_FILE="$ROOT_DIR/.env.active"
+FALLBACK_ENV_FILE="$ROOT_DIR/.env.prod.aws"
+ENV_FILE=${ENV_FILE:-}
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$DEFAULT_ENV_FILE" ]]; then
+    ENV_FILE="$DEFAULT_ENV_FILE"
+  else
+    ENV_FILE="$FALLBACK_ENV_FILE"
+  fi
+fi
 TF_VARS_FILE=${TF_VARS_FILE:-terraform.v2.tfvars}
 TF_WORKSPACE=${TF_WORKSPACE:-prod}
 DESTROY_FIRST=0

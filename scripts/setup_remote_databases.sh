@@ -6,7 +6,16 @@ set -euo pipefail
 # installs extensions, and runs migrations for both stacks).
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.prod.aws"}
+DEFAULT_ENV_FILE="$ROOT_DIR/.env.active"
+FALLBACK_ENV_FILE="$ROOT_DIR/.env.prod.aws"
+ENV_FILE=${ENV_FILE:-}
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$DEFAULT_ENV_FILE" ]]; then
+    ENV_FILE="$DEFAULT_ENV_FILE"
+  else
+    ENV_FILE="$FALLBACK_ENV_FILE"
+  fi
+fi
 
 if [[ -f "$ENV_FILE" ]]; then
   echo "Loading env vars from $ENV_FILE"
@@ -135,13 +144,10 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Drop foreign keys that reference users.user_id so we can alter types
-    IF to_regclass('public.refresh_tokens_user_id_fkey') IS NOT NULL THEN
-        ALTER TABLE IF EXISTS refresh_tokens DROP CONSTRAINT refresh_tokens_user_id_fkey;
-    END IF;
-    IF to_regclass('public.users_created_by_fkey') IS NOT NULL THEN
-        ALTER TABLE IF EXISTS users DROP CONSTRAINT users_created_by_fkey;
-    END IF;
+    -- Drop foreign keys that reference users.user_id so we can alter types.
+    -- to_regclass() does not work for constraints, so rely on IF EXISTS clauses.
+    ALTER TABLE IF EXISTS refresh_tokens DROP CONSTRAINT IF EXISTS refresh_tokens_user_id_fkey;
+    ALTER TABLE IF EXISTS users DROP CONSTRAINT IF EXISTS users_created_by_fkey;
 
     -- Convert primary key to UUIDs using the deterministic namespace used by Lambdas
     ALTER TABLE users ALTER COLUMN user_id DROP DEFAULT;

@@ -104,18 +104,14 @@ resource "aws_lambda_function" "marker_converter" {
   function_name = "${var.project_name}-marker-converter-${var.environment}"
   role          = aws_iam_role.marker_converter_lambda.arn
 
-  filename         = data.archive_file.marker_converter.output_path
-  source_code_hash = data.archive_file.marker_converter.output_base64sha256
+  package_type = "Image"
+  image_uri    = "${aws_ecr_repository.marker_converter.repository_url}:${var.marker_converter_image_tag}"
+  image_config {
+    command = ["handler.handler"]
+  }
 
-  runtime     = "python3.12"
-  handler     = "handler.handler"
   timeout     = 120
   memory_size = 512
-
-  layers = [
-    aws_lambda_layer_version.python_deps.arn,
-    aws_lambda_layer_version.shared_data_layer.arn,
-  ]
 
   environment {
     variables = {

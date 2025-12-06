@@ -51,7 +51,7 @@ DEMO_DOCUMENTS = (
         content="""
         ## Housing Stability Update 2024
         - Rental assistance expanded across three pilot cities: Arroyo Vista, Brookhaven, and District 9.
-        - Pillar metrics improved 14% after community land trust adoption; District 9’s land trust now owns 210 units.
+        - Pillar metrics improved 14% after community land trust adoption; District 9's land trust now owns 210 units.
         - Text-only context is optimized for LangGraph demos so analysts can trace every recommendation back to the memo.
         """.strip(),
         source_uri="https://example.com/demo/housing-stability",
@@ -63,10 +63,10 @@ DEMO_DOCUMENTS = (
         language="en",
         content="""
         ### Voucher Expansion Guardrails
-        1. **Equity Cap:** No more than 65% of a borough’s total vouchers may be allocated to a single developer; excess vouchers must be rebalanced within 30 days.
+        1. **Equity Cap:** No more than 65% of a borough's total vouchers may be allocated to a single developer; excess vouchers must be rebalanced within 30 days.
         2. **Affordability Floor:** Any building that receives expansion vouchers must prove tenants spend **< 35%** of income on rent after subsidies; automatic clawbacks trigger if the ratio exceeds 40% for two consecutive months.
 
-        The memo also directs housing teams to pair the guardrails with District 9’s community land trust so voucher families can graduate into permanently affordable units once their arrears fall below $500.
+        The memo also directs housing teams to pair the guardrails with District 9's community land trust so voucher families can graduate into permanently affordable units once their arrears fall below $500.
         """.strip(),
         source_uri="https://example.com/demo/voucher-guardrails",
         tags=("demo", "policy", "voucher"),

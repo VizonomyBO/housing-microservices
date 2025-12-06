@@ -202,9 +202,7 @@ class ResultValidatorNode:
         flags = state.reduced_scope_flags
         if state.requires_sql:
             if flags.should_skip_capability("numerical"):
-                add_metadata(
-                    reduced_scope_sql_override=True, capability="numerical_validator"
-                )
+                add_metadata(reduced_scope_sql_override=True, capability="numerical_validator")
             return None
         if not flags.should_skip_capability("numerical"):
             return None
@@ -223,7 +221,6 @@ class ResultValidatorNode:
             "next_subgraph": "informational_subgraph",
             "guardrails_passed": True,
         }
-
 
     def _merge_trace(self, state: AgentState, **entries: Any) -> dict[str, Any]:
         trace = dict(state.numerical_trace)

@@ -4,7 +4,7 @@
 Run auth-service and user-service locally against the AWS Postgres host so JWT login works without manual tokens when the stack points at AWS. Ensure `.env*` files reflect the remote DB and any required hostnames/ports.
 
 ## Current state (context to avoid re-discovery)
-- AWS stack live: API Gateway `https://gs6w1i52n4.execute-api.us-east-1.amazonaws.com/dev2`; raw bucket `vizonomy-v2-raw-docs-dev2-4fd5a20a`; processed bucket `vizonomy-v2-processed-artifacts-dev2-4fd5a20a`; Postgres on EC2 `44.216.103.232:5432` (`housing`, `auth_db`, user/pass `vizonomy_user`/`iSQOjvXTBzJBcGCCt4koPDno`).
+- AWS stack live: API Gateway `https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2`; raw bucket `vizonomy-v2-raw-docs-dev2-4fd5a20a`; processed bucket `vizonomy-v2-processed-artifacts-dev2-4fd5a20a`; Postgres on EC2 `52.207.140.87:5432` (`housing`, `auth_db`, user/pass `vizonomy_user`/`iSQOjvXTBzJBcGCCt4koPDno`).
 - Compose already points agent-api at AWS via `.env.prod.aws` with `USE_LOCALSTACK=0`.
 - AWS smoke is passing; tracker Step 9 is done. Real PDF lives at `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf`.
 - Many files are dirty in git; do not revert unrelated work.
@@ -27,4 +27,5 @@ Run auth-service and user-service locally against the AWS Postgres host so JWT l
 - Notes in tracker row 10 and, if needed, short deltas in the next task prompt. Evidence: curl/login output or log snippet.
 
 ## Hand-off
-- If anything shifts (ports, hosts, env var names), edit `task_prompts/11_env_switching.md` to reflect new defaults. Keep plan/tracker/AGENTS consistent. 
+- If anything shifts (ports, hosts, env var names), edit `task_prompts/11_env_switching.md` to reflect new defaults. Keep plan/tracker/AGENTS consistent.
+- Once the task is finished, commit all files added/edited by this thread.

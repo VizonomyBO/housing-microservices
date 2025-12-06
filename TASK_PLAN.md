@@ -23,11 +23,11 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 6. **State-machine data retention (Dec 2025 directive)** – Capture the original document-upload payload at the top of `document_ingestion_workflow.asl.json` (e.g., `Pass` state that writes `$.request = $`) and reference optional inputs such as `callback_url` from `$.request`. This keeps DeadLetter / EmitFailureEvent / ingestion_finalizer from crashing when later tasks overwrite the root input, matching AWS Step Functions guidance on `ResultPath`.
 7. **AWS run discipline** – `/tmp/aws_flow.sh` uploads a document every invocation. After a timeout or failure, **do not re-upload**; instead continue polling `/v1/documents?content_hash=…` with the last hash, inspect the existing Step Functions execution via `aws stepfunctions describe-execution`, and pull Lambda CloudWatch logs. Only register a new document once we intentionally reset the test or change inputs.
 
-## Session Focus – 2025‑02‑?? (Step 9: AWS Smoke Script + Evidence)
+## Session Focus – 2025‑02‑?? (Step 9: AWS Smoke Script + Evidence, completed via Task 14)
 - **Scope:** Finish tracker Step 9 by running the documented AWS curl walkthrough plus `scripts/prod_smoke_check.sh` against the real stack (no LocalStack fallback this round). Compose already targets AWS; reuse `.env.prod.aws` as-is.
 - **Plan references:** `docs/runbooks/prod_setup.md` §§5–6 (curl + smoke walkthrough), `scripts/prod_smoke_check.sh` inline docs, and `prod_sample_run.json` for prior evidence expectations.
 - **Key tasks:**
-  1. Generate a unique PDF for the run (e.g., copy `/tmp/sample.pdf` and append a timestamp) so ingestion bypasses content-hash dedupe.
+  1. Generate a unique PDF for the run (e.g., copy `/tmp/sample.pdf` and append a timestamp) so ingestion bypasses content-hash dedupe. (Completed: smoke now uses stamped PDFs and the FastAPI ingestion service at `http://52.207.140.87:8085`.)
   2. Execute the manual curl flow end-to-end (login, upload, poll `/v1/documents`, attach, SSE). Capture output snippets plus doc/conversation IDs for the tracker.
   3. Run `scripts/prod_smoke_check.sh` in AWS mode; if it initially times out, inspect Step Functions + document status, adjust the helper (poll windows, dedupe bypass) per findings, and re-run until it succeeds.
   4. Update `prod_sample_run.json` with fresh evidence (doc IDs, timestamps, SSE summary) and log the filesystem paths under `/tmp/aws_ingest_logs/` (or new dir) for reviewers.

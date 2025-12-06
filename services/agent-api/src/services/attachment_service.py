@@ -36,6 +36,16 @@ class AttachmentResult:
     message: str | None = None
 
 
+class DocumentNotReadyError(RuntimeError):
+    """Raised when a document is still ingesting and cannot be attached."""
+
+    def __init__(self, document_id: UUID, status: str | None, stage: str | None):
+        super().__init__("Document is still ingesting")
+        self.document_id = document_id
+        self.status = status
+        self.stage = stage
+
+
 class AttachmentService:
     """Manages conversation attachments under text-only constraints."""
 
@@ -71,6 +81,7 @@ class AttachmentService:
         document = await self._session.get(Document, _as_uuid(document_id))
         if document is None:
             raise LookupError("Document not found")
+        self._ensure_document_ready(document)
 
         auto_attached = []
         if auto_attach_base_docs:
@@ -181,6 +192,10 @@ class AttachmentService:
         document.metadata_ = metadata
         await self._session.flush()
 
+    def _ensure_document_ready(self, document: Document) -> None:
+        if document.status != "active" or document.ingestion_stage != "activate":
+            raise DocumentNotReadyError(document.id, document.status, document.ingestion_stage)
+
 
 def _as_uuid(value: str | UUID) -> UUID:
     return value if isinstance(value, UUID) else UUID(str(value))
@@ -190,4 +205,5 @@ __all__ = [
     "AttachmentResult",
     "AttachmentService",
     "AttachmentStatus",
+    "DocumentNotReadyError",
 ]

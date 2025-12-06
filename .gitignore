@@ -52,6 +52,8 @@ dist/
 .env
 .env.local
 .env.prod*
+.env.active
+.env.active.mode
 .env.*.local
 .venv
 .venv.tooling/

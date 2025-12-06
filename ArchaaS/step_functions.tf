@@ -7,14 +7,14 @@ resource "aws_sfn_state_machine" "document_ingestion" {
 
   definition = templatefile("${path.module}/step_functions/document_ingestion_workflow.asl.json", {
     # NOTE: Preflight validation now runs via S3 trigger BEFORE this Step Function starts
-    MarkerConverterLambdaArn     = aws_lambda_function.marker_converter.arn
-    ChunkBuilderLambdaArn        = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chunk-builder-${var.environment}"
-    TableNormalizerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-table-normalizer-${var.environment}"
-    FigureCaptionerLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-figure-captioner-${var.environment}"
-    EmbeddingWriterLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-embedding-writer-${var.environment}"
-    IndexRefresherLambdaArn      = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-index-refresher-${var.environment}"
-    IngestionFinalizerLambdaArn  = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-ingestion-finalizer-${var.environment}"
-    EventBusName                 = aws_cloudwatch_event_bus.ingestion.name
+    MarkerConverterLambdaArn    = aws_lambda_function.marker_converter.arn
+    ChunkBuilderLambdaArn       = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chunk-builder-${var.environment}"
+    TableNormalizerLambdaArn    = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-table-normalizer-${var.environment}"
+    FigureCaptionerLambdaArn    = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-figure-captioner-${var.environment}"
+    EmbeddingWriterLambdaArn    = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-embedding-writer-${var.environment}"
+    IndexRefresherLambdaArn     = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-index-refresher-${var.environment}"
+    IngestionFinalizerLambdaArn = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-ingestion-finalizer-${var.environment}"
+    EventBusName                = aws_cloudwatch_event_bus.ingestion.name
   })
 
   logging_configuration {
@@ -33,6 +33,9 @@ resource "aws_sfn_state_machine" "document_ingestion" {
     Service     = "ingestion-pipeline"
   }
 }
+
+# The preflight validator Lambda starts this state machine after deduplication succeeds,
+# so we intentionally avoid wiring S3 events directly to Step Functions.
 
 # CloudWatch Log Group for Step Function
 resource "aws_cloudwatch_log_group" "step_function" {
@@ -170,110 +173,6 @@ resource "aws_iam_role_policy" "step_function_xray" {
   })
 }
 
-# EventBridge Rule to trigger Step Function from S3 events
-resource "aws_cloudwatch_event_rule" "s3_upload_trigger" {
-  name        = "${var.project_name}-s3-upload-trigger-${var.environment}"
-  description = "Triggers ingestion pipeline when documents are uploaded to S3"
-
-  event_pattern = jsonencode({
-    source      = ["aws.s3"]
-    detail-type = ["Object Created"]
-    detail = {
-      bucket = {
-        name = [aws_s3_bucket.raw_documents.id]
-      }
-      object = {
-        key = [{
-          prefix = "raw/"
-        }]
-      }
-    }
-  })
-
-  tags = {
-    Name        = "${var.project_name}-s3-upload-trigger"
-    Environment = var.environment
-  }
-}
-
-# EventBridge Target - Step Function
-resource "aws_cloudwatch_event_target" "step_function" {
-  rule      = aws_cloudwatch_event_rule.s3_upload_trigger.name
-  target_id = "DocumentIngestionStateMachine"
-  arn       = aws_sfn_state_machine.document_ingestion.arn
-  role_arn  = aws_iam_role.eventbridge_sfn.arn
-
-  # Transform S3 event to Step Function input
-  input_transformer {
-    input_paths = {
-      s3_bucket = "$.detail.bucket.name"
-      s3_key    = "$.detail.object.key"
-      etag      = "$.detail.object.etag"
-      time      = "$.time"
-    }
-    input_template = <<EOF
-{
-  "ingestion_id": <s3_key>,
-  "s3_bucket": <s3_bucket>,
-  "s3_key": <s3_key>,
-  "trace_id": "trace-<etag>",
-  "timestamps": {
-    "uploaded_at": <time>
-  },
-  "retries": {
-    "preflight": 0,
-    "convert": 0,
-    "chunk": 0,
-    "embed": 0
-  }
-}
-EOF
-  }
-}
-
-# IAM Role for EventBridge to start Step Function
-resource "aws_iam_role" "eventbridge_sfn" {
-  name = "${var.project_name}-eventbridge-sfn-role-${var.environment}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "events.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.project_name}-eventbridge-sfn-role"
-    Environment = var.environment
-  }
-}
-
-resource "aws_iam_role_policy" "eventbridge_sfn" {
-  name = "${var.project_name}-eventbridge-sfn-policy"
-  role = aws_iam_role.eventbridge_sfn.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "states:StartExecution"
-        ]
-        Resource = [
-          aws_sfn_state_machine.document_ingestion.arn
-        ]
-      }
-    ]
-  })
-}
-
 # Outputs
 output "step_function_arn" {
   description = "ARN of the document ingestion Step Function"
@@ -289,4 +188,3 @@ output "ingestion_event_bus_name" {
   description = "Name of the ingestion EventBridge event bus"
   value       = aws_cloudwatch_event_bus.ingestion.name
 }
-

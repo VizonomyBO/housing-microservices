@@ -1,6 +1,11 @@
 """Service-layer helpers for the Agent API."""
 
-from .attachment_service import AttachmentResult, AttachmentService, AttachmentStatus
+from .attachment_service import (
+    AttachmentResult,
+    AttachmentService,
+    AttachmentStatus,
+    DocumentNotReadyError,
+)
 from .checkpoint_service import CheckpointService
 from .conversation_service import (
     ConversationEnsureResult,
@@ -59,6 +64,7 @@ __all__ = [
     "DemoResetService",
     "DocumentListEntry",
     "DocumentListingService",
+    "DocumentNotReadyError",
     "DocumentPurgeResult",
     "DocumentUploadData",
     "DocumentUploadResult",

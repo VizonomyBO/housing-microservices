@@ -91,6 +91,20 @@ async def base_document(session_factory) -> Document:
         return doc
 
 
+@pytest.fixture
+async def pending_document(session_factory) -> Document:
+    async with session_factory() as session:
+        await session.begin()
+        doc = await DocumentFactory.create_async(
+            session=session,
+            chunk_count=1,
+            status="ingesting",
+            ingestion_stage="chunk",
+        )
+        await session.commit()
+        return doc
+
+
 @pytest.mark.asyncio
 async def test_attach_document_success(
     api_client: AsyncClient, conversation: Conversation, text_document: Document, session_factory
@@ -140,6 +154,24 @@ async def test_rejects_non_text_attachments(
     assert resp.headers.get("Retry-After") == "86400"
     body = resp.json()
     assert body["status"] == "FEATURE_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_rejects_document_until_ingestion_complete(
+    api_client: AsyncClient,
+    conversation: Conversation,
+    pending_document: Document,
+) -> None:
+    resp = await api_client.post(
+        f"/v1/conversations/{conversation.id}/attachments",
+        json={"document_id": str(pending_document.id)},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 409
+    payload = resp.json()
+    assert payload["error"]["code"] == "DOCUMENT_NOT_READY"
+    assert payload["error"]["details"]["status"] == "ingesting"
+    assert payload["error"]["details"]["ingestion_stage"] == "chunk"
 
 
 @pytest.mark.asyncio

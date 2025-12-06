@@ -576,16 +576,8 @@ async def _run_prompts(
         done_payload = completion.done_payload or {}
         trace = done_payload.get("numerical_trace") or {}
         requires_sql = bool(done_payload.get("requires_sql"))
-        sql_queries = list(
-            done_payload.get("sql_queries")
-            or trace.get("sql_queries")
-            or []
-        )
-        table_results = list(
-            done_payload.get("table_results")
-            or trace.get("table_results")
-            or []
-        )
+        sql_queries = list(done_payload.get("sql_queries") or trace.get("sql_queries") or [])
+        table_results = list(done_payload.get("table_results") or trace.get("table_results") or [])
         executor = trace.get("executor") or {}
         sql_row_count = done_payload.get("sql_row_count")
         if sql_row_count is None:

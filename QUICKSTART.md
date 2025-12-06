@@ -20,7 +20,7 @@ Edit `.env` to set secure passwords, JWT secrets, and AWS credentials (if you pl
 | --- | --- | --- |
 | Reduced Agent API demo | `docker compose --profile reduced up --build agent-api` | Postgres + db-init + agent-api + db-shell + LocalStack for AWS mocks. |
 | Full platform | `docker compose --profile full up --build` | All services (auth, user, swagger, agent, marker), LocalStack, Valkey, otel-collector. |
-| Default (auth + user + swagger) | `docker compose up --build` | Legacy stack without agent-api or marker-service. |
+| Default (auth + user + swagger) | `docker compose up --build` | Legacy stack without agent-api (marker removed). |
 
 Set `STACK_PROFILE=reduced` or `STACK_PROFILE=full` in your shell (or `.env`) so services know which runtime to activate. Override `COMPOSE_PROFILES` if you need extra helpers (e.g., `COMPOSE_PROFILES=full,ops`).
 
@@ -50,7 +50,7 @@ Once healthy, visit:
 
 ## 6. LocalStack vs AWS
 - LocalStack is enabled by default (`USE_LOCALSTACK=1`).
-- To use real AWS, set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env`, then restart services that talk to AWS (`docker compose restart agent-api marker-service`).
+- To use real AWS, set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env`, then restart services that talk to AWS (`docker compose restart agent-api`).
 
 ## 7. Tear Down & Troubleshooting
 ```bash

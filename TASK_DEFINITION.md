@@ -21,14 +21,14 @@ This repository currently uses a reduced-scope shortcut where Markdown text is w
 ### Task Order (updated)
 1. EC2 deployment and AWS smoke (Task 12, done)
 2. **Enforce SQL/Polars for numeric reasoning** (Task 13) – auto-extract numeric facts via LLM into tables and route numeric prompts through Polars/SQL.
-3. **Replace Lambda ingestion with a FastAPI service on EC2** (Task 14) – drop the Lambda/S3 flow, add a synchronous MarkItDown-based ingestion API compatible with the existing contract, and wire all services/smoke to it.
+3. **Replace Lambda ingestion with a FastAPI service on EC2** (Task 14 – done) – drop the Lambda/S3 flow, add a synchronous MarkItDown-based ingestion API compatible with the existing contract, and wire all services/smoke to it.
 4. LocalStack verification (Task 15) – end-to-end ingestion + smoke in LocalStack.
 5. Cleanup & quality gates (Task 16) – lint/type/tests and final cleanup.
 
 ### Current State
-- `POST /v1/documents/upload` (FastAPI) only ingests Markdown text synchronously. PDF/table/image ingestion is disabled.
-- The ArchaaS Step Functions pipeline exists but several Lambdas are placeholders, so documents never progress to `status='active'`.
-- `docs/runbooks/prod_setup.md` only describes the simplified flow; it now needs a full ingestion + curl walkthrough for both LocalStack and AWS.
+- Lambda/S3 ingestion has been replaced by a FastAPI ingestion service running on the EC2 host (`INGEST_BASE_URL=http://52.207.140.87:8085`); smoke uploads go through this service and complete end-to-end (docs active + chat).
+- Legacy ArchaaS Step Functions remain but are bypassed for prod flows; API Gateway endpoint is deprecated in favor of the new service.
+- `docs/runbooks/prod_setup.md` documents the new ingestion curl flow (presign via FastAPI → form upload → poll → attach → chat).
 
 ### Desired State
 1. Uploads go through the ArchaaS ingestion API (via API Gateway) in both LocalStack and AWS.

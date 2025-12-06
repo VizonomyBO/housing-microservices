@@ -60,6 +60,7 @@ class FakeScopeRepository:
     ):
         return self._previews
 
+
 class FakeWorkflowRepo:
     def __init__(self, workflows: dict[str, FakeWorkflow]):
         self._workflows = workflows

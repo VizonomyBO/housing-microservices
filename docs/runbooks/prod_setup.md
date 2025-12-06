@@ -35,7 +35,7 @@ Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && s
     }
     ```
     Expect `requires_sql: true` for KPI/ledger prompts and nodes `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`.
-- **Ingestion FastAPI service (INGEST_BASE_URL)**
+- **Ingestion FastAPI service (INGEST_BASE_URL, port 8085)**
   - Presign: `POST /v1/documents/upload` with JSON:
     ```json
     {
@@ -148,7 +148,7 @@ The commands below run entirely against the live AWS endpoints and the new inges
    Confirm `requires_sql:true` and the numerical nodes appear in the SSE stream.
 
 ## 6) Automated smoke (multi-PDF)
-Run the helper in AWS mode to upload **all three** PDFs (`doc_policy.pdf`, `doc_ledger.pdf`, `doc_kpi.pdf`), poll until `active`, attach, and fire three prompts. Each upload is copied to `/tmp/prod_smoke_upload_XXXX.pdf` to avoid dedupe.
+Run the helper in AWS mode to upload **all three** PDFs (`doc_policy.pdf`, `doc_ledger.pdf`, `doc_kpi.pdf`) via the FastAPI ingestion service, poll until `active`, attach, and fire three prompts. Each upload is copied to `/tmp/prod_smoke_upload_XXXX.pdf` to avoid dedupe.
 ```bash
 ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
 ```

@@ -228,28 +228,23 @@ class LangGraphChatRunner:
         tables: list[NumericalTable] = []
         for document in scope.documents:
             parsed = self._parse_markdown_table(document)
-            if parsed is None:
+            fact_rows: list[dict[str, Any]] = []
+            if parsed is not None:
+                headers, rows = parsed
+                if rows:
+                    column_names = self._normalize_columns(headers)
+                    fact_rows = self._rows_from_markdown(column_names, rows)
+            if not fact_rows:
+                fact_rows = self._extract_numeric_facts(document)
+            if not fact_rows:
                 continue
-            headers, rows = parsed
-            if not rows:
-                continue
-            column_names = self._normalize_columns(headers)
-            converted_rows: list[dict[str, Any]] = []
-            for row_values in rows:
-                converted: dict[str, Any] = {}
-                for name, value in zip(column_names, row_values, strict=False):
-                    converted[name] = self._convert_cell_value(value)
-                converted_rows.append(converted)
+
+            sample_row = fact_rows[0]
             columns = []
-            sample_row = converted_rows[0]
-            for name in column_names:
-                sample_value = sample_row.get(name)
-                columns.append(
-                    NumericalTableColumn(
-                        name=name,
-                        data_type="float" if isinstance(sample_value, (int, float)) else "text",
-                    )
-                )
+            for name, sample_value in sample_row.items():
+                data_type = "float" if isinstance(sample_value, (int, float)) else "text"
+                columns.append(NumericalTableColumn(name=name, data_type=data_type))
+
             alias = self._slugify(document.canonical_name or f"table_{len(tables) + 1}")
             tables.append(
                 NumericalTable(
@@ -257,16 +252,25 @@ class LangGraphChatRunner:
                     table_name=document.canonical_name or "Numerical Table",
                     alias=alias,
                     columns=columns,
-                    row_count=len(converted_rows),
-                    sample_rows=converted_rows[:5],
+                    row_count=len(fact_rows),
+                    sample_rows=fact_rows[:5],
                     metadata={
                         "document_ids": [document.document_id],
                         "chunk_ids": [chunk.chunk_id for chunk in document.chunks][:1],
-                        "rows": converted_rows,
+                        "rows": fact_rows,
                     },
                 )
             )
         return tables
+
+    def _rows_from_markdown(self, column_names: list[str], rows: list[list[str]]) -> list[dict[str, Any]]:
+        converted_rows: list[dict[str, Any]] = []
+        for row_values in rows:
+            converted: dict[str, Any] = {}
+            for name, value in zip(column_names, row_values, strict=False):
+                converted[name] = self._convert_cell_value(value)
+            converted_rows.append(converted)
+        return converted_rows
 
     def _parse_markdown_table(
         self, document: AttachmentDocument
@@ -299,6 +303,45 @@ class LangGraphChatRunner:
             seen[base] = count + 1
             normalized.append(f"{base}_{count}" if count else base)
         return normalized
+
+    def _extract_numeric_facts(self, document: AttachmentDocument) -> list[dict[str, Any]]:
+        """Extract loose numeric facts from arbitrary text so we always have a table."""
+        facts: list[dict[str, Any]] = []
+        for chunk in document.chunks or []:
+            for line in chunk.text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                matches = re.finditer(
+                    r"(?P<label>[^0-9]{0,80}?)(?P<number>[-+]?[0-9]+(?:\\.[0-9]+)?)(?P<suffix>[kKmMbB%]?)",
+                    line,
+                )
+                for match in matches:
+                    number = match.group("number")
+                    suffix = match.group("suffix")
+                    label = match.group("label").strip() or "value"
+                    try:
+                        value = float(number)
+                        if suffix.lower() == "k":
+                            value *= 1_000
+                        elif suffix.lower() == "m":
+                            value *= 1_000_000
+                        elif suffix.lower() == "b":
+                            value *= 1_000_000_000
+                        elif suffix == "%":
+                            value = value
+                    except ValueError:
+                        continue
+                    facts.append(
+                        {
+                            "label": label[:120],
+                            "value": int(value) if value.is_integer() else value,
+                            "unit": "%" if suffix == "%" else "",
+                            "source_doc": document.document_id,
+                            "raw": line[:240],
+                        }
+                    )
+        return facts
 
     def _convert_cell_value(self, value: str) -> Any:
         stripped = value.strip()

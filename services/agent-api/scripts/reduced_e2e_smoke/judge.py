@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, Sequence
+from typing import Protocol, SupportsFloat
 
 from openai import AsyncOpenAI, OpenAIError
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -144,9 +145,13 @@ class LLMPromptJudge(PromptJudge):
             )
         addresses = bool(data.get("addresses_question"))
         grounded = bool(
-            data.get("grounded_in_documents") if "grounded_in_documents" in data else data.get("supported_by_documents")
+            data.get("grounded_in_documents")
+            if "grounded_in_documents" in data
+            else data.get("supported_by_documents")
         )
-        unsupported_raw = data.get("unsupported_claims") or data.get("issues") or data.get("problems")
+        unsupported_raw = (
+            data.get("unsupported_claims") or data.get("issues") or data.get("problems")
+        )
         unsupported = _coerce_list(unsupported_raw)
         summary = data.get("summary") or data.get("explanation") or data.get("notes")
         score = _coerce_float(data.get("score"))
@@ -195,10 +200,19 @@ def _coerce_list(value: object) -> list[str]:
 def _coerce_float(value: object) -> float | None:
     if value is None:
         return None
-    try:
+    if isinstance(value, (int, float)):
         return float(value)
-    except (TypeError, ValueError):  # pragma: no cover - defensive parsing
-        return None
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:  # pragma: no cover - defensive parsing
+            return None
+    if isinstance(value, SupportsFloat):
+        try:
+            return float(value)
+        except TypeError:  # pragma: no cover - defensive parsing
+            return None
+    return None
 
 
 __all__ = [

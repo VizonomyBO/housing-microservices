@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from agent_api.http import create_app
+from services import AttachmentService, DocumentNotReadyError
 
 
 @asynccontextmanager
@@ -217,3 +218,44 @@ async def test_conversation_summary_reports_attachment_counts(api_client: AsyncC
 async def test_conversation_list_requires_auth(api_client: AsyncClient) -> None:
     resp = await api_client.get("/v1/conversations")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_attachment_rejected_until_document_active(
+    api_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    conv_resp = await api_client.post(
+        "/v1/conversations",
+        json={"country_code": "USA"},
+        headers=headers,
+    )
+    conversation_id = conv_resp.json()["conversation"]["conversation_id"]
+
+    upload_resp = await api_client.post(
+        "/v1/documents/upload",
+        json={
+            "document_name": "Pending Upload",
+            "content": "temporary content",
+            "country_code": "USA",
+            "language": "en",
+        },
+        headers=headers,
+    )
+    doc_id = upload_resp.json()["document_id"]
+
+    async def _raise_not_ready(*args, **kwargs):
+        raise DocumentNotReadyError(UUID(doc_id), "ingesting", "chunk")
+
+    monkeypatch.setattr(AttachmentService, "attach_document", _raise_not_ready)
+
+    attach_resp = await api_client.post(
+        f"/v1/conversations/{conversation_id}/attachments",
+        json={"document_id": doc_id},
+        headers=headers,
+    )
+    assert attach_resp.status_code == 409
+    payload = attach_resp.json()
+    assert payload["error"]["code"] == "DOCUMENT_NOT_READY"

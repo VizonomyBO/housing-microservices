@@ -51,13 +51,13 @@ def _agent_state(
         attachment_refs=[],
         scope_hash="abc",
         intent_tags=intent_tags or [],
-        reduced_scope_flags=reduced_scope_flags or ReducedScopeFlags(),
     )
     return AgentState(
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
         conversation_id="conv",
         normalized_input=normalized,
         workflow_plan=workflow_plan,
+        reduced_scope_flags=reduced_scope_flags or ReducedScopeFlags(),
     )
 
 

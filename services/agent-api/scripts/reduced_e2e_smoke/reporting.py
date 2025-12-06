@@ -142,9 +142,7 @@ def format_console(summary: RunSummary) -> str:
                 row_count = prompt.sql_row_count
                 if row_count is None:
                     row_count = len(prompt.sql_table_results)
-                lines.append(
-                    f"      SQL rows={row_count} query={query[:80]}"
-                )
+                lines.append(f"      SQL rows={row_count} query={query[:80]}")
                 if prompt.sql_table_results:
                     preview = prompt.sql_table_results[0]
                     lines.append(f"      preview={preview}")

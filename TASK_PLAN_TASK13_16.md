@@ -2,7 +2,7 @@
 _Plan auto-approved per AGENTS.md. Per session constraint, keep plan/tracker files in place after completion._
 
 ## Summary
-Refresh prod-facing docs and automation so the AWS stack is redeployable with zero manual steps and immediately usable by frontend clients. Confirm converter fail-on-parse behavior, update the AWS curl walkthrough + endpoint reference, add an idempotent prod deploy entrypoint, run AWS smoke with new PDFs, and point README to the right runbooks. Work corresponds to updated `TASK_DEFINITION.md` tasks 13–16 and prompts `task_prompts/13_numerical_sql_enforcement.md`, `task_prompts/14_sync_fastapi_ingestion.md`, `task_prompts/15_localstack_verification.md`, `task_prompts/16_cleanup_reset.md` (FastAPI ingestion work is detailed separately in `TASK_PLAN_SYNC_FASTAPI_INGESTION.md`).
+Refresh prod-facing docs and automation so the AWS stack is redeployable with zero manual steps and immediately usable by frontend clients. Confirm converter fail-on-parse behavior, update the AWS curl walkthrough + endpoint reference, add an idempotent prod deploy entrypoint, run AWS smoke with new PDFs, and point README to the right runbooks. Work corresponds to updated `TASK_DEFINITION.md` tasks 13–16 and prompts `task_prompts/13_numerical_sql_enforcement.md`, `task_prompts/14_sync_fastapi_ingestion.md`, `task_prompts/15_localstack_verification.md`, `task_prompts/16_cleanup_reset.md` (FastAPI ingestion work is detailed separately in `TASK_PLAN_SYNC_FASTAPI_INGESTION.md`). Task 14 is now complete (FastAPI ingestion deployed on EC2 and verified).
 
 ## Impacted files (initial)
 - `docs/runbooks/prod_setup.md` (AWS curl walkthrough, endpoints, multi-PDF smoke flow)

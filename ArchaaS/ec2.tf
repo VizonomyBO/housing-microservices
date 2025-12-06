@@ -150,8 +150,8 @@ resource "aws_security_group" "ec2_microservices" {
     from_port   = 5001
     to_port     = 5001
     protocol    = "tcp"
-    cidr_blocks = var.vpc_cidr_blocks
-    description = "Auth service"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Auth service (public access)"
   }
 
   # User Service
@@ -159,8 +159,17 @@ resource "aws_security_group" "ec2_microservices" {
     from_port   = 5002
     to_port     = 5002
     protocol    = "tcp"
-    cidr_blocks = var.vpc_cidr_blocks
-    description = "User service"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "User service (public access)"
+  }
+
+  # Agent API
+  ingress {
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Agent API (public access)"
   }
 
   # Swagger Service
@@ -168,8 +177,8 @@ resource "aws_security_group" "ec2_microservices" {
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks = var.vpc_cidr_blocks
-    description = "Swagger service"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Swagger service (public access)"
   }
 
   # HTTP/HTTPS for package updates

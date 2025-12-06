@@ -1,6 +1,8 @@
 # Full Stack Compose Runbook
 
-Use this guide when you need the entire microservices platform (auth, user, swagger, agent-api, marker-service, LocalStack, Valkey, telemetry) running locally through the root `docker-compose.yml`.
+Use this guide when you need the entire microservices platform (auth, user, swagger, agent-api, LocalStack, Valkey, telemetry) running locally through the root `docker-compose.yml`.
+
+- Legacy note: `marker-service` has been removed. The full profile no longer includes it.
 
 ## 1. Prerequisites
 - Docker 25.x with Compose V2 (`docker compose`).
@@ -28,7 +30,7 @@ COMPOSE_PROFILES=full,ops \
 ```
 - Services without profile entries (`postgres`, auth-service, user-service, swagger-service, localstack) start automatically.
 - `db-init` runs once Postgres is healthy, ensuring both the reduced agent schema and auth DB migrations are applied.
-- `marker-service`, `valkey`, and `otel-collector` join because the `full` profile is active.
+- `valkey` and `otel-collector` join because the `full` profile is active.
 - First builds can take several minutes; subsequent `up` commands reuse cached layers.
 
 ## 4. Verification Checklist
@@ -45,7 +47,7 @@ COMPOSE_PROFILES=full,ops \
 
 ## 5. LocalStack Toggle
 - **Local mode (default)**: `USE_LOCALSTACK=1` keeps `AWS_ENDPOINT_URL` pointing at the `localstack` container. Buckets (`RAW_DOCUMENTS_BUCKET`, `PROCESSED_BUCKET`) are created on startup and the smoke wrapper waits for `/_localstack/health` before running.
-- **Real AWS**: set `USE_LOCALSTACK=0`, populate `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, (optional) `AWS_SESSION_TOKEN`, and clear `AWS_ENDPOINT_URL`. Restart any AWS-aware services (`docker compose restart agent-api marker-service`), and expect the reduced smoke wrapper to skip LocalStack entirely so every SDK call hits the real endpoints you configured.
+- **Real AWS**: set `USE_LOCALSTACK=0`, populate `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, (optional) `AWS_SESSION_TOKEN`, and clear `AWS_ENDPOINT_URL`. Restart any AWS-aware services (`docker compose restart agent-api`), and expect the reduced smoke wrapper to skip LocalStack entirely so every SDK call hits the real endpoints you configured.
 - To inspect LocalStack resources, run `docker compose exec localstack awslocal s3 ls`.
 
 ## 6. Seeding & CLI Helpers
@@ -53,7 +55,7 @@ COMPOSE_PROFILES=full,ops \
 - Use the CLI for ingestion/pillar tests:
   ```bash
   docker compose exec agent-api uv run agent_api.cli --help
-  docker compose exec marker-service uv run python scripts/sample_ingest.py
+  # marker-service removed
   ```
 - The `db-shell` profile keeps an interactive Postgres shell running: `docker compose --profile full,ops exec db-shell bash` → `psql ...`.
 
@@ -76,6 +78,6 @@ Remember to stop resource-intensive services when not in use to free CPU/RAM.
 | Agent API waiting on db-init | Confirm Postgres health (`docker compose logs postgres`). If necessary, rerun `docker compose run --rm db-init`. |
 | Valkey refuses connections | Ensure the `full` profile is active and `VALKEY_PORT` isn’t already in use. |
 | Ports 3000/5001/5002 busy | Override host ports in `.env` (e.g., `SWAGGER_SERVICE_PORT=3100`) before running Compose. |
-| High resource usage | Start only what you need: `docker compose --profile full up agent-api marker-service localstack`. |
+| High resource usage | Start only what you need: `docker compose --profile full up agent-api localstack`. |
 
 Keep this runbook alongside `docs/runbooks/reduced_scope_demo.md` so teammates know how to switch between the lightweight demo and the full platform.

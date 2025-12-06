@@ -49,6 +49,10 @@ python3 -m pip install \
 echo "Copying shared_data_layer package..."
 cp -r "$PROJECT_ROOT/packages/shared_data_layer/src/shared_data_layer" "$LAYER_DIR/python/"
 
+# Bundle the reusable Lambda helpers (common/)
+echo "Copying common Lambda helpers..."
+cp -r "$PROJECT_ROOT/ArchaaS/lambdas/common" "$LAYER_DIR/python/common"
+
 # Remove unnecessary files to reduce layer size
 echo "Cleaning up unnecessary files..."
 find "$LAYER_DIR/python" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -78,4 +82,3 @@ rm -rf "$LAYER_DIR"
 rm -f "$LAYER_DIR/requirements.txt"
 
 echo "Done!"
-

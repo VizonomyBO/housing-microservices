@@ -1,18 +1,17 @@
 # Task 14 – Replace Lambda ingestion with a simple FastAPI service on EC2
 
 ## Objective
-Retire the Lambda-based ingestion flow and replace it with a single FastAPI app (running on EC2 alongside the other services) that performs synchronous PDF ingestion end-to-end using MarkItDown, chunking, embeddings, and activation. No Redis/workers—just a long-running process handling the full pipeline. The API surface must mirror the current ingestion Lambda interface so upstream clients (agent-api, scripts, smoke) continue to work.
+**Status: Completed.** The Lambda-based ingestion flow has been replaced with a single FastAPI app on EC2 (port 8085) that performs synchronous PDF ingestion end-to-end using MarkItDown, chunking, embeddings, and activation. No Redis/workers—just a long-running process handling the full pipeline. The API surface mirrors the prior ingestion Lambda interface so upstream clients (agent-api, scripts, smoke) continue to work.
 
-## Requirements
-- Build a FastAPI service with its own uv-managed venv; expose an upload endpoint matching the existing ingestion API contract (presign + fields compatibility or a direct upload that preserves the same request/response shape).
-- Perform ingestion synchronously: download/process the PDF, convert with MarkItDown, chunk, embed, index, and mark the document ready, all within the request/response lifecycle (or a single long-running process without background workers).
-- Maintain payload compatibility with the Lambda workflow (same fields: document_id, content_hash, tags, trace_id, callback_url, etc.) so agent-api and smoke scripts continue to function without client changes.
-- Remove or bypass the Lambda/S3-trigger path as needed (“nuke all needed”); wire agent-api and any helpers to call this FastAPI service instead of API Gateway/S3/Lambda for ingestion.
-- Deploy the FastAPI ingestion service on the existing EC2 host with the other services; keep it as simple as possible (no Redis, no workers, no additional infra).
-- Keep functionality parity with the previous pipeline: documents convert, chunk, embed/index, and become attachable/active; attachment safety remains enforced.
+## Requirements (fulfilled)
+- FastAPI service (`services/ingestion-service`, port 8085) with uv-managed venv; upload endpoint returns signed form fields and sync-ingests (MarkItDown → chunk → embed → activate).
+- Payload compatibility with prior ingestion (document_id, ingestion_id, tags, trace_id, callback_url, etc.) so agent-api and smoke scripts work unchanged.
+- Lambda/S3 path bypassed; `INGEST_BASE_URL` now points to the FastAPI service; scripts/runbooks updated accordingly.
+- Deployed on the existing EC2 host alongside other services via `docker-compose.ec2.yml` and `scripts/deploy_ec2_services.sh` (opens 8085).
+- Parity: docs convert/chunk/embed, reach `active`, and attach; attachment safety still enforced in agent-api.
 
-## Deliverables
+## Deliverables (completed)
 - FastAPI ingestion service code + uv venv setup; deploy manifest/compose entry for EC2.
-- Updated wiring so agent-api and smoke/tests hit this service instead of the Lambda/S3 flow.
-- Documentation/runbook updates reflecting the new ingestion path and how to run it on EC2.
-- Removal/disablement of the old Lambda ingestion flow if necessary to prevent conflicts.
+- Wiring updated so agent-api and smoke/tests hit this service instead of Lambda/S3.
+- Documentation/runbook updated to reflect the new ingestion path and EC2 deployment.
+- Old Lambda ingestion path bypassed for prod flows.

@@ -65,7 +65,9 @@ class PolarsExecutorNode:
             duration_ms = (perf_counter() - start) * 1000
             row_count = len(rows)
             normalized_query = " ".join(query.split())
-            log_query = normalized_query if len(normalized_query) <= 400 else f"{normalized_query[:397]}..."
+            log_query = (
+                normalized_query if len(normalized_query) <= 400 else f"{normalized_query[:397]}..."
+            )
             logger.info(
                 "numerical SQL executed (tables=%s rows=%s query=%s)",
                 ",".join(sorted(tables.keys())),

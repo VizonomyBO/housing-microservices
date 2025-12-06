@@ -49,6 +49,13 @@ variable "log_retention_days" {
   default     = 30
 }
 
+# Marker converter container image tag (for container-based Lambda)
+variable "marker_converter_image_tag" {
+  description = "ECR image tag to deploy for the marker-converter Lambda"
+  type        = string
+  default     = "markitdown-r4"
+}
+
 variable "presigned_url_expiry_sec" {
   description = "Presigned URL expiration time in seconds"
   type        = number

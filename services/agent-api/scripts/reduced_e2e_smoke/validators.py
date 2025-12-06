@@ -8,9 +8,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .judge import JudgeDocument, JudgeRequest, PromptJudge
-
 from scripts.reduced_e2e_fixtures import DocumentFixture, PromptSpec, ValidationRule
+
+from .judge import JudgeDocument, JudgeRequest, PromptJudge
 
 
 @dataclass(slots=True)
@@ -23,7 +23,7 @@ class ValidationSummary:
     judge_name: str | None = None
 
 
-async def validate_prompt(
+async def validate_prompt(  # noqa: PLR0912 - prompt validation intentionally enumerates many rule branches
     prompt: PromptSpec,
     *,
     answer_text: str,

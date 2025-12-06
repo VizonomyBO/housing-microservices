@@ -16,7 +16,7 @@ Replace the broken Lambda/S3 ingestion path with a simple FastAPI service (own `
 - Keeping the interface identical so other services don’t need major rewrites.
 - Deployment idempotence and env sourcing with the existing `.env` / `scripts/use_env.sh`.
 
-## Ordered Steps
+## Ordered Steps (all completed)
 1. Read new prompt `task_prompts/14_sync_fastapi_ingestion.md` and existing plan/tracker rows (13–15) to understand dependencies and numbering changes.
 2. Research FastAPI + MarkItDown sync ingestion best practices (Serper/Context7) and note sources here.
 3. Update task docs/plans to insert the new task and shift subsequent tasks; create/update tracker for this plan.

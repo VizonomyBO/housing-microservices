@@ -19,7 +19,9 @@
 
 ## 2. Environment, Commands & Tools (uv-first)
 
-Operate python from environment at `services/agent-api/.venv` and rely on `uv` for everything: Python installation, dependency sync, scripts, and tool execution.
+**Shared automation env (`.venv.tooling`)**
+- `scripts/ensure_tooling_env.sh` bootstraps a repo-level uv virtualenv plus `shared_data_layer`/auth-service deps; `scripts/setup_remote_databases.sh` already calls it before running migrations.
+- If we later add more automation that needs shared_data_layer (scripted data refreshes, LocalStack DB prep, etc.), point those helpers at `ensure_tooling_env.sh` so they reuse the same environment; currently no other tasks depend on it.
 
 | Purpose | Command | Notes |
 | --- | --- | --- |
@@ -41,10 +43,6 @@ uv run ruff check --fix .
 uv run ty check .
 uv run pytest -n auto
 ```
-
-**Shared automation env (`.venv.tooling`)**
-- `scripts/ensure_tooling_env.sh` bootstraps a repo-level uv virtualenv plus `shared_data_layer`/auth-service deps; `scripts/setup_remote_databases.sh` already calls it before running migrations.
-- If we later add more automation that needs shared_data_layer (scripted data refreshes, LocalStack DB prep, etc.), point those helpers at `ensure_tooling_env.sh` so they reuse the same environment; currently no other tasks depend on it.
 
 ---
 
@@ -79,8 +77,13 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 ## Task-Specific Requirements (Ingestion Reactivation)
 
 - Maintain the per-task plan + tracker files (`TASK_PLAN.md`, `TASK_PLAN_PROGRESS.md`) and keep them in sync with the outstanding steps (enforce attachment safety, LocalStack verification, AWS verification, cleanup/tests).
+- For the in-progress AWS smoke work (Step 9), review `notes/aws_step9_status.md` before making changes; it captures the latest commands, evidence paths (`/tmp/aws_smoke_step9/`), and outstanding actions.
 - Always run Python tooling via `services/agent-api/.venv` and prefer `uv run …` for formatting, linting, typing, and pytest.
 - Compose workflows must support pointing the locally running services at the AWS deployment by sourcing `.env.prod.aws`; LocalStack remains required for verification as well.
 - Perform the end-to-end curl walkthrough plus `scripts/prod_smoke_check.sh` in both LocalStack and AWS modes before completion; document commands and evidence in the tracker.
 - When AWS resources conflict, re-run Terraform with the provided `ArchaaS/terraform.v2.tfvars` (uses the `vizonomy-v2/dev2` suffix) instead of deleting user-managed infrastructure.
 - The remote Postgres host must expose **two** logical databases (`housing` for shared_data_layer/agent-api, `auth_db` for auth-service). Never co-mingle schemas by reusing `auth_db` for agent tables—create/fix the `housing` database instead.
+- **Current session constraints (Dec 2024):** user requested we focus on AWS verification (Plan Step 7) while deferring the LocalStack run to a later session, and to leave `TASK_PLAN.md` / `TASK_PLAN_PROGRESS.md` in place after finishing so the next session can resume quickly.
+- **Current focus (Feb 2025):** Step 9 is active—rerun the AWS curl walkthrough and `scripts/prod_smoke_check.sh` against the real stack (ignore LocalStack), ensure each upload is unique to avoid dedupe short-circuits, capture command evidence/IDs, and update the tracker while keeping the plan files for future sessions. (Update: Task 14 replaced the Lambda ingestion with a FastAPI service on EC2; `INGEST_BASE_URL` now points to http://52.207.140.87:8085 and smoke has passed through the new service.)
+- **State machine + callback handling (Dec 2025):** Preserve the original document upload payload at the start of the Step Functions workflow (e.g., copy it under `$.request`) so optional fields like `callback_url`, `tags`, and `trace_id` remain accessible in later states (DeadLetter, EmitFailureEvent, Finalizer). Reference `$.request.callback_url` instead of the mutable root, aligning with AWS’s `ResultPath` best practices.
+- **AWS verification discipline:** The `/tmp/aws_flow.sh` helper uploads a new document on every run. After a timeout or failure, do **not** trigger another upload; keep polling `/v1/documents?content_hash=…`, inspect the existing Step Functions execution (`aws stepfunctions describe-execution …`), and review per-Lambda CloudWatch logs until that execution succeeds or is redriven. Only upload again when inputs change or after we intentionally purge test data.
