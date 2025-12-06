@@ -1,0 +1,137 @@
+version: "3.9"
+
+x-ec2-defaults: &ec2-defaults
+  env_file:
+    - .env.active
+  restart: unless-stopped
+  networks:
+    - ec2-net
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  agent-api:
+    <<: *ec2-defaults
+    build:
+      context: .
+      dockerfile: services/agent-api/Dockerfile.reduced
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${AGENT_API_PORT:-8000}"
+      - --app-dir
+      - src
+      - --workers
+      - "${UVICORN_WORKERS:-1}"
+    ports:
+      - "${AGENT_API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  ingestion-service:
+    <<: *ec2-defaults
+    build:
+      context: .
+      dockerfile: services/ingestion-service/Dockerfile
+    command:
+      - uvicorn
+      - ingestion_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${INGESTION_SERVICE_PORT:-8085}"
+    ports:
+      - "${INGESTION_SERVICE_PORT:-8085}:8085"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
+      SIGNING_SECRET: ${INGESTION_SIGNING_SECRET:-}
+    depends_on:
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  auth-service:
+    <<: *ec2-defaults
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    ports:
+      - "${AUTH_SERVICE_PORT:-5001}:5000"
+    environment:
+      DATABASE_URL: ${AUTH_DATABASE_URL}
+      PORT: 5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  user-service:
+    <<: *ec2-defaults
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    ports:
+      - "${USER_SERVICE_PORT:-5002}:5001"
+    depends_on:
+      - auth-service
+    environment:
+      DATABASE_URL: ${AUTH_DATABASE_URL}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      PORT: 5001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  swagger-service:
+    <<: *ec2-defaults
+    profiles:
+      - swagger
+    build:
+      context: ./services/swagger-service
+      dockerfile: Dockerfile
+    ports:
+      - "${SWAGGER_SERVICE_PORT:-3000}:3000"
+    depends_on:
+      - auth-service
+      - user-service
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ACCOUNT_SERVICE_URL: ${ACCOUNT_SERVICE_URL}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  ec2-net:
+    driver: bridge

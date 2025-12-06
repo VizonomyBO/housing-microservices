@@ -88,7 +88,7 @@ USE_INGEST_API=0
 if [[ -n "${INGEST_BASE_URL:-}" ]]; then
   USE_INGEST_API=1
   INGEST_UPLOAD_URL="${INGEST_BASE_URL%/}/v1/documents/upload"
-  log "INGEST_BASE_URL detected; smoke test will upload via $INGEST_UPLOAD_URL"
+  log "INGEST_BASE_URL detected; smoke test will upload via $INGEST_UPLOAD_URL (FastAPI ingestion service)"
 fi
 
 get_file_size() {

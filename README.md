@@ -8,7 +8,7 @@ A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gatew
 ## Quick links (AWS-first)
 - Production setup, curl walkthrough, and frontend endpoint reference: `docs/runbooks/prod_setup.md`
 - Idempotent prod deploy (Terraform + EC2 compose): `scripts/deploy_prod_stack.sh`
-- AWS smoke helper (uploads policy/ledger/KPI PDFs to S3): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` (see runbook §6)
+- AWS smoke helper (uploads policy/ledger/KPI PDFs via ingestion service): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` (see runbook §6)
 
 ## Service Inventory
 | Service | Language | Host Port | Profiles | Notes |
@@ -129,7 +129,7 @@ The target calls `services/agent-api/scripts/run_reduced_e2e_compose.sh`, which 
 ## 7. Production Mode with Compose
 Use this workflow when you need the full stack with production-like settings, real secrets, and optional AWS access.
 
-> AWS ingestion, curl walkthrough, and frontend endpoint reference live in [`docs/runbooks/prod_setup.md`](docs/runbooks/prod_setup.md). For a one-shot prod deploy (Terraform + EC2 compose), use `scripts/deploy_prod_stack.sh`.
+> AWS ingestion, curl walkthrough, and frontend endpoint reference live in [`docs/runbooks/prod_setup.md`](docs/runbooks/prod_setup.md). For a one-shot prod deploy (Terraform + EC2 compose), use `scripts/deploy_prod_stack.sh`. The ingestion endpoint is the FastAPI service on EC2 (`INGEST_BASE_URL=http://52.207.140.87:8085`).
 
 1. **Prep environment files**
    ```bash

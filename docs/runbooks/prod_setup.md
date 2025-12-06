@@ -1,11 +1,11 @@
 # Production Runbook (AWS-first ingestion)
 
-End-to-end guide for deploying the prod stack (Terraform + EC2 services), running the AWS curl walkthrough (login → presign via API Gateway → S3 POST → poll → attach → chat), and exposing a frontend-ready endpoint reference. Swagger is unhealthy in prod—use the curls below instead.
+End-to-end guide for deploying the prod stack (Terraform + EC2 services), running the AWS curl walkthrough (login → presign via ingestion service → form upload → poll → attach → chat), and exposing a frontend-ready endpoint reference. Swagger is unhealthy in prod—use the curls below instead.
 
 ## 1) Live endpoints (AWS)
 - `AGENT_BASE_URL=http://52.207.140.87:8000`
 - `AUTH_BASE_URL=http://52.207.140.87:5001`
-- `INGEST_BASE_URL=https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2`
+- `INGEST_BASE_URL=http://52.207.140.87:8085` (FastAPI ingestion service on EC2)
 - Auth demo creds: `PROD_DEMO_EMAIL` / `PROD_DEMO_PASSWORD` from `.env.prod.aws`.  
 Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && set +a` to load them.
 
@@ -35,7 +35,7 @@ Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && s
     }
     ```
     Expect `requires_sql: true` for KPI/ledger prompts and nodes `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`.
-- **Ingestion API Gateway (INGEST_BASE_URL)**
+- **Ingestion FastAPI service (INGEST_BASE_URL)**
   - Presign: `POST /v1/documents/upload` with JSON:
     ```json
     {
@@ -64,7 +64,7 @@ What it does:
 Flags: `--skip-terraform`, `--skip-deploy`, `--include-swagger`, `--no-build`, `--no-sync`, `--tfvars <file>`, `--workspace <name>`.
 
 ## 5) AWS curl walkthrough (manual)
-The commands below run entirely against the live AWS endpoints and raw S3. Use fresh copies of the sample PDFs to bypass content-hash dedupe.
+The commands below run entirely against the live AWS endpoints and the new ingestion FastAPI service on EC2. Use fresh copies of the sample PDFs to bypass content-hash dedupe.
 
 1. **Set env + token**
    ```bash
@@ -84,7 +84,7 @@ The commands below run entirely against the live AWS endpoints and raw S3. Use f
    FILE_SIZE=$(stat -c%s "$FILE")
    FILE_HASH=$(sha256sum "$FILE" | awk '{print $1}')
    ```
-3. **Request presigned upload via API Gateway**
+3. **Request presigned upload via ingestion service** (FastAPI on EC2; no S3 POST required)
    ```bash
    UPLOAD_RESP=$(jq -n \
      --arg name "Prod Smoke $(date +%s)" \
@@ -102,13 +102,13 @@ The commands below run entirely against the live AWS endpoints and raw S3. Use f
    UPLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.upload.url')
    UPLOAD_FIELDS=$(echo "$UPLOAD_RESP" | jq -c '.upload.fields')
    ```
-4. **POST the binary to S3 (SigV4 form)**
+4. **POST the binary to ingestion service form endpoint**  
+   (The FastAPI service returns an HMAC-signed form; upload directly to its `/v1/documents/upload/complete` URL. No S3 POST/fields juggling needed.)
    ```bash
-   CONTENT_TYPE=$(echo "$UPLOAD_FIELDS" | jq -r '."Content-Type" // "application/pdf"')
    FORM_ARGS=()
    while IFS=$'\t' read -r key val; do FORM_ARGS+=(-F "$key=$val"); done \
      < <(echo "$UPLOAD_FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv')
-   FORM_ARGS+=(-F "file=@${FILE};type=${CONTENT_TYPE}")
+   FORM_ARGS+=(-F "file=@${FILE}")
    curl -sSf -X POST "$UPLOAD_URL" "${FORM_ARGS[@]}"
    ```
 5. **Poll Agent API until active (or failed)**

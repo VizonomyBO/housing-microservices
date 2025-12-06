@@ -75,13 +75,13 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 4. **Automated SSH Key Provisioning** – Update Terraform (`ec2.tf`, `variables.tf`, `outputs.tf`, `providers.tf`) to generate an RSA key pair when `ec2_key_pair_name` is unset, upload the public key via `aws_key_pair`, persist the private key to a gitignored file, and expose a sensitive output for automation scripts.
 5. **Remote Provision Script** – Add `scripts/provision_remote_stack.sh` that (a) loads `.env.prod.aws` for AWS creds, (b) runs `terraform -chdir=ArchaaS apply -destroy` for the EC2 host when requested, (c) re-applies with `terraform.v2.tfvars`, (d) fetches the generated PEM, patches `.env.prod.aws` host/IPs, and (e) invokes `scripts/setup_remote_databases.sh`.
 6. **Tooling Python Env** – Introduce a root-level uv-managed environment (`.venv.tooling`) plus `requirements.tooling.txt`/`scripts/ensure_tooling_env.sh` so automation scripts can install shared dependencies (shared_data_layer, auth-service requirements) without conflicting with service-specific virtualenvs.
-7. **Run Compose Locally** – Launch services via docker compose (with override/flag) ensuring they connect to AWS DB + AWS ingestion endpoints; confirm health across agent-api, auth-service, user-service, marker-service.
+7. **Run Compose Locally** – Launch services via docker compose (with override/flag) ensuring they connect to AWS DB + AWS ingestion endpoints; confirm health across agent-api, auth-service, user-service (marker-service is legacy and now skipped).
 8. **Enforce Attachment Safety (Plan §5)** – Update `agent-api` attachment routes/services to block non-active documents, cover with automated tests, and document the error semantics.
 9. **Manual Curl Walkthrough** – Follow docs/runbooks: login, request presigned upload from API Gateway, push sample document to S3, poll until active, attach, run SSE chat; capture outputs/logs and feed updates back into runbooks (use the real PDF `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf` to avoid corrupt fixtures).
 10. **AWS Verification** – Repeat the terraform/apply as needed, run the compose stack in AWS mode, execute curl + smoke scripts end-to-end, and confirm documents activate plus SSE events fire.
 11. **Harden AWS-mode compose env for auth/user** – Point auth/user containers at the remote Postgres host via `.env.prod.aws`/overrides so JWT login works without manual tokens when targeting AWS (all `.env*` files may be updated as needed).
 12. **Automate env switching** – Add scripts/templates so compose, tooling, and lambdas pick the right DATABASE_URL/auth endpoints when toggling between LocalStack and AWS (safe to touch `.env*` files).
-13. **Deploy services to EC2 host** – Add automation to package and run agent-api/auth-service/user-service/marker-service on the existing EC2 (same host as Postgres), using public IP/hostnames for DB and peer services and exposing required ports/security-group rules so they can later be moved off-box without code changes.
+13. **Deploy services to EC2 host** – Add automation to package and run agent-api/auth-service/user-service on the existing EC2 (same host as Postgres), using public IP/hostnames for DB and peer services and exposing required ports/security-group rules so they can later be moved off-box without code changes (marker-service is deprecated and excluded by default).
 14. **LocalStack Verification (last)** – After AWS + EC2 deployment, bring up a LocalStack-based stack (or docker-based emulation if LocalStack Pro is unavailable) and rerun terraform, compose, curl flow, and `scripts/prod_smoke_check.sh`.
 15. **Quality Gates & Cleanup** – Run `uv run ruff format`, `uv run ruff check --fix`, `uv run ty check`, and `uv run pytest -n auto`; once complete remove the plan + tracker files per AGENTS.md.
 
@@ -89,17 +89,56 @@ Deploy the ingestion stack to AWS (using `terraform.tfvars` or a suffixed varian
 _Plan auto-approved; per user direction keep plan/tracker files after completion._
 
 - **Goal:** Ensure `auth-service` and `user-service` run locally against the AWS Postgres host so JWT login works without manual tokens when `USE_LOCALSTACK=0`.
-- **Scope:** Update compose overrides/env (`docker-compose.prod.override.yml`, `.env.prod.aws`, related helpers) to point auth/user at the remote `auth_db` / `housing` databases on `44.216.103.232:5432`. Validate with `/v1/auth/login` and `/v1/health` using demo creds (`demo.client@example.com` / `ChangeMe!123`).
+- **Scope:** Update compose overrides/env (`docker-compose.prod.override.yml`, `.env.prod.aws`, related helpers) to point auth/user at the remote `auth_db` / `housing` databases on `52.207.140.87:5432`. Validate with `/v1/auth/login` and `/v1/health` using demo creds (`demo.client@example.com` / `ChangeMe!123`).
 - **Impacted files:** `.env.prod.aws`, `docker-compose.prod.override.yml`, `services/auth-service` and `services/user-service` compose env wiring, any helper scripts sourcing `.env.prod.aws`, tracker (`TASK_PLAN_PROGRESS.md`), future prompt notes (`task_prompts/11_env_switching.md`) if defaults change.
 - **Ordered steps:**
   1. Inspect current AWS-mode env/compose wiring for auth/user (`.env.prod.aws`, `docker-compose.prod.override.yml`) to confirm which DB host/DB names they use when `USE_LOCALSTACK=0`.
-  2. Align auth/user DB env vars to the AWS Postgres host (`44.216.103.232`, `auth_db` for auth-service, `housing` where applicable) and ensure credentials come from `.env.prod.aws`; propagate any new vars to helper scripts that source this file.
+  2. Align auth/user DB env vars to the AWS Postgres host (`52.207.140.87`, `auth_db` for auth-service, `housing` where applicable) and ensure credentials come from `.env.prod.aws`; propagate any new vars to helper scripts that source this file.
   3. Restart only auth-service and user-service in AWS mode (no LocalStack) and verify health (`/v1/health`) plus login (`/v1/auth/login`) returns a JWT using the remote DB.
   4. Update tracker row #10 with commands/evidence; if env defaults change, append a brief delta note to `task_prompts/11_env_switching.md`.
   5. Re-run any affected smoke commands if necessary to confirm compose AWS mode remains healthy; document verification in the tracker.
 - **Risks / mitigations:** Remote DB auth_db may be missing migrations—rerun `scripts/setup_remote_databases.sh` if login fails; compose may cache old env—force container recreate for auth/user; ensure we don’t disturb agent-api AWS wiring.
 - **Sources:** Internal runbooks `docs/runbooks/prod_setup.md` (compose AWS mode, login curl) and existing compose override `.env.prod.aws` conventions.
 
+## Task 11 Plan – Automate env switching between AWS and LocalStack (auto-approved)
+_Plan auto-approved; per Dec 2024 directive keep plan/tracker files after completion._
+
+- **Summary:** Provide a single toggle so compose, helper scripts, and lambdas can switch between AWS and LocalStack (or future local emulation) without manual `.env` edits. Defaults should favor the current AWS stack while keeping LocalStack ready for later tasks.
+- **Impacted files:** `.env*` templates, `docker-compose*.yml` (env wiring), `scripts/prod_smoke_check.sh`, terraform/runbook helpers under `scripts/` and `docs/runbooks/`, prompt updates under `task_prompts/12_ec2_services.md`, tracker files.
+- **Risks / mitigations:** Divergent env names across services/scripts could drift; mitigate by centralizing variables in the toggle script and documenting required exports. Avoid breaking existing AWS defaults; verify AWS mode with a login curl before finishing.
+- **Ordered steps (checkbox = tracker sync):**
+  - [ ] Inventory env consumers (compose overrides, smoke/terraform/runbooks) and note required vars for AWS vs LocalStack.
+  - [ ] Design and add the toggle (script + `.env.*.template` or similar) that exports the canonical set (DB URLs, service base URLs, `INGEST_BASE_URL`, `USE_LOCALSTACK`, AWS creds).
+- [ ] Wire consumers to the toggle (compose, scripts, lambdas/templates) so they source the generated env without manual edits.
+- [ ] Verify AWS mode minimally (login curl) and sanity-check LocalStack mode resolves variables; record commands/evidence.
+- [ ] Update docs/runbooks + tracker row #11; note any new vars/paths in `task_prompts/12_ec2_services.md`.
+- **Research sources:** Internal `docs/runbooks/prod_setup.md` (compose env expectations) and existing helpers (`scripts/prod_smoke_check.sh`, `.env.prod.aws`) for canonical variable names. No external references expected unless new tooling arises.
+
+## Task 12 Plan – Deploy services to EC2 (auto-approved; keep plan/tracker per user directive)
+_Plan auto-approved; keep plan/tracker files in place after completion for continuity._
+
+- **Summary:** Package and run `agent-api`, `auth-service`, and `user-service` on the existing EC2 host that already runs Postgres. Marker-service is legacy/unused and should be skipped unless explicitly needed for a retrospective test. Use public hostnames/IPs for DB and peer services so they can be moved off-box later via env only. Expose required ports (agent-api 8000, auth 5001, user 5002, swagger 3000 if used) via security groups/iptables and automate start/stop/update.
+- **Plan reference:** `task_prompts/12_ec2_services.md`, Task 12 section of `TASK_DEFINITION.md`, existing env toggle `scripts/use_env.sh aws`.
+- **Impacted files:** New deploy helper under `scripts/` (e.g., `deploy_ec2_services.sh`), optional systemd/unit templates or compose override snippets, `.env.prod.aws`/`.env.active` (gitignored) for public endpoints, docs/runbooks for EC2 deployment notes, tracker (`TASK_PLAN_PROGRESS.md` row 12), follow-on prompts (`task_prompts/13_localstack_verification.md`, `task_prompts/14_cleanup_reset.md`) if env/ports change. Note: marker-service is legacy; do not include it in new deploys.
+- **Risks / mitigations:** EC2 may lack uv/docker/systemd → add bootstrap steps; security groups may block ports → document required rules/CLI commands; long-lived services need log/venv isolation → prefer containers or systemd-managed uv runs; must avoid hardcoding private addresses so later relocation is env-only; ensure automation is idempotent and does not clobber Postgres data.
+- **Ordered steps (checkbox = tracker sync):**
+  - [x] Review `task_prompts/12_ec2_services.md`, current env/compose wiring, and DB/service endpoints to confirm required ports + env vars (DB at `52.207.140.87:5432`, API Gateway base, peer URLs).
+  - [x] Decide packaging strategy (docker-compose vs systemd+uv) favoring reproducible deploys; outline env sourcing via `scripts/use_env.sh aws`/`.env.active` using public hosts.
+  - [x] Implement automation (e.g., `scripts/deploy_ec2_services.sh` plus optional unit templates) that bootstraps dependencies on EC2, syncs env/config, builds or pulls images, runs services bound to public-facing hostnames/ports, and notes required SG/iptables updates (marker-service excluded unless explicitly opted in).
+  - [x] Document start/stop/update + verification commands (health endpoints, auth login curl) for EC2; capture any SG changes and note marker-service deprecation.
+  - [x] Update `TASK_PLAN_PROGRESS.md` row 12 with commands/evidence; propagate env/port changes to `task_prompts/15_localstack_verification.md` and `task_prompts/16_cleanup_reset.md` if needed (call out marker-service is legacy).
+
+### New scope (user request, Dec 2025 — continues prior EC2 work)
+- Continue from the completed EC2 deploy/smoke baseline and now: switch the converter to use MarkItDown in the ingestion pipeline (marker-converter Lambda) so PDFs are robustly parsed; rebuild layers/Lambdas as needed.
+- Remove the legacy `services/marker-service` folder entirely and document its deprecation.
+- Clean up placeholder/legacy documents in Postgres/S3 created during earlier failed runs.
+- Refresh `scripts/prod_smoke_check.sh` defaults (use a reliable PDF, new ingest endpoint) and rerun full e2e on AWS/EC2 (upload → poll → attach → two-turn chat) until success.
+- Update tracker/docs to reflect the new ingest endpoint/IP and the MarkItDown switch.
+
 ## Research Notes / Sources
 - AWS EC2 key pairs cannot be recovered; private keys must be generated client-side and stored securely ([AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html)).
 - Terraform can generate SSH keys using `tls_private_key` and register them via `aws_key_pair` for EC2 access without manual `.pem` handling ([Terraform AWS key pair resource](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/key_pair), [`tls_private_key` resource](https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key)).
+- Docker installation on Amazon Linux 2023: AWS SAM guide outlines updating packages, installing Docker CE, starting the service, and adding `ec2-user` to the docker group ([AWS docs](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-docker.html)).
+- Docker Compose plugin install on Linux (preferred over standalone binary) via the Docker docs ([Docker docs](https://docs.docker.com/compose/install/linux/)).
+- Systemd services can run Python apps inside a venv by pointing `ExecStart` at the venv’s Python binary instead of sourcing `activate` ([Stack Overflow](https://stackoverflow.com/questions/37211115/how-to-enable-a-virtualenv-in-a-systemd-service-unit)).
+- Opening ports via security groups using the AWS CLI `authorize-security-group-ingress` command ([AWS CLI reference](https://docs.aws.amazon.com/cli/latest/reference/ec2/authorize-security-group-ingress.html)).
