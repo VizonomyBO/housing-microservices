@@ -59,6 +59,9 @@ asyncio_default_fixture_loop_scope = "session"
 markers = [
   "reduced_scope_smoke: Validates reduced-scope Docker/seed assets",
 ]
+filterwarnings = [
+  "ignore:The @wait_container_is_ready decorator is deprecated.*:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
