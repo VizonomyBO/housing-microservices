@@ -116,3 +116,30 @@ async def test_list_documents_filters_by_hash(api_client: AsyncClient) -> None:
 async def test_list_documents_requires_auth(api_client: AsyncClient) -> None:
     resp = await api_client.get("/v1/documents")
     assert resp.status_code == 401
+
+
+async def test_list_documents_filters_by_country(api_client: AsyncClient) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    usa_payload = {
+        "document_name": "USA Memo",
+        "content": "# Memo\ncontent",
+        "country_code": "USA",
+    }
+    arg_payload = {
+        "document_name": "ARG Memo",
+        "content": "# Memo\ncontenido",
+        "country_code": "ARG",
+    }
+    resp_usa = await api_client.post("/v1/documents/upload", json=usa_payload, headers=headers)
+    resp_arg = await api_client.post("/v1/documents/upload", json=arg_payload, headers=headers)
+    assert resp_usa.status_code == 201
+    assert resp_arg.status_code == 201
+
+    filtered = await api_client.get(
+        "/v1/documents", params=[("country_code", "ARG")], headers=headers
+    )
+    assert filtered.status_code == 200
+    docs = filtered.json()["documents"]
+    assert all(doc["country_code"] == "ARG" for doc in docs)
+    assert any(doc["canonical_name"] == "ARG Memo" for doc in docs)

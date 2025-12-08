@@ -25,7 +25,7 @@ Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && s
   - Health: `GET /health`, `GET /v1/health`.
   - Documents: `GET /v1/documents?page=1&page_size=50&content_hash=<sha256>` returns status (`pending|active|failed`) and `ingestion_stage`. Failed docs include `metadata.ingestion_failure`.
   - Conversations: `POST /v1/conversations` body `{"country_code":"US","namespace":"prod-demo"}` → `{conversation_id}`.
-  - Attachments: `POST /v1/conversations/{id}/attachments` body `{"document_id":"...","auto_attach_base_docs":false}`. Returns `409 DOCUMENT_NOT_READY` until the doc is `active`.
+  - Attachments: `POST /v1/conversations/{id}/attachments` body `{"document_id":"...","auto_attach_base_docs":false}`. Returns `409 DOCUMENT_NOT_READY` until the doc is `active`. For bulk, call `POST /v1/conversations/{id}/attachments/bulk` with `{"document_ids":["...","..."]}` (frontend can fetch IDs via `/v1/documents?country_code=ARG` first).
   - Chat (SSE): `POST /v1/chat` with headers `Accept: text/event-stream`, `Authorization: Bearer $TOKEN`, body:
     ```json
     {

@@ -223,6 +223,7 @@ class DocumentListingService:
         page_size: int,
         tags: Sequence[str] | None = None,
         content_hashes: Sequence[str] | None = None,
+        country_codes: Sequence[str] | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         include_base_documents: bool = False,
@@ -244,6 +245,9 @@ class DocumentListingService:
         normalized_hashes = [h.strip().lower() for h in (content_hashes or []) if h]
         if normalized_hashes:
             criteria.append(Document.content_hash.in_(normalized_hashes))
+        normalized_countries = [c.strip().upper() for c in (country_codes or []) if c]
+        if normalized_countries:
+            criteria.append(Document.country_code.in_(normalized_countries))
         if created_after:
             criteria.append(Document.created_at >= created_after)
         if created_before:

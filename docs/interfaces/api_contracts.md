@@ -268,6 +268,35 @@ Creates or reactivates a `conversation_documents` bridge row.
 - Image/table documents are short-circuited with `202 Accepted`, `{ "status": "FEATURE_DISABLED" }`, and `Retry-After: 86400`. The skip is recorded in `document.metadata_.reduced_scope.skipped` for auditing.
 - Base-scope documents cannot be detached; clients should mark them `visibility=hidden` instead until the full workflow returns.
 
+### 1.7.1 POST /v1/conversations/{id}/attachments/bulk
+Attach multiple documents in one call by passing explicit document IDs (frontend can first query `/v1/documents?country_code=ARG` and forward those IDs).
+
+**Request**:
+```json
+{
+  "document_ids": ["doc_a12", "doc_b34"],
+  "visibility": "visible",
+  "role": "primary"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "conversation_id": "thr_92aa2",
+  "attached": ["doc_a12", "doc_b34"],
+  "skipped": [
+    {"document_id": "doc_c56", "reason": "Document not ready (status=ingesting, stage=chunk)"}
+  ],
+  "request_id": "..."
+}
+```
+
+Notes:
+- Enforces the same attachment guardrails (ingestion must be `active`, text-only in reduced scope, base doc immutability).
+- Ignores duplicate IDs in the request.
+- Returns per-document skip reasons instead of failing the whole batch.
+
 ### 1.8 GET /v1/conversations/{id}/attachments
 Lists the effective attachment set with the same `AttachmentRecord` schema used in the mutation response. Hidden/read-only entries remain in the payload so clients can expose audit controls, but retrieval still honors the stored visibility.
 

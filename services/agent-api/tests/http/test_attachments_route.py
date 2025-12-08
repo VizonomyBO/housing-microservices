@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -89,6 +89,39 @@ async def base_document(session_factory) -> Document:
         )
         await session.commit()
         return doc
+
+
+@pytest.fixture
+async def arg_conversation(session_factory) -> Conversation:
+    async with session_factory() as session:
+        await session.begin()
+        conv = Conversation(id=uuid4(), country_code="ARG", status="active")
+        session.add(conv)
+        await session.commit()
+        return conv
+
+
+@pytest.fixture
+async def arg_documents(session_factory) -> tuple[Document, Document]:
+    async with session_factory() as session:
+        await session.begin()
+        user_doc = await DocumentFactory.create_async(
+            session=session,
+            chunk_count=1,
+            country_code="ARG",
+            language="es",
+            owner_user_id=UUID(TEST_USER_ID),
+        )
+        base_doc = await DocumentFactory.create_async(
+            session=session,
+            chunk_count=1,
+            access_scope="base",
+            owner_user_id=None,
+            country_code="ARG",
+            metadata_={"auto_attach_enabled": True},
+        )
+        await session.commit()
+        return user_doc, base_doc
 
 
 @pytest.fixture
@@ -196,3 +229,26 @@ async def test_detach_document(
     assert listing.status_code == 200
     docs = listing.json()["attachments"]
     assert all(rec["document_id"] != str(text_document.id) for rec in docs)
+
+
+@pytest.mark.asyncio
+async def test_bulk_attach_by_country(
+    api_client: AsyncClient,
+    arg_conversation: Conversation,
+    arg_documents: tuple[Document, Document],
+) -> None:
+    user_doc, base_doc = arg_documents
+    resp = await api_client.post(
+        f"/v1/conversations/{arg_conversation.id}/attachments/bulk",
+        json={
+            "document_ids": [str(user_doc.id), str(base_doc.id)],
+        },
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert str(user_doc.id) in body["attached"] or str(base_doc.id) in body["attached"]
+    listing = await api_client.get(f"/v1/conversations/{arg_conversation.id}/attachments")
+    assert listing.status_code == 200
+    attached_ids = {rec["document_id"] for rec in listing.json()["attachments"]}
+    assert str(user_doc.id) in attached_ids or str(base_doc.id) in attached_ids

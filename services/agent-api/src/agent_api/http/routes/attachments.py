@@ -19,6 +19,9 @@ from agent_api.http.deps import (
 from agent_api.http.errors import GatewayError
 from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.schemas import (
+    AttachmentBulkRequest,
+    AttachmentBulkResponse,
+    AttachmentBulkSkipped,
     AttachmentDeleteResponse,
     AttachmentListResponse,
     AttachmentMutationResponse,
@@ -28,12 +31,7 @@ from agent_api.http.schemas import (
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
 from repositories.conversation_scope_repository import ConversationDocumentRecord
-from services import (
-    AttachmentResult,
-    AttachmentService,
-    AttachmentStatus,
-    DocumentNotReadyError,
-)
+from services import AttachmentResult, AttachmentService, AttachmentStatus, DocumentNotReadyError
 
 router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 
@@ -188,6 +186,96 @@ async def detach_document(  # pragma: no cover - exercised via HTTP tests
         conversation_id=conversation_id,
         document_id=document_id,
         status=status_value.value,
+        request_id=request_context.request_id,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_200_OK, content=response.model_dump(), headers=headers
+    )
+
+
+@router.post(
+    "/{conversation_id}/attachments/bulk",
+    summary="Attach all documents for a country to a conversation",
+)
+async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
+    conversation_id: str,
+    payload: AttachmentBulkRequest,
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    auth_context: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> JSONResponse:
+    user_id = auth_context.user_id
+    if not user_id:
+        raise GatewayError(
+            code="UNAUTHORIZED",
+            message="User context is required",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    await rate_limiter.acquire(
+        bucket="attachments_bulk",
+        tokens=1,
+        route="attachments.bulk",
+        metadata={
+            "document_ids": len(payload.document_ids),
+        },
+    )
+
+    service = AttachmentService(
+        db_session,
+        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
+    )
+
+    attached: list[str] = []
+    skipped: list[AttachmentBulkSkipped] = []
+    unique_ids = list(dict.fromkeys(payload.document_ids))
+    for doc_id in unique_ids:
+        try:
+            result = await service.attach_document(
+                conversation_id=conversation_id,
+                document_id=doc_id,
+                attach_source="bulk_country",
+                visibility=payload.visibility,
+                role=payload.role,
+                attached_by_user_id=user_id,
+                auto_attach_base_docs=False,
+            )
+        except DocumentNotReadyError as exc:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=str(exc.document_id),
+                    reason=f"Document not ready (status={exc.status}, stage={exc.stage})",
+                )
+            )
+            continue
+        except LookupError as exc:
+            skipped.append(AttachmentBulkSkipped(document_id=doc_id, reason=str(exc)))
+            continue
+
+        if result.status is AttachmentStatus.ATTACHED and result.attachment:
+            attached.append(result.attachment.document_id)
+        elif result.status is AttachmentStatus.FEATURE_DISABLED or not result.attachment:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=doc_id,
+                    reason=result.message or "Attachment feature disabled",
+                )
+            )
+        else:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=doc_id,
+                    reason=result.message or result.status.value,
+                )
+            )
+
+    await db_session.commit()
+    headers = _build_headers(rate_limiter, settings)
+    response = AttachmentBulkResponse(
+        conversation_id=conversation_id,
+        attached=attached,
+        skipped=skipped,
         request_id=request_context.request_id,
     )
     return JSONResponse(

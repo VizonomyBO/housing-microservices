@@ -65,6 +65,10 @@ async def list_documents(  # pragma: no cover - exercised via HTTP tests
         list[str] | None,
         Query(description="Filter by SHA-256 content hash"),
     ] = None,
+    country_code: Annotated[
+        list[str] | None,
+        Query(description="Filter by country code"),
+    ] = None,
     created_after: Annotated[
         datetime | None,
         Query(description="Return documents created after this timestamp"),
@@ -88,6 +92,7 @@ async def list_documents(  # pragma: no cover - exercised via HTTP tests
         page_size=page_size,
         tags=tags or [],
         content_hashes=content_hash or [],
+        country_codes=country_code or [],
         created_after=created_after,
         created_before=created_before,
         include_base_documents=settings.reduced_scope.enabled,

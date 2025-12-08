@@ -114,6 +114,9 @@ class PaginationMetadata(BaseModel):
 
 
 __all__ = [
+    "AttachmentBulkRequest",
+    "AttachmentBulkResponse",
+    "AttachmentBulkSkipped",
     "AttachmentDeleteResponse",
     "AttachmentListResponse",
     "AttachmentMutationResponse",
@@ -415,6 +418,24 @@ class AttachmentRequest(BaseModel):
     visibility: Literal["visible", "hidden", "read_only"] | None = None
     role: str | None = Field(default="primary")
     auto_attach_base_docs: bool = False
+
+
+class AttachmentBulkRequest(BaseModel):
+    document_ids: list[str] = Field(..., min_length=1, max_length=500)
+    visibility: Literal["visible", "hidden", "read_only"] | None = None
+    role: str | None = Field(default="primary")
+
+
+class AttachmentBulkSkipped(BaseModel):
+    document_id: str
+    reason: str
+
+
+class AttachmentBulkResponse(BaseModel):
+    conversation_id: str
+    attached: list[str] = Field(default_factory=list)
+    skipped: list[AttachmentBulkSkipped] = Field(default_factory=list)
+    request_id: str
 
 
 class AttachmentMutationResponse(BaseModel):
