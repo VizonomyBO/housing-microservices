@@ -147,7 +147,7 @@ main() {
   if [[ "$RUN_TERRAFORM" -eq 1 ]]; then
     tf_args=(--tfvars "$TF_VARS_FILE" --workspace "$TF_WORKSPACE")
     [[ "$DESTROY_FIRST" -eq 1 ]] && tf_args=(--destroy-first "${tf_args[@]}")
-    ENV_FILE="$ENV_FILE" TF_VARS_FILE="$TF_VARS_FILE" TF_WORKSPACE="$TF_WORKSPACE" "$PROVISION_SCRIPT" "${tf_args[@]}"
+    ENV_FILE="$ENV_FILE" TF_VARS_FILE="$TF_VARS_FILE" "$PROVISION_SCRIPT" "${tf_args[@]}"
   else
     log "Skipping terraform apply (--skip-terraform)"
   fi
