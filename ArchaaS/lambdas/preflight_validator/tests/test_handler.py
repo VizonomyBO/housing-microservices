@@ -81,7 +81,9 @@ class TestValidateContentType:
         assert validate_content_type("application/pdf; charset=utf-8", "pdf") is True
 
     def test_docx_valid(self):
-        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        content_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
         assert validate_content_type(content_type, "docx") is True
 
     def test_html_valid(self):

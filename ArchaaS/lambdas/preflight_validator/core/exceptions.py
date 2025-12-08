@@ -5,10 +5,8 @@ class PreflightError(Exception):
     """Base exception for preflight validator."""
 
 
-
 class ValidationError(PreflightError):
     """Raised when document validation fails."""
-
 
 
 class DuplicateDocumentError(PreflightError):
@@ -23,17 +21,13 @@ class MimeTypeError(ValidationError):
     """Raised when MIME type validation fails."""
 
 
-
 class DatabaseError(PreflightError):
     """Raised when database operations fail."""
-
 
 
 class S3Error(PreflightError):
     """Raised when S3 operations fail."""
 
 
-
 class StepFunctionError(PreflightError):
     """Raised when Step Function operations fail."""
-

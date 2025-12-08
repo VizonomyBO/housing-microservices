@@ -176,7 +176,9 @@ class DocumentRepository:
                     document_data.get("ingestion_started_at"),
                     document_data.get("visibility", "private"),
                     document_data.get("managed_by", "user"),
-                    json.dumps(document_data.get("metadata", {})),  # Serialize dict to JSON string
+                    json.dumps(
+                        document_data.get("metadata", {})
+                    ),  # Serialize dict to JSON string
                     document_data["created_at"],
                 )
 

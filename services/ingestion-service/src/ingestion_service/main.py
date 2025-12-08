@@ -5,8 +5,16 @@ import logging
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -185,9 +193,13 @@ async def complete_upload(
         raise HTTPException(status_code=400, detail="Invalid identifiers") from exc
 
     if source_type not in settings.allowed_source_types:
-        raise HTTPException(status_code=400, detail=f"Unsupported source_type '{source_type}'")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported source_type '{source_type}'"
+        )
     if access_scope != "base" and not owner_user_id:
-        raise HTTPException(status_code=400, detail="owner_user_id required for non-base uploads")
+        raise HTTPException(
+            status_code=400, detail="owner_user_id required for non-base uploads"
+        )
 
     tags_list = _parse_json_field(tags, [])
     metadata_obj = _parse_json_field(metadata, {})
@@ -213,7 +225,9 @@ async def complete_upload(
         raise HTTPException(status_code=400, detail="File is empty")
     actual_size = len(body)
     if declared_size and actual_size > declared_size + 1024:
-        raise HTTPException(status_code=400, detail="Uploaded file exceeds declared size")
+        raise HTTPException(
+            status_code=400, detail="Uploaded file exceeds declared size"
+        )
     if actual_size > settings.max_file_size_bytes:
         raise HTTPException(status_code=413, detail="File exceeds max_file_size_bytes")
     payload.file_size_bytes = actual_size
@@ -237,14 +251,18 @@ async def complete_upload(
     except Exception as exc:  # pragma: no cover - defensive
         await db.rollback()
         logger.exception("Unexpected failure")
-        raise HTTPException(status_code=500, detail="Unexpected ingestion failure") from exc
+        raise HTTPException(
+            status_code=500, detail="Unexpected ingestion failure"
+        ) from exc
 
     return UploadCompleteResponse(
         document_id=document.id,
         ingestion_id=job.id,
         status=document.status,
         content_hash=document.content_hash,
-        message="Ingestion completed" if document.status == "active" else "Ingestion failed",
+        message="Ingestion completed"
+        if document.status == "active"
+        else "Ingestion failed",
     )
 
 

@@ -70,7 +70,9 @@ class IngestionJobManager:
             existing_job.started_at = datetime.now(UTC)
             existing_job.worker = worker or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
             if trace_id:
-                existing_job.trace_id = UUID(trace_id) if isinstance(trace_id, str) else trace_id
+                existing_job.trace_id = (
+                    UUID(trace_id) if isinstance(trace_id, str) else trace_id
+                )
             await self.session.flush()
             return existing_job
 

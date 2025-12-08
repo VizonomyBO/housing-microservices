@@ -181,6 +181,15 @@ resource "aws_security_group" "ec2_microservices" {
     description = "Swagger service (public access)"
   }
 
+  # Ingestion service (FastAPI on EC2)
+  ingress {
+    from_port   = 8085
+    to_port     = 8085
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Ingestion service (public access)"
+  }
+
   # HTTP/HTTPS for package updates
   egress {
     from_port   = 0

@@ -47,7 +47,9 @@ async def async_handler(event: dict) -> dict:
         try:
             await refresh_active_chunks_view(session, concurrently=REFRESH_CONCURRENTLY)
             if document.access_scope == "base" and document.country_code:
-                await refresh_base_documents_cache_for_country(session, document.country_code)
+                await refresh_base_documents_cache_for_country(
+                    session, document.country_code
+                )
             await job_manager.complete_job(job.id)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Index refresh failed for %s", document_id)

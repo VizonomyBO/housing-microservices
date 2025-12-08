@@ -5,7 +5,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from voyageai import AsyncClient as VoyageAsyncClient
 from voyageai import error as voyage_errors
 
@@ -28,7 +33,9 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
     max_batch: int = 64
 
     def __post_init__(self) -> None:
-        self._client = VoyageAsyncClient(api_key=self.api_key, timeout=self.timeout_seconds)
+        self._client = VoyageAsyncClient(
+            api_key=self.api_key, timeout=self.timeout_seconds
+        )
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
@@ -46,7 +53,8 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
             ):
                 with attempt:
                     response = await self._client.embed(batch, model=self.model)
-                    vectors = [list(map(float, embedding)) for embedding in response.embeddings]
+                    vectors = [
+                        list(map(float, embedding)) for embedding in response.embeddings
+                    ]
                     embeddings.extend(vectors)
         return embeddings
-

@@ -25,7 +25,9 @@ logger.setLevel(logging.INFO)
 PROCESSED_BUCKET = os.environ.get("PROCESSED_BUCKET", "")
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY")
 VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-3")
-VOYAGE_API_URL = os.environ.get("VOYAGE_API_URL", "https://api.voyageai.com/v1/embeddings")
+VOYAGE_API_URL = os.environ.get(
+    "VOYAGE_API_URL", "https://api.voyageai.com/v1/embeddings"
+)
 BATCH_SIZE = int(os.environ.get("EMBEDDING_BATCH_SIZE", "32"))
 MAX_TOKEN_COUNT = 800
 EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", "1024"))
@@ -90,7 +92,9 @@ async def async_handler(event: dict) -> dict:
         await update_document_stage(session, document_uuid, stage="embed")
 
         try:
-            inserted = await _persist_chunks(session, document, chunk_payloads, embeddings)
+            inserted = await _persist_chunks(
+                session, document, chunk_payloads, embeddings
+            )
             await job_manager.complete_job(job.id)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Failed to persist embeddings for %s", document_id)
@@ -135,7 +139,9 @@ def _load_chunks(document_id: str, chunks_key: str) -> list[ChunkPayload]:
                 page_number=_first_value(data.get("page_numbers")),
                 section_title=data.get("section_title"),
                 chunk_type=str(data.get("chunk_type", "text")),
-                metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else None,
+                metadata=data.get("metadata")
+                if isinstance(data.get("metadata"), dict)
+                else None,
                 content_hash=data.get("content_hash"),
             )
         )
@@ -147,7 +153,9 @@ async def _generate_embeddings(texts: Sequence[str]) -> list[list[float] | None]
     if not texts:
         return []
     if not VOYAGE_API_KEY:
-        logger.warning("VOYAGE_API_KEY not configured. Writing chunks without embeddings.")
+        logger.warning(
+            "VOYAGE_API_KEY not configured. Writing chunks without embeddings."
+        )
         return [None for _ in texts]
 
     embeddings: list[list[float]] = []

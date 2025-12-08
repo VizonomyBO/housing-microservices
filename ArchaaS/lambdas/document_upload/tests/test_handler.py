@@ -209,7 +209,9 @@ class TestHandlerIntegration:
     @pytest.mark.asyncio
     @patch("handler.DocumentRepository")
     @patch("handler.generate_presigned_url")
-    async def test_new_document_upload(self, mock_presigned, mock_repo_class, valid_event):
+    async def test_new_document_upload(
+        self, mock_presigned, mock_repo_class, valid_event
+    ):
         """Test successful new document upload."""
         # Setup mocks
         mock_repo = AsyncMock()

@@ -88,7 +88,9 @@ async def async_handler(event: dict) -> dict:
                 await job_manager.complete_job(job.id)
                 await refresh_active_chunks_view(session)
                 if document.access_scope == "base" and document.country_code:
-                    await refresh_base_documents_cache_for_country(session, document.country_code)
+                    await refresh_base_documents_cache_for_country(
+                        session, document.country_code
+                    )
             else:
                 await _mark_document_failed(
                     document=document,
@@ -118,7 +120,11 @@ async def async_handler(event: dict) -> dict:
         "Ingestion finalizer updated document %s (status=%s)",
         document_id,
         document.status,
-        extra={"document_id": document_id, "ingestion_id": ingestion_id, "status": document.status},
+        extra={
+            "document_id": document_id,
+            "ingestion_id": ingestion_id,
+            "status": document.status,
+        },
     )
 
     return {
@@ -142,7 +148,9 @@ async def _mark_document_active(
     document.ingestion_stage = "activate"
     started_at = _parse_timestamp(timestamps.get("started_at"))
     completed_at = _parse_timestamp(timestamps.get("completed_at")) or datetime.now(UTC)
-    document.ingestion_started_at = document.ingestion_started_at or started_at or completed_at
+    document.ingestion_started_at = (
+        document.ingestion_started_at or started_at or completed_at
+    )
     document.ingestion_completed_at = completed_at
     if content_hash:
         document.content_hash = content_hash
@@ -214,4 +222,8 @@ def _error_code(error_info: dict) -> str:
 def _error_message(error_info: dict) -> str:
     if not error_info:
         return "Document ingestion failed"
-    return error_info.get("Cause") or error_info.get("message") or "Document ingestion failed"
+    return (
+        error_info.get("Cause")
+        or error_info.get("message")
+        or "Document ingestion failed"
+    )

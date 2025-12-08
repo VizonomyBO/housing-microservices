@@ -58,7 +58,9 @@ async def _verify_remote(token: str, settings: Settings) -> UserContext:
         raise AuthError("Auth service URL not configured")
     verify_url = f"{str(settings.auth_base_url).rstrip('/')}{settings.auth_verify_path}"
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(verify_url, headers={"Authorization": f"Bearer {token}"})
+        resp = await client.get(
+            verify_url, headers={"Authorization": f"Bearer {token}"}
+        )
     if resp.status_code != 200:
         raise AuthError(f"Token verification failed: {resp.text}")
     data = resp.json()
@@ -80,4 +82,3 @@ async def verify_token(authorization: str | None, settings: Settings) -> UserCon
     if settings.jwt_secret_key:
         return _decode_locally(token, settings)
     return await _verify_remote(token, settings)
-

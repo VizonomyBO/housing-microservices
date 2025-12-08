@@ -88,7 +88,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     trace_id = event.get("trace_id", "")
 
     if not all([document_id, bucket, key]):
-        return {"statusCode": 400, "error": "Missing required fields: document_id, bucket, key"}
+        return {
+            "statusCode": 400,
+            "error": "Missing required fields: document_id, bucket, key",
+        }
 
     local_path = None
     try:
@@ -101,9 +104,17 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Convert to markdown
         logger.info(f"Converting {document_id} with MarkItDown")
         try:
-            markdown_content, tables_count, pages_count = extract_pdf_to_markdown(local_path)
-        except (UnsupportedFormatException, FileConversionException, MarkdownConversionError) as err:
-            logger.error("Conversion failed for %s: %s", document_id, err, exc_info=True)
+            markdown_content, tables_count, pages_count = extract_pdf_to_markdown(
+                local_path
+            )
+        except (
+            UnsupportedFormatException,
+            FileConversionException,
+            MarkdownConversionError,
+        ) as err:
+            logger.error(
+                "Conversion failed for %s: %s", document_id, err, exc_info=True
+            )
             raise RuntimeError(f"Conversion failed for {document_id}: {err}") from err
 
         # Upload markdown to S3

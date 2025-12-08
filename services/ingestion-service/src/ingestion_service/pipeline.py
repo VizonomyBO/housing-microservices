@@ -21,7 +21,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import RetryError
 
-from ingestion_service.embeddings import VoyageEmbeddingClient, VoyageEmbeddingClientProtocol
+from ingestion_service.embeddings import (
+    VoyageEmbeddingClient,
+    VoyageEmbeddingClientProtocol,
+)
 from ingestion_service.settings import Settings
 from ingestion_service.schemas import UploadInitRequest
 
@@ -46,7 +49,8 @@ class MarkdownChunker:
     """Simple markdown chunker mirroring the agent-api embedding writer."""
 
     TARGET_TOKENS = 500
-    MAX_TOKENS = 1000
+    # Keep max at or below DB constraint ck_chunks_token_limit (800)
+    MAX_TOKENS = 800
     MIN_TOKENS = 50
     OVERLAP_TOKENS = 50
     CHARS_PER_TOKEN = 4
@@ -89,7 +93,10 @@ class MarkdownChunker:
                 overlap_chars = self.OVERLAP_TOKENS * self.CHARS_PER_TOKEN
                 current_text = current_text[-overlap_chars:]
 
-        if current_text.strip() and self._token_estimate(current_text) >= self.MIN_TOKENS:
+        if (
+            current_text.strip()
+            and self._token_estimate(current_text) >= self.MIN_TOKENS
+        ):
             chunks.append(
                 self._build_chunk(
                     document_id,
@@ -148,7 +155,9 @@ class MarkdownConverter:
             except OSError:
                 logger.warning("Failed to cleanup temp file %s", path)
 
-        markdown = getattr(result, "text_content", None) or getattr(result, "markdown_content", None)
+        markdown = getattr(result, "text_content", None) or getattr(
+            result, "markdown_content", None
+        )
         if not markdown or not markdown.strip():
             raise IngestionError("Conversion returned empty content")
         metadata = getattr(result, "metadata", {}) or {}
@@ -189,7 +198,11 @@ class IngestionPipeline:
             country_code=request.country_code,
         )
         if existing:
-            logger.info("Deduped upload for hash=%s (document %s)", content_hash[:8], existing.id)
+            logger.info(
+                "Deduped upload for hash=%s (document %s)",
+                content_hash[:8],
+                existing.id,
+            )
             job = await self._record_job(
                 session=session,
                 document_id=existing.id,
@@ -230,7 +243,9 @@ class IngestionPipeline:
             )
             await refresh_active_chunks_view(session)
             if document.access_scope == "base" and document.country_code:
-                await refresh_base_documents_cache_for_country(session, document.country_code)
+                await refresh_base_documents_cache_for_country(
+                    session, document.country_code
+                )
             return document, job
         except RetryError as exc:
             await self._fail_document(
@@ -474,7 +489,10 @@ class IngestionPipeline:
             ingestion_meta.setdefault("mode", "markitdown_sync")
             ingestion_meta.setdefault("source", "document_upload")
         else:
-            payload["ingestion"] = {"mode": "markitdown_sync", "source": "document_upload"}
+            payload["ingestion"] = {
+                "mode": "markitdown_sync",
+                "source": "document_upload",
+            }
         return payload
 
     @staticmethod

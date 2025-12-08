@@ -90,11 +90,17 @@ def validate_mime_type(
     # Check if MIME type is in allowed list
     if mime_type not in ALLOWED_MIME_TYPES:
         allowed = ", ".join(ALLOWED_MIME_TYPES.keys())
-        return False, f"MIME type '{mime_type}' is not allowed. Allowed types: {allowed}"
+        return (
+            False,
+            f"MIME type '{mime_type}' is not allowed. Allowed types: {allowed}",
+        )
 
     # Check against expected type if provided
     if expected_type and mime_type != expected_type:
-        return False, f"MIME type mismatch: expected '{expected_type}', got '{mime_type}'"
+        return (
+            False,
+            f"MIME type mismatch: expected '{expected_type}', got '{mime_type}'",
+        )
 
     return True, None
 

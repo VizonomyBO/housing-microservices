@@ -114,7 +114,9 @@ def split_into_chunks(
             # Keep overlap
             overlap_chars = overlap_tokens * CHARS_PER_TOKEN
             current_text = (
-                current_text[-overlap_chars:] if len(current_text) > overlap_chars else ""
+                current_text[-overlap_chars:]
+                if len(current_text) > overlap_chars
+                else ""
             )
             chunk_index += 1
 
@@ -154,7 +156,9 @@ def handler(event: dict, context: Any) -> dict:
     document_id = event.get("document_id")
     ingestion_id = event.get("ingestion_id")
     # markdown_key can be passed directly or nested in convert_result
-    markdown_key = event.get("markdown_key") or event.get("convert_result", {}).get("markdown_key")
+    markdown_key = event.get("markdown_key") or event.get("convert_result", {}).get(
+        "markdown_key"
+    )
 
     if not all([document_id, markdown_key]):
         return {"statusCode": 400, "error": "Missing document_id or markdown_key"}

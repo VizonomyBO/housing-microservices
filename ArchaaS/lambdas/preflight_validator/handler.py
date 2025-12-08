@@ -207,9 +207,12 @@ async def handler(event: dict, context: Any) -> dict:
 
             # Download and analyze file
             logger.info(f"Analyzing document {document_id}")
-            content_hash, file_size, mime_type, detection_method = await download_and_analyze_file(
-                bucket, key
-            )
+            (
+                content_hash,
+                file_size,
+                mime_type,
+                detection_method,
+            ) = await download_and_analyze_file(bucket, key)
             logger.info(
                 f"Analysis complete: hash={content_hash[:16]}..., "
                 f"size={file_size}, mime={mime_type} ({detection_method})"
@@ -314,11 +317,15 @@ async def handler(event: dict, context: Any) -> dict:
                         # metadata_ might be a JSON string or dict
                         existing_meta = document.metadata_
                         if isinstance(existing_meta, str):
-                            existing_meta = json.loads(existing_meta) if existing_meta else {}
+                            existing_meta = (
+                                json.loads(existing_meta) if existing_meta else {}
+                            )
                         elif existing_meta is None:
                             existing_meta = {}
                         existing_meta["deduped_from"] = str(existing.id)
-                        existing_meta["dedup_detected_at"] = datetime.now(UTC).isoformat()
+                        existing_meta["dedup_detected_at"] = datetime.now(
+                            UTC
+                        ).isoformat()
                         document.metadata_ = json.dumps(existing_meta)
 
                         # Mark job as succeeded (dedup is a success case)
@@ -339,7 +346,10 @@ async def handler(event: dict, context: Any) -> dict:
                             document_id=document_id,
                             stage="preflight",
                             status="completed",
-                            metadata={"result": "deduplicated", "deduped_from": str(existing.id)},
+                            metadata={
+                                "result": "deduplicated",
+                                "deduped_from": str(existing.id),
+                            },
                             trace_id=request_id,
                         )
 

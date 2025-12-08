@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 class UploadInitRequest(BaseModel):
     document_name: str = Field(..., min_length=1, max_length=255)
-    source_type: str = Field(..., description="File extension or content type hint (pdf, docx, etc.)")
+    source_type: str = Field(
+        ..., description="File extension or content type hint (pdf, docx, etc.)"
+    )
     country_code: str | None = Field(default=None, min_length=2, max_length=3)
     language: str = Field(default="en", min_length=2, max_length=5)
     tags: list[str] = Field(default_factory=list)
@@ -28,7 +30,9 @@ class UploadInitRequest(BaseModel):
     def validate_access_scope(cls, value: str) -> str:
         allowed = {"user_private", "user_shared", "base"}
         if value not in allowed:
-            raise ValueError(f"Invalid access_scope '{value}', expected one of {sorted(allowed)}")
+            raise ValueError(
+                f"Invalid access_scope '{value}', expected one of {sorted(allowed)}"
+            )
         return value
 
     @field_validator("country_code")
@@ -57,4 +61,3 @@ class UploadCompleteResponse(BaseModel):
     status: str
     content_hash: str
     message: str | None = None
-

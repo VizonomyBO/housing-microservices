@@ -34,7 +34,9 @@ class StructuredLogger:
         log_data = extra or {}
         log_data["request_id"] = self._request_id
 
-        self.logger.log(level, message, extra={"structured": log_data}, exc_info=exc_info)
+        self.logger.log(
+            level, message, extra={"structured": log_data}, exc_info=exc_info
+        )
 
     def info(self, message: str, extra: dict | None = None) -> None:
         self._log(logging.INFO, message, extra)
@@ -71,7 +73,9 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             import traceback
 
-            log_entry["exception"] = "".join(traceback.format_exception(*record.exc_info))
+            log_entry["exception"] = "".join(
+                traceback.format_exception(*record.exc_info)
+            )
 
         return json.dumps(log_entry)
 

@@ -15,16 +15,23 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="Async SQLAlchemy database URL")
 
     # Auth/token validation
-    jwt_secret_key: str | None = Field(default=None, description="JWT secret for access tokens")
+    jwt_secret_key: str | None = Field(
+        default=None, description="JWT secret for access tokens"
+    )
     auth_base_url: AnyUrl | None = Field(
-        default=None, description="Auth service base URL for token verification fallback"
+        default=None,
+        description="Auth service base URL for token verification fallback",
     )
     auth_verify_path: str = Field(default="/v1/auth/verify-token")
 
     # Upload signing
-    signing_secret: str | None = Field(default=None, description="Secret used to sign upload fields")
+    signing_secret: str | None = Field(
+        default=None, description="Secret used to sign upload fields"
+    )
     upload_ttl_seconds: int = Field(default=900, description="Presign validity window")
-    max_file_size_bytes: int = Field(default=100 * 1024 * 1024, description="Upload size cap (100MB)")
+    max_file_size_bytes: int = Field(
+        default=100 * 1024 * 1024, description="Upload size cap (100MB)"
+    )
 
     # Ingestion
     allowed_source_types: Sequence[str] = Field(

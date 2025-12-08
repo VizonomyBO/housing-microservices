@@ -38,7 +38,9 @@ logger = get_logger(__name__)
 S3_BUCKET = os.environ.get("RAW_DOCUMENTS_BUCKET", "vizonomy-raw-documents")
 S3_KEY_PREFIX = os.environ.get("S3_KEY_PREFIX", "raw")
 PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY_SEC", "900"))
-MAX_FILE_SIZE_BYTES = int(os.environ.get("MAX_FILE_SIZE_BYTES", str(100 * 1024 * 1024)))  # 100MB
+MAX_FILE_SIZE_BYTES = int(
+    os.environ.get("MAX_FILE_SIZE_BYTES", str(100 * 1024 * 1024))
+)  # 100MB
 
 # Allowed source types and their MIME mappings
 ALLOWED_SOURCE_TYPES = {
@@ -264,7 +266,9 @@ def validate_base_scope_access(access_scope: str, roles: list[str]) -> None:
     if access_scope == "base":
         allowed_roles = {"admin", "service"}
         if not any(role in allowed_roles for role in roles):
-            raise AppValidationError("Only admin/service roles can create base documents")
+            raise AppValidationError(
+                "Only admin/service roles can create base documents"
+            )
 
 
 @async_handler
