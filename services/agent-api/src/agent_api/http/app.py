@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from shared_data_layer.db.session import DatabaseSessionManager
 
@@ -122,6 +123,15 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
         lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        expose_headers=["Authorization", "Content-Type"],
     )
 
     @app.middleware("http")

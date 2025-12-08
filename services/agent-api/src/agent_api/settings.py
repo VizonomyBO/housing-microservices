@@ -37,6 +37,7 @@ class Settings:
     openai_chat_model: str
     voyage_embedding_model: str
     auth: AuthSettings
+    cors_allowed_origins: tuple[str, ...]
 
 
 @dataclass(slots=True)
@@ -143,6 +144,13 @@ def load_settings() -> Settings:
         openai_chat_model=openai_chat_model,
         voyage_embedding_model=voyage_embedding_model,
         auth=auth_settings,
+        cors_allowed_origins=_env_csv(
+            "AGENT_API_CORS_ORIGINS",
+            default=(
+                "http://localhost:3000",
+                "http://localhost:5173",
+            ),
+        ),
     )
 
 

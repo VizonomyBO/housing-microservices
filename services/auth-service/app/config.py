@@ -33,7 +33,11 @@ class Config:
     COOKIE_SECURE = os.getenv("COOKIE_SECURE", "True").lower() == "true"
 
     # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+    # Default includes common local frontends (localhost:3000, localhost:5173) plus "*"
+    CORS_ORIGINS = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,*",
+    ).split(",")
 
     # Rate Limiting
     RATELIMIT_STORAGE_URL = "memory://"
