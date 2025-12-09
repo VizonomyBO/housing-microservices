@@ -1,5 +1,7 @@
 # Production Runbook (AWS-first ingestion)
 
+For a quick-start version, see `docs/setup/prod.md`. This runbook keeps the full curl walkthrough and terraform/deploy details.
+
 End-to-end guide for deploying the prod stack (Terraform + EC2 services), running the AWS curl walkthrough (login → presign via ingestion service → form upload → poll → attach → chat), and exposing a frontend-ready endpoint reference. Swagger is unhealthy in prod—use the curls below instead.
 
 ## 1) Live endpoints (AWS)
