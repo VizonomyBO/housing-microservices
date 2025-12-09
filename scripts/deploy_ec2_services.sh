@@ -2,14 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-DEFAULT_ENV_FILE="$ROOT_DIR/.env.active"
-FALLBACK_ENV_FILE="$ROOT_DIR/.env.prod.aws"
+DEFAULT_ENV_FILE="$ROOT_DIR/.env.prod"
 TF_DIR="$ROOT_DIR/ArchaaS"
 
 REMOTE_DIR=${REMOTE_DIR:-/opt/housing-microservices}
 REMOTE_COMPOSE_FILE=${REMOTE_COMPOSE_FILE:-docker-compose.ec2.yml}
-REMOTE_ENV_FILE=${REMOTE_ENV_FILE:-.env.ec2}
-REMOTE_ACTIVE_ENV=${REMOTE_ACTIVE_ENV:-.env.active}
+REMOTE_ENV_FILE=${REMOTE_ENV_FILE:-.env.prod}
 
 SSH_USER=${SSH_USER:-ec2-user}
 SSH_PORT=${SSH_PORT:-22}
@@ -34,7 +32,7 @@ Usage:
 
 Options:
   --host HOST              EC2 public host/IP (defaults to POSTGRES_HOST from env or terraform output).
-  --env-file PATH          Base env file to ship to EC2 (default: .env.active if present else .env.prod.aws).
+  --env-file PATH          Base env file to ship to EC2 (default: .env.prod).
   --remote-dir PATH        Remote deployment directory (default: /opt/housing-microservices).
   --ssh-user USER          SSH user (default: ec2-user).
   --ssh-key PATH           SSH key (default: ArchaaS terraform output if present).
@@ -47,7 +45,7 @@ Options:
   -h, --help               Show this help text.
 
 Examples:
-  scripts/use_env.sh aws
+  scripts/use_env.sh prod
   scripts/deploy_ec2_services.sh --host 52.207.140.87 --open-ports
   scripts/deploy_ec2_services.sh --action stop
 EOF
@@ -88,10 +86,8 @@ resolve_env_file() {
   fi
   if [[ -f "$DEFAULT_ENV_FILE" ]]; then
     ENV_FILE="$DEFAULT_ENV_FILE"
-  elif [[ -f "$FALLBACK_ENV_FILE" ]]; then
-    ENV_FILE="$FALLBACK_ENV_FILE"
   else
-    die "No env file found (.env.active or .env.prod.aws)."
+    die "No env file found (.env.prod). Pass --env-file to override."
   fi
 }
 
@@ -251,7 +247,7 @@ sync_repo_to_remote() {
 }
 
 prepare_remote_env() {
-  log "Preparing remote env file ($REMOTE_ENV_FILE → $REMOTE_ACTIVE_ENV) on $REMOTE_HOST"
+  log "Preparing remote env file ($REMOTE_ENV_FILE) on $REMOTE_HOST"
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" bash -s <<EOF
 set -euo pipefail
 cd "$REMOTE_DIR"
@@ -259,8 +255,6 @@ if [[ ! -f "$REMOTE_ENV_FILE" ]]; then
   echo "Missing $REMOTE_ENV_FILE in $REMOTE_DIR" >&2
   exit 1
 fi
-
-AWS_ENV_FILE="$REMOTE_ENV_FILE" ./scripts/use_env.sh aws >/dev/null
 
 DEPLOY_HOST="$REMOTE_HOST" \
 AGENT_PORT="$AGENT_API_PORT" \
@@ -273,9 +267,9 @@ python3 - <<'PY'
 import os
 from pathlib import Path
 
-env_path = Path(".env.active")
+env_path = Path("$REMOTE_ENV_FILE")
 if not env_path.exists():
-    raise SystemExit(".env.active missing after use_env.sh")
+    raise SystemExit(f"{env_path} missing on remote host")
 
 host = os.environ["DEPLOY_HOST"]
 agent_port = os.environ["AGENT_PORT"]
@@ -389,7 +383,7 @@ EOF
 run_compose() {
   local services
   services=$(compose_services)
-  local compose_cmd="sudo docker compose --env-file $REMOTE_ACTIVE_ENV -f $REMOTE_COMPOSE_FILE"
+  local compose_cmd="sudo docker compose --env-file $REMOTE_ENV_FILE -f $REMOTE_COMPOSE_FILE"
   [[ "$INCLUDE_SWAGGER" -eq 0 ]] || compose_cmd="$compose_cmd --profile swagger"
 
   case "$ACTION" in

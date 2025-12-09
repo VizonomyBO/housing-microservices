@@ -8,7 +8,7 @@ A polyglot demo platform that pairs the FastAPI-based Agent API (LangGraph gatew
 ## Quick links (AWS-first)
 - Production setup, curl walkthrough, and frontend endpoint reference: `docs/runbooks/prod_setup.md`
 - Idempotent prod deploy (Terraform + EC2 compose): `scripts/deploy_prod_stack.sh`
-- AWS smoke helper (uploads policy/ledger/KPI PDFs via ingestion service): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` (see runbook §6)
+- AWS smoke helper (uploads policy/ledger/KPI PDFs via ingestion service): `ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh` (see runbook §6)
 - Numeric routing: Numeric cues (digits, arithmetic, KPI/ledger language) auto-set `requires_sql=true`. Prose-only attachments are lifted into a numeric-fact table (label/value/unit with doc/chunk provenance) before Text→SQL→Polars execution, keeping citations intact.
 
 ## Service Inventory
@@ -145,7 +145,15 @@ Use this workflow when you need the full stack with production-like settings, re
 2. **Decide on LocalStack vs AWS**
    - Keep `USE_LOCALSTACK=1` to emulate AWS. Ensure `AWS_ENDPOINT_URL=http://localstack:4566` (containers) or `http://localhost.localstack.cloud:4566` (host tooling), and reuse the default credentials baked into `env.example`.
    - Set `USE_LOCALSTACK=0` when you want the stack to talk to real AWS. Provide `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (optionally) `AWS_SESSION_TOKEN` plus the target region. Clear `AWS_ENDPOINT_URL` so SDKs auto-discover AWS endpoints and restart affected services (`docker compose restart agent-api`).
-   - Prefer `scripts/use_env.sh aws` to copy your prod env into `.env.active` before running compose, `scripts/prod_smoke_check.sh`, or deployment helpers.
+- Prefer `scripts/use_env.sh prod` to emit the `.env.prod` path before running compose, `scripts/prod_smoke_check.sh`, or deployment helpers.
+
+### Env selection (local/dev/prod)
+```bash
+env_file=$(scripts/use_env.sh local|dev|prod)
+set -a && source "$env_file" && set +a
+docker compose --env-file "$env_file" ...
+```
+- `.env.local` → LocalStack/dev DBs, `.env.dev` → hybrid (cloud data plane with local services), `.env.prod` → AWS/EC2.
 
 3. **Launch the full profile**
    ```bash

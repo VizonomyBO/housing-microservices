@@ -7,11 +7,9 @@ set -euo pipefail
 # - Leaves AWS resources intact on repeat runs; pass --destroy-first for a fresh apply.
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-DEFAULT_ENV_ACTIVE="$ROOT_DIR/.env.active"
-DEFAULT_ENV_AWS="$ROOT_DIR/.env.prod.aws"
+DEFAULT_ENV="$ROOT_DIR/.env.prod"
 PROVISION_SCRIPT="$ROOT_DIR/scripts/provision_remote_stack.sh"
 DEPLOY_SCRIPT="$ROOT_DIR/scripts/deploy_ec2_services.sh"
-USE_ENV_SCRIPT="$ROOT_DIR/scripts/use_env.sh"
 
 ENV_FILE=${ENV_FILE:-}
 TF_VARS_FILE=${TF_VARS_FILE:-terraform.v2.tfvars}
@@ -31,10 +29,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/deploy_prod_stack.sh [options]
 
-Idempotent prod deploy: terraform apply + EC2 compose restart. Defaults to .env.active or .env.prod.aws.
+Idempotent prod deploy: terraform apply + EC2 compose restart. Defaults to .env.prod.
 
 Options:
-  --env-file PATH       Env file to source (default: .env.active if present, otherwise .env.prod.aws).
+  --env-file PATH       Env file to source (default: .env.prod).
   --tfvars FILE         Terraform tfvars file (default: terraform.v2.tfvars).
   --workspace NAME      Terraform workspace (default: prod).
   --skip-terraform      Skip terraform apply (only redeploy services).
@@ -108,21 +106,12 @@ resolve_env_file() {
     return
   fi
 
-  if [[ -f "$DEFAULT_ENV_ACTIVE" ]]; then
-    ENV_FILE="$DEFAULT_ENV_ACTIVE"
+  if [[ -f "$DEFAULT_ENV" ]]; then
+    ENV_FILE="$DEFAULT_ENV"
     return
   fi
 
-  if [[ -f "$DEFAULT_ENV_AWS" ]]; then
-    log "No .env.active found; activating AWS env via scripts/use_env.sh aws"
-    if [[ -x "$USE_ENV_SCRIPT" ]]; then
-      ENV_FILE=$("$USE_ENV_SCRIPT" aws 2>/dev/null || true)
-    fi
-  fi
-
-  if [[ -z "${ENV_FILE:-}" || ! -f "$ENV_FILE" ]]; then
-    die "Unable to resolve env file (.env.active or .env.prod.aws)."
-  fi
+  die "Unable to resolve env file (.env.prod)."
 }
 
 ensure_scripts() {

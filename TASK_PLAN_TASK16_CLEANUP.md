@@ -18,7 +18,7 @@ Finalize Task 16 by running all Python quality gates, cleaning smoke/test artifa
 - Internal schemas (`packages/shared_data_layer`) for cascade behavior on documents/conversations. No external sources required so far.
 
 ## Ordered Steps (auto-approved)
-1. Validate env/DB targets: confirm `.env.active` (or `.env.prod.aws`) points to AWS housing/auth_db; note any backups needed.
+1. Validate env/DB targets: confirm `.env.prod` points to AWS housing/auth_db; note any backups needed.
 2. Identify smoke artifacts (docs/conversations/users) from recent runs and delete them in housing/auth_db with targeted SQL; record commands and counts.
 3. Run quality gates via uv: `uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto` (scope only if necessary) and address any failures.
 4. Update tracker/runbooks: mark `TASK_PLAN_TASK16_CLEANUP_PROGRESS.md` + `TASK_PLAN_PROGRESS.md` row 16, add cleanup commands/evidence and any doc/runbook tweaks.

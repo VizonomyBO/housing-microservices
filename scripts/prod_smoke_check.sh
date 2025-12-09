@@ -12,7 +12,7 @@ require_var() {
 }
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-DEFAULT_ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.active"}
+DEFAULT_ENV_FILE=${ENV_FILE:-"$ROOT_DIR/.env.prod"}
 if [[ -f "$DEFAULT_ENV_FILE" ]]; then
   log "Loading env from $DEFAULT_ENV_FILE"
   set -a

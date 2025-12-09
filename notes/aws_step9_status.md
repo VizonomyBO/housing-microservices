@@ -8,8 +8,8 @@
 - Keep evidence under `/tmp/aws_smoke_step9/` so future sessions can diff results.
 
 ## Environment Snapshot (this workstation)
-- Docker compose usually targets AWS via `.env.prod.aws` (LocalStack still deferred). Marker-service is legacy/unused—keep it stopped unless explicitly debugging historical flows.
-- `.env.prod.aws` now points directly at the EC2 host: `AGENT_BASE_URL=http://52.207.140.87:8000`, `AUTH_BASE_URL=http://52.207.140.87:5001`, `INGEST_BASE_URL=https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2`.
+- Docker compose usually targets AWS via `.env.prod` (LocalStack still deferred). Marker-service is legacy/unused—keep it stopped unless explicitly debugging historical flows.
+- `.env.prod` now points directly at the EC2 host: `AGENT_BASE_URL=http://52.207.140.87:8000`, `AUTH_BASE_URL=http://52.207.140.87:5001`, `INGEST_BASE_URL=https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2`.
 - Tooling env: `.venv.tooling` (bootstrap via `scripts/ensure_tooling_env.sh` when running automation helpers).
 
 ## Work Completed This Session

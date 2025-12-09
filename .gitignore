@@ -51,10 +51,13 @@ dist/
 # Environment
 .env
 .env.local
-.env.prod*
+.env.dev
+.env.prod
+.env.prod.*
 .env.active
 .env.active.mode
 .env.*.local
+env-archive/
 .venv
 .venv.tooling/
 venv/

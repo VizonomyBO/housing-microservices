@@ -6,23 +6,24 @@ End-to-end guide for deploying the prod stack (Terraform + EC2 services), runnin
 - `AGENT_BASE_URL=http://52.207.140.87:8000`
 - `AUTH_BASE_URL=http://52.207.140.87:5001`
 - `INGEST_BASE_URL=http://52.207.140.87:8085` (FastAPI ingestion service on EC2)
-- Auth demo creds: `PROD_DEMO_EMAIL` / `PROD_DEMO_PASSWORD` from `.env.prod.aws`.  
-Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && set +a` to load them.
+- Auth demo creds: `PROD_DEMO_EMAIL` / `PROD_DEMO_PASSWORD` from `.env.prod`.  
+Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && set +a` to load them.
 
 ## 2) Environment & prerequisites
 - Tools: Docker 25+ with Compose V2, Terraform 1.7+, AWS CLI, `jq`, `curl`. Python/uv optional (`scripts/ensure_tooling_env.sh` seeds `.venv.tooling`).
 - Env toggle (required before any command):  
   ```bash
-  env_file=$(scripts/use_env.sh aws)   # USE_LOCALSTACK=0, real AWS endpoints
+  env_file=$(scripts/use_env.sh prod)   # USE_LOCALSTACK=0, real AWS endpoints
   set -a && source "$env_file" && set +a
   ```
+- Env files: `.env.local` (LocalStack), `.env.dev` (cloud data plane with local services), `.env.prod` (AWS). Each file sets `ENV_FILE` so compose/env scripts pick up the right configuration.
 - LocalStack is deferred per user directive; keep USE_LOCALSTACK=0 for this runbook.
 
 ## 2.5) CORS configuration (agent-api/auth-service)
 - `agent-api` now reads `AGENT_API_CORS_ORIGINS` (falls back to `CORS_ORIGINS`); auth/user-service continue to use `CORS_ORIGINS`.
-- During the current testing phase, `.env.active` / `.env.prod.aws` set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
+- During the current testing phase, `.env.prod` (and `.env.dev` if you use it) set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
 - To allowlist specific origins/IPs instead, edit the env file(s) before redeploy:  
-  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.active ./scripts/deploy_ec2_services.sh ...`) so containers reload the values.
+  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.prod ./scripts/deploy_ec2_services.sh ...`) so containers reload the values.
 - Revert to `*` if you need fully open CORS again during testing.
 
 ## 3) Frontend integration quick reference
@@ -61,13 +62,13 @@ Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && s
 ## 4) Idempotent prod deploy (infra + EC2 services)
 Use the new entrypoint to apply Terraform and restart the EC2 compose stack in one go:
 ```bash
-ENV_FILE=${ENV_FILE:-.env.active} ./scripts/deploy_prod_stack.sh --open-ports
+ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_prod_stack.sh --open-ports
 ```
 What it does:
-- Sources the selected env (defaults to `.env.active` or `.env.prod.aws`).
+- Sources the selected env (defaults to `.env.prod`).
 - Runs `scripts/provision_remote_stack.sh` (Terraform `-chdir=ArchaaS apply -var-file=terraform.v2.tfvars` in workspace `prod`, optional `--destroy-first` if passed).
 - Updates `POSTGRES_HOST` in the env with the latest EC2 IP, reruns `scripts/setup_remote_databases.sh`.
-- Calls `scripts/deploy_ec2_services.sh` to rsync code, prep `.env.active` on the host, open ports (if `--open-ports`), and start `agent-api`, `auth-service`, `user-service` via `docker-compose.ec2.yml`.
+- Calls `scripts/deploy_ec2_services.sh` to rsync code, use `.env.prod` on the host, open ports (if `--open-ports`), and start `agent-api`, `auth-service`, `user-service` via `docker-compose.ec2.yml`.
 Flags: `--skip-terraform`, `--skip-deploy`, `--include-swagger`, `--no-build`, `--no-sync`, `--tfvars <file>`, `--workspace <name>`.
 
 ## 5) AWS curl walkthrough (manual)
@@ -157,10 +158,10 @@ The commands below run entirely against the live AWS endpoints and the new inges
 ## 6) Automated smoke (multi-PDF)
 Run the helper in AWS mode to upload **all three** PDFs (`doc_policy.pdf`, `doc_ledger.pdf`, `doc_kpi.pdf`) via the FastAPI ingestion service, poll until `active`, attach, and fire three prompts. Each upload is copied to `/tmp/prod_smoke_upload_XXXX.pdf` to avoid dedupe.
 ```bash
-ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
+ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
 ```
 - Output: updates `prod_sample_run.json` with answers + `requires_sql` fields; smoke log captured via `tee`.
-- Override a single upload: `SMOKE_UPLOAD_FILE=/tmp/custom.pdf ENV_FILE=.env.active bash scripts/prod_smoke_check.sh`.
+- Override a single upload: `SMOKE_UPLOAD_FILE=/tmp/custom.pdf ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh`.
 - Expectations: KPI/ledger prompts show `requires_sql:true`, non-empty `sql_queries`, and `table_results` rows. Numeric prompts in prose (no markdown table) are auto-routed to SQL via the synthesized numeric-fact table, so `requires_sql` should still be `true` when digits/ledger/KPI language appears.
 
 ## 7) Troubleshooting & cleanup
@@ -181,7 +182,7 @@ ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(da
   - Data reset (AWS) before final deploy:
     ```bash
     # housing DB – remove smoke docs/chats and cascades
-    set -a && source .env.active && set +a
+    set -a && source .env.prod && set +a
     PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB \
       -c "begin; delete from conversations; delete from documents; commit;"
 

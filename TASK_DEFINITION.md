@@ -66,7 +66,7 @@ COMPOSE_PROFILES=reduced,ops docker compose up -d --build
 
 #### Compose + AWS override
 ```bash
-set -a && source .env.prod.aws && set +a
+set -a && source .env.prod && set +a
 COMPOSE_PROFILES=reduced,ops \
   docker compose \
     -f docker-compose.yml \
@@ -144,7 +144,7 @@ Restructure into clear sections:
    - `terraform apply -var-file=configs/localstack.tfvars`.
    - Curl workflow (login, request presigned URL, upload file, poll doc status, create conversation, attach, SSE chat).
 3. AWS deployment
-   - Source `.env.prod.aws`.
+   - Source `.env.prod`.
    - Compose w/ override.
    - `terraform apply -var-file=configs/prod.tfvars`.
    - Same curl workflow with AWS endpoints.
@@ -181,10 +181,10 @@ For both environments provide scripts/commands:
 ### 3.7 AWS Validation
 
 1. Apply Terraform with real AWS tfvars (buckets, Step Function, Lambdas, RDS).
-2. Start compose stack with `.env.prod.aws` + override.
+2. Start compose stack with `.env.prod` + override.
 3. Repeat curl upload/attach/chat flow using the AWS API Gateway URL.
 4. Run pytest locally (same as above).
-5. Run `./scripts/prod_smoke_check.sh` pointing at AWS endpoints (ensure `.env.prod.aws` values match).
+5. Run `./scripts/prod_smoke_check.sh` pointing at AWS endpoints (ensure `.env.prod` values match).
 6. Confirm SSE log shows identical numerical events with `requires_sql=true`.
 7. If any Terraform/AWS errors occur that block verification, stop and request help.
 
@@ -498,7 +498,7 @@ PROD_DEMO_COUNTRY=USA
 PROD_DEMO_TAG=demo
 ```
 
-.env.prod.aws
+.env.prod
 ```
 # =============================================================================
 # Production Environment (Reduced Scope)
