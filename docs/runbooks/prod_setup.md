@@ -24,6 +24,7 @@ Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && 
 ## 2.5) CORS configuration (agent-api/auth-service)
 - `agent-api` now reads `AGENT_API_CORS_ORIGINS` (falls back to `CORS_ORIGINS`); auth/user-service continue to use `CORS_ORIGINS`.
 - During the current testing phase, `.env.prod` (and `.env.dev` if you use it) set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
+- Verify headers any time with `ORIGIN=https://my-frontend.example ./scripts/test_cors.sh` (hits local + AWS endpoints).
 - To allowlist specific origins/IPs instead, edit the env file(s) before redeploy:  
   `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.prod ./scripts/deploy_ec2_services.sh ...`) so containers reload the values.
 - Revert to `*` if you need fully open CORS again during testing.
