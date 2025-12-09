@@ -38,6 +38,7 @@ class Settings:
     voyage_embedding_model: str
     auth: AuthSettings
     cors_allowed_origins: tuple[str, ...]
+    cors_allow_credentials: bool
 
 
 @dataclass(slots=True)
@@ -111,6 +112,18 @@ def load_settings() -> Settings:
         http_timeout_seconds=_env_float("AUTH_JWKS_TIMEOUT_SECONDS", default=5.0),
     )
 
+    cors_allowed_origins = _resolve_cors_origins(
+        primary="AGENT_API_CORS_ORIGINS",
+        fallback="CORS_ORIGINS",
+        default=(
+            "http://localhost:3000",
+            "http://localhost:5173",
+        ),
+    )
+    cors_allow_credentials = _env_flag("AGENT_API_CORS_ALLOW_CREDENTIALS", default=True)
+    if "*" in cors_allowed_origins and cors_allow_credentials:
+        cors_allow_credentials = False
+
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "agent_api"),
         stack_profile=stack_profile,
@@ -144,13 +157,8 @@ def load_settings() -> Settings:
         openai_chat_model=openai_chat_model,
         voyage_embedding_model=voyage_embedding_model,
         auth=auth_settings,
-        cors_allowed_origins=_env_csv(
-            "AGENT_API_CORS_ORIGINS",
-            default=(
-                "http://localhost:3000",
-                "http://localhost:5173",
-            ),
-        ),
+        cors_allowed_origins=cors_allowed_origins,
+        cors_allow_credentials=cors_allow_credentials,
     )
 
 
@@ -193,6 +201,25 @@ def _env_csv(name: str, default: Iterable[str] | None = None) -> tuple[str, ...]
     if not values and default is not None:
         return tuple(default)
     return tuple(values)
+
+
+def _resolve_cors_origins(
+    *, primary: str, fallback: str | None = None, default: Iterable[str] | None = None
+) -> tuple[str, ...]:
+    """Resolve CORS origins, preferring a service-specific env var with a shared fallback."""
+
+    def _parse(raw_value: str | None) -> tuple[str, ...]:
+        if raw_value is None:
+            return ()
+        values = [segment.strip() for segment in raw_value.split(",") if segment.strip()]
+        return tuple(values)
+
+    origins = _parse(os.getenv(primary))
+    if not origins and fallback:
+        origins = _parse(os.getenv(fallback))
+    if origins:
+        return origins
+    return tuple(default or ())
 
 
 def _resolve_aws_endpoint_url(

@@ -18,6 +18,13 @@ Run `env_file=$(scripts/use_env.sh aws)` then `set -a && source "$env_file" && s
   ```
 - LocalStack is deferred per user directive; keep USE_LOCALSTACK=0 for this runbook.
 
+## 2.5) CORS configuration (agent-api/auth-service)
+- `agent-api` now reads `AGENT_API_CORS_ORIGINS` (falls back to `CORS_ORIGINS`); auth/user-service continue to use `CORS_ORIGINS`.
+- During the current testing phase, `.env.active` / `.env.prod.aws` set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
+- To allowlist specific origins/IPs instead, edit the env file(s) before redeploy:  
+  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.active ./scripts/deploy_ec2_services.sh ...`) so containers reload the values.
+- Revert to `*` if you need fully open CORS again during testing.
+
 ## 3) Frontend integration quick reference
 - **Auth (AUTH_BASE_URL)**
   - Login: `POST /v1/auth/login` with `{"login": "...", "password": "..."}` → `{access_token, refresh_token, user_id}`.

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 from shared_data_layer.db.session import DatabaseSessionManager
 
 from agent_api.auth import AuthTokenValidator
@@ -125,12 +126,19 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    cors_allowed_origins = list(settings.cors_allowed_origins) or ["*"]
+    cors_allow_credentials = settings.cors_allow_credentials
+    if "*" in cors_allowed_origins and cors_allow_credentials:
+        cors_allow_credentials = False
+        logger.info("Wildcard CORS origins detected; disabling credentials for compatibility.")
+
+    cors_middleware_cls: Any = CORSMiddleware
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(settings.cors_allowed_origins),
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        cors_middleware_cls,  # type: ignore[arg-type]
+        allow_origins=cors_allowed_origins,
+        allow_credentials=cors_allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
         expose_headers=["Authorization", "Content-Type"],
     )
 
