@@ -35,6 +35,18 @@ class UserAdminUpdate(BaseModel):
     notes: str | None = None
 
 
+class UserListRequest(BaseModel):
+    page: int = Field(1, ge=1)
+    per_page: int = Field(20, ge=1, le=100)
+    roles: list[str] | None = None
+    role: str | None = None
+    statuses: list[str] | None = None
+    status: str | None = None
+    countries: list[str] | None = None
+    country: str | None = None
+    search: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 router = APIRouter(prefix="/v1/users", tags=["users"])
 
 
@@ -129,16 +141,8 @@ async def get_user(user_id: UUID, request: Request, session: DatabaseSession) ->
     return JSONResponse({"user": user.to_dict(include_sensitive=include_sensitive)})
 
 
-@router.get("")
-async def list_users(
-    request: Request,
-    session: DatabaseSession,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    role: str | None = None,
-    status: str | None = None,
-    country_code: str | None = None,
-) -> JSONResponse:
+@router.post("")
+async def list_users(request: Request, session: DatabaseSession, payload: UserListRequest) -> JSONResponse:
     """List users with pagination and filtering (admin only)."""
     user_ctx = await _require_user_context(request)
     _require_admin(user_ctx)
@@ -147,14 +151,22 @@ async def list_users(
         "List users request",
         extra={
             "admin_id": user_ctx.user_id,
-            "page": page,
-            "per_page": per_page,
-            "role": role,
-            "status": status,
+            "page": payload.page,
+            "per_page": payload.per_page,
+            "roles": payload.roles,
+            "statuses": payload.statuses,
+            "countries": payload.countries,
+            "search": payload.search,
         },
     )
     result = UserService.get_all_users(
-        session, page=page, per_page=per_page, role=role, status=status, country_code=country_code
+        session,
+        page=payload.page,
+        per_page=payload.per_page,
+        roles=(payload.roles or []) + ([payload.role] if payload.role else []),
+        statuses=(payload.statuses or []) + ([payload.status] if payload.status else []),
+        countries=(payload.countries or []) + ([payload.country] if payload.country else []),
+        search=payload.search,
     )
     return JSONResponse(result)
 

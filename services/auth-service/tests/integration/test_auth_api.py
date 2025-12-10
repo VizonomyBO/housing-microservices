@@ -175,6 +175,31 @@ class TestLoginEndpoint:
 
 
 @pytest.mark.integration
+class TestForgotPasswordEndpoint:
+    """Tests for /v1/auth/forgot-password endpoint"""
+
+    def test_forgot_password_sends_email(self, client, sample_user, monkeypatch):
+        captured = {}
+
+        def mock_send(self, to_email: str, reset_url: str, token: str):
+            captured["to"] = to_email
+            captured["reset_url"] = reset_url
+            captured["token"] = token
+
+        monkeypatch.setattr("app.api.auth.EmailClient.send_password_reset_email", mock_send)
+
+        response = client.post(
+            "/v1/auth/forgot-password",
+            json={"email": sample_user.email},
+        )
+
+        assert response.status_code == 200
+        assert captured["to"] == sample_user.email
+        assert "token" in captured
+        assert "reset_url" in captured
+
+
+@pytest.mark.integration
 class TestRefreshEndpoint:
     """Tests for /v1/auth/refresh endpoint"""
 

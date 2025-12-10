@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import or_
+from sqlalchemy.sql import literal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -50,23 +51,41 @@ class UserService:
         session: Session,
         page: int = 1,
         per_page: int = 20,
-        role: str | None = None,
-        status: str | None = None,
-        country_code: str | None = None,
+        roles: list[str] | None = None,
+        statuses: list[str] | None = None,
+        countries: list[str] | None = None,
+        search: str | None = None,
     ) -> dict[str, Any]:
-        """Get all users with pagination and filtering"""
+        """Get all users with pagination and filtering."""
         query = session.query(User)
 
-        if role:
-            query = query.filter_by(role=role)
-        if status:
-            query = query.filter_by(status=status)
-        if country_code:
-            query = query.filter_by(country_code=country_code)
+        roles_filter = [role for role in (roles or []) if role]
+        if roles_filter:
+            query = query.filter(User.role.in_(roles_filter))
+
+        status_filter = [status for status in (statuses or []) if status]
+        if status_filter:
+            query = query.filter(User.status.in_(status_filter))
+
+        country_filter = [country.upper() for country in (countries or []) if country]
+        if country_filter:
+            query = query.filter(User.country_code.in_(country_filter))
+
+        trimmed_search = search.strip() if search else ""
+        if trimmed_search:
+            pattern = f"%{trimmed_search}%"
+            full_name = (User.first_name + literal(" ") + User.last_name)
+            query = query.filter(
+                or_(
+                    User.email.ilike(pattern),
+                    User.first_name.ilike(pattern),
+                    User.last_name.ilike(pattern),
+                    full_name.ilike(pattern),
+                )
+            )
 
         query = query.order_by(User.date_created.desc())
 
-        # Manual pagination
         total = query.count()
         offset = (page - 1) * per_page
         items = query.offset(offset).limit(per_page).all()

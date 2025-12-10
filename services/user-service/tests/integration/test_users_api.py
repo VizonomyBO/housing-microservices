@@ -66,7 +66,7 @@ class TestUserEndpoints:
         assert response.status_code == 403
 
     def test_list_users_as_admin(self, client, admin_auth_headers):
-        response = client.get("/v1/users", headers=admin_auth_headers)
+        response = client.post("/v1/users", json={"page": 1, "per_page": 20}, headers=admin_auth_headers)
 
         assert response.status_code == 200
         data = response.json()
@@ -74,7 +74,7 @@ class TestUserEndpoints:
         assert "total" in data
 
     def test_list_users_as_regular_user(self, client, auth_headers):
-        response = client.get("/v1/users", headers=auth_headers)
+        response = client.post("/v1/users", json={}, headers=auth_headers)
 
         assert response.status_code == 403
 
@@ -101,6 +101,53 @@ class TestUserEndpoints:
         response = client.delete(f"/v1/users/{admin_user.user_id}", headers=admin_auth_headers)
 
         assert response.status_code == 400
+
+    def test_list_users_with_filters_and_full_name_search(self, client, admin_auth_headers, admin_user):
+        from app.db import get_session
+        from app.models.user import User
+
+        session = get_session()
+        try:
+            target = User(
+                first_name="Maria",
+                last_name="Lopez",
+                email="maria.lopez@example.com",
+                password_hash="hashed",
+                role="staff",
+                status="active",
+                country_code="PER",
+            )
+            other = User(
+                first_name="Carlos",
+                last_name="Perez",
+                email="carlos.perez@example.com",
+                password_hash="hashed",
+                role="public",
+                status="active",
+                country_code="CHL",
+            )
+            session.add_all([target, other])
+            session.commit()
+
+            target_email = target.email
+            response = client.post(
+                "/v1/users",
+                json={
+                    "roles": ["staff"],
+                    "countries": ["PER"],
+                    "search": "Maria Lopez",
+                    "page": 1,
+                    "per_page": 10,
+                },
+                headers=admin_auth_headers,
+            )
+        finally:
+            session.close()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        assert any(user["email"] == target_email for user in data["users"])
 
     def test_search_users_as_admin(self, client, sample_user, admin_auth_headers):
         # Search for "John" which should match sample_user's first_name

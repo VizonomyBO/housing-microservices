@@ -32,4 +32,10 @@ class GUID(TypeDecorator):
             return value
         if isinstance(value, uuid.UUID):
             return value
-        return uuid.UUID(str(value))
+        try:
+            return uuid.UUID(str(value))
+        except (ValueError, TypeError):
+            # Accept integer primary keys from legacy data
+            if isinstance(value, int):
+                return uuid.UUID(int=value)
+            raise
