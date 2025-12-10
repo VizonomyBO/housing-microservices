@@ -142,7 +142,9 @@ async def get_user(user_id: UUID, request: Request, session: DatabaseSession) ->
 
 
 @router.post("")
-async def list_users(request: Request, session: DatabaseSession, payload: UserListRequest) -> JSONResponse:
+async def list_users(
+    request: Request, session: DatabaseSession, payload: UserListRequest
+) -> JSONResponse:
     """List users with pagination and filtering (admin only)."""
     user_ctx = await _require_user_context(request)
     _require_admin(user_ctx)

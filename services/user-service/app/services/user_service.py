@@ -6,9 +6,9 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import or_
-from sqlalchemy.sql import literal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import literal
 
 from app.models.user import User
 from app.utils.validators import (
@@ -74,7 +74,7 @@ class UserService:
         trimmed_search = search.strip() if search else ""
         if trimmed_search:
             pattern = f"%{trimmed_search}%"
-            full_name = (User.first_name + literal(" ") + User.last_name)
+            full_name = User.first_name + literal(" ") + User.last_name
             query = query.filter(
                 or_(
                     User.email.ilike(pattern),

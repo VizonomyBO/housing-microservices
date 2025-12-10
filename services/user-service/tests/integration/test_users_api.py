@@ -66,7 +66,9 @@ class TestUserEndpoints:
         assert response.status_code == 403
 
     def test_list_users_as_admin(self, client, admin_auth_headers):
-        response = client.post("/v1/users", json={"page": 1, "per_page": 20}, headers=admin_auth_headers)
+        response = client.post(
+            "/v1/users", json={"page": 1, "per_page": 20}, headers=admin_auth_headers
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -102,7 +104,9 @@ class TestUserEndpoints:
 
         assert response.status_code == 400
 
-    def test_list_users_with_filters_and_full_name_search(self, client, admin_auth_headers, admin_user):
+    def test_list_users_with_filters_and_full_name_search(
+        self, client, admin_auth_headers, admin_user
+    ):
         from app.db import get_session
         from app.models.user import User
 

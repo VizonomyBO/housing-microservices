@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -129,6 +130,11 @@ class AnswerSynthesizerNode:
                 self._require_numerical_sql_trace(state)
                 self._ensure_sql_citation(result, state)
                 self._append_sql_rows(result, state)
+            inline_mappings = self._normalize_doc_placeholders(result)
+            if inline_mappings:
+                model_metadata = dict(result.model_metadata or {})
+                model_metadata["inline_citations"] = inline_mappings
+                result.model_metadata = model_metadata
             return {
                 "answer": result.answer_text,
                 "citations": result.citations,
@@ -234,19 +240,122 @@ class AnswerSynthesizerNode:
         if not rows:
             return
         marker = "[SQL_ROWS]"
-        if marker in result.answer_text:
+        answer = result.answer_text or ""
+        if marker not in answer:
+            # Preserve placeholder without emitting inline dumps; table evidence is provided via table_results.
+            cleaned = answer.rstrip()
+            result.answer_text = f"{cleaned} {marker}".strip()
             return
-        formatted_rows: list[str] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                formatted_rows.append(f"- {row}")
+        result.answer_text = self._strip_inline_sql_rows(answer, marker)
+
+    def _strip_inline_sql_rows(self, answer: str, marker: str) -> str:
+        """Remove inline row dumps that may follow the [SQL_ROWS] marker."""
+        before, sep, after = answer.partition(marker)
+        if not sep:
+            return answer
+        suffix_lines = after.splitlines()
+        cleaned_suffix: list[str] = []
+        skipping = True
+        for line in suffix_lines:
+            stripped = line.strip()
+            if skipping and stripped == "":
                 continue
-            parts: list[str] = []
-            for key, value in row.items():
-                parts.append(f"{key}={value}")
-            formatted_rows.append(f"- {', '.join(parts)}")
-        rows_block = "\n".join([marker, *formatted_rows])
-        result.answer_text = result.answer_text.rstrip() + "\n\n" + rows_block
+            if skipping and stripped.startswith("-"):
+                continue
+            skipping = False
+            cleaned_suffix.append(line)
+        cleaned = "\n".join(cleaned_suffix).lstrip()
+        base = (before + sep).rstrip()
+        if not cleaned:
+            return base
+        separator = "" if base.endswith((" ", "\n")) else " "
+        return f"{base}{separator}{cleaned}"
+
+    def _normalize_doc_placeholders(self, result: AnswerSynthesisResult) -> list[dict[str, Any]]:
+        """Convert LLM DOC_* markers into numeric footnotes aligned to citations and surface a mapping."""
+        answer = result.answer_text or ""
+        pattern = re.compile(r"\[DOC_[A-Za-z0-9_-]+\]")
+        matches = list(pattern.finditer(answer))
+        if not matches:
+            return []
+
+        doc_citations: list[tuple[int, CacheCitation]] = []
+        for idx, citation in enumerate(result.citations):
+            if citation.doc_id == "SQL_RESULT":
+                continue
+            doc_citations.append((idx, citation))
+
+        if not doc_citations:
+            result.answer_text = pattern.sub("", answer).strip()
+            return []
+
+        def _normalized(text: str) -> str:
+            cleaned = re.sub(r"^doc[_-]?", "", text, flags=re.IGNORECASE)
+            return re.sub(r"[^a-z0-9]+", "", cleaned.lower())
+
+        def _citation_keys(citation: CacheCitation) -> set[str]:
+            metadata = citation.metadata or {}
+            alias = metadata.get("document_alias")
+            raw_keys = [alias, citation.doc_id, citation.chunk_id, metadata.get("citation_key")]
+            keys: set[str] = set()
+            for raw in raw_keys:
+                if not raw:
+                    continue
+                normalized = _normalized(str(raw))
+                if normalized:
+                    keys.add(normalized)
+            return keys
+
+        inline_mappings: list[dict[str, Any]] = []
+        placeholder_map: dict[str, dict[str, Any]] = {}
+        key_to_entry: dict[str, dict[str, Any]] = {}
+        doc_entries: list[dict[str, Any]] = []
+
+        for footnote, (citation_index, citation) in enumerate(doc_citations, start=1):
+            citation.metadata = dict(citation.metadata or {})
+            citation.metadata["citation_key"] = (
+                citation.metadata.get("citation_key") or f"c{footnote}"
+            )
+            citation.metadata["footnote"] = footnote
+            entry = {
+                "citation_index": citation_index,
+                "citation": citation,
+                "footnote": footnote,
+            }
+            doc_entries.append(entry)
+            for key in _citation_keys(citation):
+                key_to_entry.setdefault(key, entry)
+
+        fallback_cursor = 0
+
+        def _replacement(match: re.Match[str]) -> str:
+            nonlocal fallback_cursor
+            placeholder_token = match.group(0)
+            placeholder = placeholder_token.strip("[]")
+            if placeholder in placeholder_map:
+                mapping = placeholder_map[placeholder]
+                return f"[{mapping['footnote']}]"
+
+            normalized_placeholder = _normalized(placeholder)
+            entry = key_to_entry.get(normalized_placeholder)
+            if entry is None:
+                entry = doc_entries[fallback_cursor % len(doc_entries)]
+                fallback_cursor += 1
+
+            citation = entry["citation"]
+            footnote = entry["footnote"]
+            mapping = {
+                "placeholder": placeholder,
+                "citation_index": entry["citation_index"],
+                "citation_key": citation.metadata.get("citation_key"),
+                "footnote": footnote,
+            }
+            inline_mappings.append(mapping)
+            placeholder_map[placeholder] = mapping
+            return f"[{footnote}]"
+
+        result.answer_text = pattern.sub(_replacement, answer)
+        return inline_mappings
 
 
 __all__ = [

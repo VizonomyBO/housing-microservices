@@ -413,6 +413,7 @@ class LangGraphChatRunner:
             "citations": citations,
             "requires_sql": requires_sql,
         }
+        payload["answer_metadata"] = dict(state.answer_metadata or {})
         if requires_sql:
             trace = dict(state.numerical_trace)
             payload["numerical_trace"] = trace

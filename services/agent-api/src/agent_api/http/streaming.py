@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -21,6 +22,8 @@ from streaming.events import SSEEventType, TaskErrorPayload
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import emit_demo_mode_event
 from telemetry import CacheObservability, MetricsRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -291,6 +294,7 @@ async def _invoke_runner(
     except Exception as exc:  # pragma: no cover - defensive guard
         outcome.error = exc
         outcome.status_code = 500
+        logger.exception("Unexpected error during chat execution", exc_info=exc)
         await _emit_task_error(
             emitter,
             code="INTERNAL_ERROR",

@@ -21,16 +21,24 @@ from subgraphs.informational.answer_synthesizer_node import (
 
 
 class StubComposer:
-    def __init__(self, *, answer_text: str = "fresh answer") -> None:
+    def __init__(
+        self,
+        *,
+        answer_text: str = "fresh answer",
+        citations: list[CacheCitation] | None = None,
+    ) -> None:
         self.calls = 0
         self.answer_text = answer_text
+        self.citations = citations or [
+            CacheCitation(doc_id="doc-1", chunk_id="chunk-1", snippet="evidence")
+        ]
 
     async def compose(self, context: AnswerSynthesisContext) -> AnswerSynthesisResult:  # type: ignore[override]
         self.calls += 1
         return AnswerSynthesisResult(
             answer_text=self.answer_text,
-            citations=[CacheCitation(doc_id="doc-1", chunk_id="chunk-1", snippet="evidence")],
-            chunk_ids=["chunk-1"],
+            citations=self.citations,
+            chunk_ids=[c.chunk_id for c in self.citations],
             quality_score=0.92,
             model_metadata={"model": "stub"},
             workflow_excerpt=CacheWorkflowPlanExcerpt(
@@ -133,11 +141,11 @@ async def test_sql_trace_adds_citation_when_required() -> None:
     assert sql_citations
     assert sql_citations[0].metadata["table_id"] == "tbl-ledger"
     assert "[SQL_ROWS]" in updates["answer"]
-    assert "city=Austin" in updates["answer"]
+    assert "city=Austin" not in updates["answer"]
 
 
 @pytest.mark.asyncio
-async def test_sql_rows_appended_to_answer() -> None:
+async def test_sql_rows_marker_added_without_inline_dump() -> None:
     client = InMemoryValkeyClient()
     metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-sql-rows")
     state = _base_state(cache_metadata=metadata)
@@ -159,6 +167,116 @@ async def test_sql_rows_appended_to_answer() -> None:
     updates = await node(state)
 
     answer = updates["answer"]
-    assert "[SQL_ROWS]" in answer
-    assert "city=Austin" in answer
-    assert "value=71" in answer
+    assert answer.endswith("[SQL_ROWS]")
+    assert "city=Austin" not in answer
+    assert "value=71" not in answer
+
+
+@pytest.mark.asyncio
+async def test_strips_inline_sql_row_dump() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-sql-inline")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = True
+    rows = [{"city": "Austin", "value": 82}]
+    state.numerical_trace = {
+        "sql_queries": ["SELECT city, value FROM ledger"],
+        "executor": {"row_count": len(rows)},
+        "table_specs": [{"table_id": "tbl-ledger", "alias": "ledger"}],
+        "table_results": rows,
+    }
+    state.numerical_result_rows = rows
+    composer = StubComposer(
+        answer_text="Summary of KPI insights.\n\n[SQL_ROWS]\n- city=Austin, value=82\n- city=Denton, value=71"
+    )
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    answer = updates["answer"]
+    assert answer.rstrip().endswith("[SQL_ROWS]")
+    assert "city=Austin" not in answer
+    assert "city=Denton" not in answer
+
+
+@pytest.mark.asyncio
+async def test_doc_placeholders_normalized_to_numeric() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-doc-markers")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = False
+    citations = [
+        CacheCitation(
+            doc_id="doc-alpha",
+            chunk_id="chunk-a",
+            snippet="a",
+            metadata={"document_alias": "DOC_ALPHA"},
+        ),
+        CacheCitation(
+            doc_id="doc-beta",
+            chunk_id="chunk-b",
+            snippet="b",
+            metadata={"document_alias": "DOC_BETA"},
+        ),
+    ]
+    composer = StubComposer(
+        answer_text="Summary cites [DOC_KPI] and the memo [DOC_POLICY].",
+        citations=citations,
+    )
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    answer = updates["answer"]
+    assert "[DOC_KPI]" not in answer
+    assert "[DOC_POLICY]" not in answer
+    assert "[1]" in answer
+    assert "[2]" in answer
+    inline = updates["answer_metadata"]["inline_citations"]
+    assert inline[0]["citation_index"] == 0
+    assert inline[0]["citation_key"] == "c1"
+    assert inline[0]["footnote"] == 1
+    assert inline[1]["citation_index"] == 1
+    assert inline[1]["citation_key"] == "c2"
+    assert inline[1]["footnote"] == 2
+    assert updates["citations"][0].metadata["footnote"] == 1
+    assert updates["citations"][1].metadata["footnote"] == 2
+
+
+@pytest.mark.asyncio
+async def test_doc_placeholders_use_alias_mapping_even_out_of_order() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-doc-order")
+    state = _base_state(cache_metadata=metadata)
+    state.requires_sql = False
+    citations = [
+        CacheCitation(
+            doc_id="doc-policy",
+            chunk_id="chunk-policy",
+            snippet="policy memo",
+            metadata={"document_alias": "DOC_POLICY"},
+        ),
+        CacheCitation(
+            doc_id="doc-kpi",
+            chunk_id="chunk-kpi",
+            snippet="kpi dashboard",
+            metadata={"document_alias": "DOC_KPI"},
+        ),
+    ]
+    composer = StubComposer(
+        answer_text="First cite KPI [DOC_KPI], then reference policy [DOC_POLICY].",
+        citations=citations,
+    )
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    assert "DOC_KPI" not in updates["answer"]
+    assert "DOC_POLICY" not in updates["answer"]
+    assert "[2]" in updates["answer"]  # KPI maps to second citation even when first in text
+    assert "[1]" in updates["answer"]
+    inline = updates["answer_metadata"]["inline_citations"]
+    assert any(entry["placeholder"] == "DOC_POLICY" and entry["footnote"] == 1 for entry in inline)
+    assert any(entry["placeholder"] == "DOC_KPI" and entry["footnote"] == 2 for entry in inline)
+    assert updates["citations"][0].metadata["citation_key"] == "c1"
+    assert updates["citations"][1].metadata["citation_key"] == "c2"
