@@ -74,7 +74,18 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 
 ---
 
-## Task-Specific Requirements (Ingestion Reactivation)
+## 6. Operational Quick Starts (revamped README)
+
+- **Pick env first**: `env_file=$(scripts/use_env.sh local|dev|prod); set -a && source "$env_file" && set +a`. `.env.local` → LocalStack, `.env.dev` → hybrid (local services, cloud data plane), `.env.prod` → AWS/EC2.
+- **Local reduced scope (LocalStack)**: `COMPOSE_PROFILES=reduced,ops docker compose --env-file "$env_file" up -d --build`; health: `http://localhost:${AGENT_API_PORT:-8000}/health`, `...5001/health`, `...4566/_localstack/health`; stop with `docker compose --env-file "$env_file" down [-v]`.
+- **Dev hybrid (local services, cloud DB/S3/ingest)**: `docker compose --env-file "$env_file" -f docker-compose.ec2.yml up -d --build agent-api auth-service user-service ingestion-service`; verify via URLs in `.env.dev` (remote ports).
+- **Prod deploy + smoke (AWS/EC2)**: `ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports` then `ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`; full runbook at `docs/runbooks/prod_setup.md`.
+- **Ingestion service**: FastAPI on EC2 (`INGEST_BASE_URL` default `http://52.207.140.87:8085`) replaces the old Lambda/S3 flow; presign + upload handled via the ingestion service endpoints.
+- **Service map** (ports from env): agent-api 8000, ingestion-service 8085, auth-service 5001, user-service 5002, swagger-service 3000, Postgres 5432; LocalStack/valkey/otel only in local profiles.
+
+---
+
+## 7. Task-Specific Requirements (Ingestion Reactivation)
 
 - Maintain the per-task plan + tracker files (`TASK_PLAN.md`, `TASK_PLAN_PROGRESS.md`) and keep them in sync with the outstanding steps (enforce attachment safety, LocalStack verification, AWS verification, cleanup/tests).
 - For the in-progress AWS smoke work (Step 9), review `notes/aws_step9_status.md` before making changes; it captures the latest commands, evidence paths (`/tmp/aws_smoke_step9/`), and outstanding actions.
