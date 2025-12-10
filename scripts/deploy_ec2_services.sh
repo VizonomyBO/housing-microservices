@@ -13,6 +13,7 @@ HOUSING_FRONTEND_REPO_URL=${HOUSING_FRONTEND_REPO_URL:-https://github.com/Vizono
 HOUSING_FRONTEND_BRANCH=${HOUSING_FRONTEND_BRANCH:-start-conversation}
 HOUSING_FRONTEND_PATH=${HOUSING_FRONTEND_PATH:-/housing-frontend}
 HOUSING_FRONTEND_BUILD_DIR=${HOUSING_FRONTEND_BUILD_DIR:-dist}
+HOUSING_FRONTEND_PUBLIC_CONTENT_URL=${HOUSING_FRONTEND_PUBLIC_CONTENT_URL:-https://housing-public-content.s3.us-east-1.amazonaws.com}
 
 SSH_USER=${SSH_USER:-ec2-user}
 SSH_PORT=${SSH_PORT:-22}
@@ -297,11 +298,13 @@ build_housing_frontend() {
   log "Building housing-frontend (branch=$HOUSING_FRONTEND_BRANCH)"
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" \
     HOUSING_FRONTEND_PATH="$HOUSING_FRONTEND_PATH" \
-    HOUSING_FRONTEND_BUILD_DIR="$HOUSING_FRONTEND_BUILD_DIR" bash -s <<'EOF'
+    HOUSING_FRONTEND_BUILD_DIR="$HOUSING_FRONTEND_BUILD_DIR" \
+    HOUSING_FRONTEND_PUBLIC_CONTENT_URL="$HOUSING_FRONTEND_PUBLIC_CONTENT_URL" bash -s <<'EOF'
 set -euo pipefail
 
 TARGET="$HOUSING_FRONTEND_PATH"
 BUILD_DIR="$HOUSING_FRONTEND_BUILD_DIR"
+PUBLIC_CONTENT_URL="$HOUSING_FRONTEND_PUBLIC_CONTENT_URL"
 
 if [[ ! -d "$TARGET" || ! -f "$TARGET/package.json" ]]; then
   echo "housing-frontend not present or missing package.json; skipping build"
@@ -317,6 +320,20 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//' | cut -d. -f
 fi
 
 if command -v npm >/dev/null 2>&1; then
+  # Ensure frontend .env carries the public content bucket URL
+  FRONTEND_ENV="$TARGET/.env"
+  if [[ -f "$FRONTEND_ENV" ]]; then
+    if grep -q '^VITE_PUBLIC_CONTENT_URL=' "$FRONTEND_ENV"; then
+      sed -i "s|^VITE_PUBLIC_CONTENT_URL=.*$|VITE_PUBLIC_CONTENT_URL=$PUBLIC_CONTENT_URL|" "$FRONTEND_ENV"
+    else
+      echo "VITE_PUBLIC_CONTENT_URL=$PUBLIC_CONTENT_URL" >> "$FRONTEND_ENV"
+    fi
+  else
+    cat > "$FRONTEND_ENV" <<EOF_ENV
+VITE_PUBLIC_CONTENT_URL=$PUBLIC_CONTENT_URL
+EOF_ENV
+  fi
+
   if [[ -f package-lock.json ]]; then
     npm ci --legacy-peer-deps || npm install --legacy-peer-deps
   else
