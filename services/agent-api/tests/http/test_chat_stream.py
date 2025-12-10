@@ -69,6 +69,7 @@ def _payload(**overrides: object) -> dict[str, object]:
     body: dict[str, object] = {
         "thread_id": "thr_test",
         "session_id": "sess-1",
+        "allow_stateless": True,
         "message": {
             "type": "user",
             "content": "hello",

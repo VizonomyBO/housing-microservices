@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
+    get_cache_client,
     get_db_session,
     get_rate_limiter,
     get_request_context,
@@ -30,8 +31,15 @@ from agent_api.http.schemas import (
 )
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
+from cache import ValkeyCacheClientProtocol
 from repositories.conversation_scope_repository import ConversationDocumentRecord
-from services import AttachmentResult, AttachmentService, AttachmentStatus, DocumentNotReadyError
+from services import (
+    AttachmentResult,
+    AttachmentService,
+    AttachmentStatus,
+    ConversationSummaryCache,
+    DocumentNotReadyError,
+)
 
 router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 
@@ -68,6 +76,7 @@ async def attach_document(  # pragma: no cover - exercised via HTTP tests
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
+    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
     service = AttachmentService(
@@ -112,6 +121,7 @@ async def attach_document(  # pragma: no cover - exercised via HTTP tests
         ) from exc
 
     headers = _build_headers(rate_limiter, settings)
+    summary_cache = ConversationSummaryCache(cache_client)
     reduced_scope_meta = (
         reduced_scope_demo_metadata(settings.reduced_scope)
         if settings.reduced_scope.is_enabled()
@@ -124,6 +134,7 @@ async def attach_document(  # pragma: no cover - exercised via HTTP tests
         status_code = status.HTTP_202_ACCEPTED
     else:
         await db_session.commit()
+        await summary_cache.invalidate(conversation_id)
         status_code = status.HTTP_201_CREATED
 
     response = AttachmentMutationResponse(
@@ -146,6 +157,7 @@ async def detach_document(  # pragma: no cover - exercised via HTTP tests
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
+    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
     service = AttachmentService(
@@ -179,6 +191,7 @@ async def detach_document(  # pragma: no cover - exercised via HTTP tests
 
     if status_value is AttachmentStatus.DETACHED:
         await db_session.commit()
+        await ConversationSummaryCache(cache_client).invalidate(conversation_id)
     else:
         await db_session.rollback()
     headers = _build_headers(rate_limiter, settings)
@@ -204,6 +217,7 @@ async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
+    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
     user_id = auth_context.user_id
@@ -222,6 +236,7 @@ async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
         },
     )
 
+    summary_cache = ConversationSummaryCache(cache_client)
     service = AttachmentService(
         db_session,
         allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
@@ -271,6 +286,8 @@ async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
             )
 
     await db_session.commit()
+    if attached:
+        await summary_cache.invalidate(conversation_id)
     headers = _build_headers(rate_limiter, settings)
     response = AttachmentBulkResponse(
         conversation_id=conversation_id,

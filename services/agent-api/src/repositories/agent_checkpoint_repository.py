@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from shared_data_layer.db.models.conversations import AgentStateCheckpoint, Message
 from shared_data_layer.db.models.documents import ConversationDocument, Document
-from sqlalchemy import func, literal, select
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from state.agent_state import (
@@ -66,6 +74,15 @@ class HydratedCheckpoint:
     state: AgentState
     documents: list[ConversationDocumentView]
     metadata: CheckpointMetadata
+
+
+@dataclass(slots=True)
+class MessagePage:
+    """Paginated transcript slice."""
+
+    messages: list[Any]
+    next_cursor: str | None
+    remaining_count: int
 
 
 class AgentCheckpointRepository:
@@ -136,6 +153,53 @@ class AgentCheckpointRepository:
             return None
         return await self._hydrate_checkpoint(row)
 
+    async def list_messages(
+        self,
+        conversation_id: UUID | str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> MessagePage:
+        """Return a paginated slice of messages ordered by created_at/ordinal/id."""
+
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+        if limit > 200:
+            raise ValueError("limit cannot exceed 200")
+
+        conversation_uuid = _as_uuid(conversation_id)
+        stmt = select(Message).where(Message.conversation_id == conversation_uuid)
+        if cursor:
+            stmt = stmt.where(_after_message_clause(*_decode_cursor(cursor)))
+
+        stmt = stmt.order_by(
+            Message.created_at.asc(),
+            Message.ordinal.asc(),
+            Message.id.asc(),
+        ).limit(limit + 1)
+
+        rows = (await self._session.execute(stmt)).scalars().all()
+        page_rows = rows[:limit]
+        messages = [_row_to_message(row) for row in page_rows]
+
+        next_cursor = None
+        if len(rows) > limit and page_rows:
+            next_cursor = _encode_cursor(page_rows[-1])
+
+        remaining_count = 0
+        if page_rows:
+            remaining_count = await _count_remaining_after(
+                self._session,
+                conversation_uuid,
+                last_row=page_rows[-1],
+            )
+
+        return MessagePage(
+            messages=messages,
+            next_cursor=next_cursor,
+            remaining_count=remaining_count,
+        )
+
     async def load_by_checkpoint_id(
         self,
         conversation_id: UUID | str,
@@ -183,6 +247,33 @@ class AgentCheckpointRepository:
         hydrated = await self._hydrate_checkpoint(row)
         hydrated.metadata.consumed_resume_token = consumed
         return hydrated
+
+    async def append_messages(
+        self,
+        conversation_id: UUID | str,
+        messages: list[MessageSnapshot],
+    ) -> None:
+        """Persist a batch of message snapshots in ordinal order."""
+
+        conversation_uuid = _as_uuid(conversation_id)
+        last_ordinal = await self._session.scalar(
+            select(func.max(Message.ordinal)).where(Message.conversation_id == conversation_uuid)
+        )
+        next_ordinal = int(last_ordinal or -1) + 1
+        for index, snapshot in enumerate(messages):
+            role = _role_from_message(snapshot.message)
+            payload = {"content": snapshot.message.content}
+            self._session.add(
+                Message(
+                    conversation_id=conversation_uuid,
+                    role=role,
+                    ordinal=next_ordinal + index,
+                    content=payload,
+                    status=snapshot.metadata.get("status", "final"),
+                    metadata_=snapshot.metadata or None,
+                )
+            )
+        await self._session.flush()
 
     async def _hydrate_checkpoint(self, row: AgentStateCheckpoint) -> HydratedCheckpoint:
         payload = dict(row.state or {})
@@ -312,6 +403,18 @@ class AgentCheckpointRepository:
         return cls(**base_kwargs)
 
 
+def _role_from_message(message: BaseMessage) -> str:
+    if isinstance(message, HumanMessage):
+        return "user"
+    if isinstance(message, AIMessage):
+        return "assistant"
+    if isinstance(message, SystemMessage):
+        return "system"
+    if isinstance(message, ToolMessage):
+        return "tool"
+    return "user"
+
+
 def _normalize_message_content(content: Any) -> Any:
     if isinstance(content, str):
         return content
@@ -331,3 +434,73 @@ def _as_uuid(value: UUID | str) -> UUID:
     if isinstance(value, UUID):
         return value
     return UUID(str(value))
+
+
+def _row_to_message(row: Message) -> dict[str, Any]:
+    return {
+        "message_id": str(row.id),
+        "role": row.role,
+        "content": _normalize_message_content(row.content),
+        "metadata": row.metadata_ or {},
+        "created_at": row.created_at or datetime.now(UTC),
+    }
+
+
+def _encode_cursor(row: Message) -> str:
+    created_at = row.created_at or datetime.now(UTC)
+    payload = {
+        "ts": created_at.replace(tzinfo=UTC).isoformat(),
+        "ordinal": row.ordinal,
+        "id": str(row.id),
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, int, UUID]:
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        created_at = datetime.fromisoformat(payload["ts"])
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        ordinal = int(payload["ordinal"])
+        message_id = UUID(str(payload["id"]))
+        return created_at, ordinal, message_id
+    except Exception as exc:
+        raise ValueError("cursor is invalid") from exc
+
+
+def _after_message_clause(
+    created_at: datetime,
+    ordinal: int,
+    message_id: UUID,
+):
+    return or_(
+        Message.created_at > created_at,
+        and_(Message.created_at == created_at, Message.ordinal > ordinal),
+        and_(
+            Message.created_at == created_at,
+            Message.ordinal == ordinal,
+            Message.id > message_id,
+        ),
+    )
+
+
+async def _count_remaining_after(
+    session: AsyncSession,
+    conversation_uuid: UUID,
+    *,
+    last_row: Message,
+) -> int:
+    created_at = last_row.created_at or datetime.now(UTC)
+    ordinal = last_row.ordinal
+    message_id = last_row.id or uuid4()
+    stmt = (
+        select(func.count())
+        .select_from(Message)
+        .where(Message.conversation_id == conversation_uuid)
+        .where(_after_message_clause(created_at, ordinal, message_id))
+    )
+    result = await session.scalar(stmt)
+    return int(result or 0)

@@ -11,8 +11,8 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.middleware.cors import CORSMiddleware
 from shared_data_layer.db.session import DatabaseSessionManager
+from starlette.middleware.cors import CORSMiddleware
 
 from agent_api.auth import AuthTokenValidator
 from agent_api.aws.factory import AWSClientFactory

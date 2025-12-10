@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
+    get_cache_client,
     get_db_session,
     get_rate_limiter,
     get_request_context,
@@ -20,9 +21,12 @@ from agent_api.http.deps import (
 from agent_api.http.errors import GatewayError
 from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.schemas import (
+    AttachmentRecord,
     ConversationCreateRequest,
     ConversationListItem,
     ConversationListResponse,
+    ConversationMessageResponse,
+    ConversationPageInfo,
     ConversationRecordResponse,
     ConversationResponse,
     ConversationSummaryResponse,
@@ -30,11 +34,15 @@ from agent_api.http.schemas import (
 )
 from agent_api.reduced_scope import reduced_scope_demo_metadata
 from agent_api.settings import Settings
+from cache import ValkeyCacheClientProtocol
+from repositories.agent_checkpoint_repository import AgentCheckpointRepository, MessagePage
+from repositories.conversation_scope_repository import ConversationScopeRepository
 from services import (
     ConversationListEntry,
     ConversationListingService,
     ConversationRecord,
     ConversationService,
+    ConversationSummaryCache,
     PaginationWindow,
 )
 
@@ -159,6 +167,8 @@ async def get_conversation(
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    cursor: Annotated[str | None, Query(description="Pagination cursor")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> JSONResponse:
     user_id = _require_user(auth_context)
     await rate_limiter.acquire(
@@ -186,9 +196,29 @@ async def get_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
         ) from exc
 
+    attachments = await _list_attachments(db_session, record.conversation_id)
+    try:
+        transcript = await _list_messages(
+            db_session,
+            record.conversation_id,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise GatewayError(
+            code="VALIDATION_ERROR",
+            message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
     reduced_meta = _reduced_scope_metadata(settings)
     response = ConversationResponse(
         conversation=_to_schema(record),
+        attachments=attachments,
+        messages=transcript.messages,
+        page_info=ConversationPageInfo(
+            next_cursor=transcript.next_cursor,
+            remaining_count=transcript.remaining_count,
+        ),
         request_id=request_context.request_id,
         reduced_scope=reduced_meta,
     )
@@ -215,6 +245,7 @@ async def get_conversation_summary(
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
 ) -> JSONResponse:
     user_id = _require_user(auth_context)
     await rate_limiter.acquire(
@@ -224,10 +255,12 @@ async def get_conversation_summary(
         metadata={"conversation_id": conversation_id},
     )
     listing_service = ConversationListingService(db_session)
+    summary_cache = ConversationSummaryCache(cache_client)
     try:
         summary = await listing_service.summarize_conversation(
             conversation_id=conversation_id,
             owner_user_id=user_id,
+            summary_cache=summary_cache,
         )
     except (PermissionError, LookupError) as exc:
         raise GatewayError(
@@ -263,6 +296,52 @@ def _require_user(auth_context: AuthContext) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
     return auth_context.user_id
+
+
+async def _list_attachments(
+    db_session: AsyncSession, conversation_id: str
+) -> list[AttachmentRecord]:
+    scope_repo = ConversationScopeRepository(db_session)
+    records = await scope_repo.list_conversation_documents(conversation_id)
+    return [
+        AttachmentRecord(
+            document_id=record.document_id,
+            attach_source=record.attach_source,
+            role=record.role,
+            visibility=record.visibility,
+            canonical_name=record.canonical_name,
+            access_scope=record.access_scope,
+            country_code=record.country_code,
+            metadata=record.metadata,
+        )
+        for record in records
+        if record.is_visible
+    ]
+
+
+async def _list_messages(
+    db_session: AsyncSession,
+    conversation_id: str,
+    *,
+    limit: int,
+    cursor: str | None = None,
+) -> MessagePage:
+    repository = AgentCheckpointRepository(db_session)
+    page = await repository.list_messages(conversation_id, limit=limit, cursor=cursor)
+    return MessagePage(
+        messages=[
+            ConversationMessageResponse(
+                message_id=message["message_id"],
+                role=message["role"],
+                content=message["content"],
+                created_at=message["created_at"],
+                metadata=message.get("metadata"),
+            )
+            for message in page.messages
+        ],
+        next_cursor=page.next_cursor,
+        remaining_count=page.remaining_count,
+    )
 
 
 def _to_schema(record: ConversationRecord) -> ConversationRecordResponse:

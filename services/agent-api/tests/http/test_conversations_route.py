@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from langchain_core.messages import HumanMessage
+from shared_data_layer.db.session import DatabaseSessionManager
 
 from agent_api.http import create_app
+from repositories.agent_checkpoint_repository import AgentCheckpointRepository
 from services import AttachmentService, DocumentNotReadyError
+from state.agent_state import MessageSnapshot
 
 
 @asynccontextmanager
@@ -212,6 +217,50 @@ async def test_conversation_summary_reports_attachment_counts(api_client: AsyncC
     assert summary["attachment_count"] >= 1
     assert summary["message_count"] == 0
     assert summary["user_prompt_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_conversation_supports_pagination(api_client: AsyncClient) -> None:
+    user_id = str(uuid4())
+    headers = _auth_headers(user_id)
+    create_resp = await api_client.post("/v1/conversations", json={}, headers=headers)
+    conversation_id = create_resp.json()["conversation"]["conversation_id"]
+
+    async with DatabaseSessionManager.session() as session:
+        repo = AgentCheckpointRepository(session)
+        base_time = datetime.now(UTC)
+        snapshots = [
+            MessageSnapshot(
+                message=HumanMessage(content=f"msg-{idx}"),
+                stored_at=base_time + timedelta(seconds=idx),
+                metadata={"role": "user"},
+            )
+            for idx in range(25)
+        ]
+        await repo.append_messages(conversation_id, snapshots)
+        await session.commit()
+
+    first = await api_client.get(
+        f"/v1/conversations/{conversation_id}",
+        params={"limit": 10},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    body = first.json()
+    assert len(body["messages"]) == 10
+    assert body["page_info"]["remaining_count"] == 15
+    cursor = body["page_info"]["next_cursor"]
+    assert cursor
+
+    second = await api_client.get(
+        f"/v1/conversations/{conversation_id}",
+        params={"limit": 10, "cursor": cursor},
+        headers=headers,
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["messages"][0]["content"] == "msg-10"
+    assert second_body["page_info"]["remaining_count"] == 5
 
 
 @pytest.mark.asyncio

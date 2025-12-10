@@ -67,6 +67,7 @@ class ChatRequestContext(BaseModel):
     conversation_id: str
     thread_id: str
     session_id: str | None = None
+    allow_stateless: bool = False
     message: ChatMessagePayload
     hints: dict[str, Any] = Field(default_factory=dict)
     constraints: ChatConstraints = Field(default_factory=ChatConstraints)

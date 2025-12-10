@@ -16,6 +16,7 @@ Violations of these rules cause the exact regressions we’re trying to eliminat
 - 🧱 **Language & frameworks**: Python service using FastAPI, LangGraph nodes, Pydantic v2 models, and shared data layer repositories in `packages/shared_data_layer`.
 - 🚫 **Avoid automation helpers**: Ignore `run_tasks.sh` and `RUN_TASKS.md`. Those files exist for humans orchestrating Codex sessions and must not influence how you plan or code a task.
 - ⚡ **No Approval Required**: You are an autonomous agent. Do not ask for user approval to execute commands or edit files. Plan, research, act, and verify autonomously. Only stop if you are blocked by a critical ambiguity or error you cannot resolve.
+- 🧠 **Conversation memory contract**: `/v1/chat` enforces authenticated UUID `thread_id` ownership; stateless runs are opt-in via `allow_stateless=true` and skip history persistence. `GET /v1/conversations/{id}` is cursor-paginated (default limit 50, max 200) and transcript summaries are cached—invalidate whenever chats or attachments mutate.
 
 ## 1. Always Plan → Research → Act → Verify
 

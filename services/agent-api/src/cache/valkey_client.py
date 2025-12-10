@@ -24,6 +24,8 @@ class ValkeyCacheClientProtocol(Protocol):
         self, key: str, value: bytes | str, *, ttl_seconds: int | None = None
     ) -> None: ...
 
+    async def delete(self, key: str) -> None: ...
+
     async def tag_hit(self, key: str) -> None: ...
 
     async def tag_miss(self, key: str, *, reason: str | None = None) -> None: ...
@@ -53,6 +55,9 @@ class InMemoryValkeyClient(ValkeyCacheClientProtocol):
         ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl_seconds
         expires_at = self._now_ts() + ttl if ttl else None
         self._store[key] = (payload, expires_at)
+
+    async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
 
     async def tag_hit(self, key: str) -> None:
         self.telemetry.append({"event": "hit", "key": key})

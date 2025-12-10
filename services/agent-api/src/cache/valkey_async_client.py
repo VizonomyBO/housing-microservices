@@ -84,6 +84,9 @@ class ValkeyAsyncClient(ValkeyCacheClientProtocol):
             operation="set",
         )
 
+    async def delete(self, key: str) -> None:
+        await self._with_retries(lambda client: client.delete(key), operation="delete")
+
     async def tag_hit(self, key: str) -> None:
         self._emit_event("hit")
 

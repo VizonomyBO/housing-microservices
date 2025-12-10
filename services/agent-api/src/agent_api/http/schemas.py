@@ -54,6 +54,10 @@ class ChatRequestBody(BaseModel):
         default=None,
         description="Legacy boolean alias for response_mode; true=stream",
     )
+    allow_stateless: bool = Field(
+        default=False,
+        description="Opt into stateless chat when thread_id is missing or invalid",
+    )
     constraints: ChatConstraints = Field(default_factory=ChatConstraints)
 
     def resolved_response_mode(self) -> ResponseMode:
@@ -74,6 +78,7 @@ class ChatRequestBody(BaseModel):
         tenant_id: str | None = None,
         allowed_chunk_types: Iterable[str] | None = None,
         reduced_scope_flags: ReducedScopeFlags | None = None,
+        allow_stateless: bool | None = None,
     ) -> ChatRequestContext:
         """Convert the HTTP payload into the internal ChatRequestContext."""
 
@@ -85,6 +90,7 @@ class ChatRequestBody(BaseModel):
             conversation_id=conversation_id,
             thread_id=conversation_id,
             session_id=self.session_id,
+            allow_stateless=bool(allow_stateless) if allow_stateless is not None else False,
             message=message_payload,
             hints=dict(self.hints or {}),
             constraints=constraints,
@@ -128,6 +134,7 @@ __all__ = [
     "ConversationCreateRequest",
     "ConversationListItem",
     "ConversationListResponse",
+    "ConversationPageInfo",
     "ConversationRecordResponse",
     "ConversationResponse",
     "ConversationSummaryResponse",
@@ -353,10 +360,30 @@ class ConversationRecordResponse(BaseModel):
     updated_at: datetime | None = None
 
 
+class ConversationMessageResponse(BaseModel):
+    """Transcript entry surfaced by conversation read endpoints."""
+
+    message_id: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: Any
+    created_at: datetime
+    metadata: dict[str, Any] | None = None
+
+
+class ConversationPageInfo(BaseModel):
+    """Pagination envelope for conversation transcripts."""
+
+    next_cursor: str | None = None
+    remaining_count: int = 0
+
+
 class ConversationResponse(BaseModel):
     """Envelope returned by create/read endpoints."""
 
     conversation: ConversationRecordResponse
+    attachments: list[AttachmentRecord] = Field(default_factory=list)
+    messages: list[ConversationMessageResponse] = Field(default_factory=list)
+    page_info: ConversationPageInfo | None = None
     request_id: str
     created: bool | None = None
     reduced_scope: dict[str, Any] | None = None

@@ -39,9 +39,10 @@ class StubFactExtractor:
 def _chat_request() -> ChatRequestContext:
     message = ChatMessagePayload(content="hello world")
     return ChatRequestContext(
-        conversation_id="conv-1",
+        conversation_id="thr-1",
         thread_id="thr-1",
         session_id="sess-1",
+        allow_stateless=True,
         message=message,
         hints={},
         owner_user_id="user-1",

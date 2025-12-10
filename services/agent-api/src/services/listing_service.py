@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from shared_data_layer.db.models.conversations import Conversation, Message
@@ -13,6 +13,9 @@ from shared_data_layer.db.models.documents import ConversationDocument, Document
 from sqlalchemy import and_, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from .conversation_summary_cache import ConversationSummaryCache
 
 DEFAULT_NAMESPACE = "reduced-e2e"
 
@@ -156,7 +159,12 @@ class ConversationListingService:
         *,
         conversation_id: str,
         owner_user_id: str,
+        summary_cache: ConversationSummaryCache | None = None,
     ) -> ConversationSummary:
+        if summary_cache is not None:
+            cached = await summary_cache.get(conversation_id)
+            if cached is not None:
+                return cached
         conversation = await self._session.get(Conversation, _as_uuid(conversation_id))
         if conversation is None:
             raise LookupError("Conversation not found")
@@ -198,7 +206,7 @@ class ConversationListingService:
             )
             else datetime.now(UTC)
         )
-        return ConversationSummary(
+        summary = ConversationSummary(
             conversation_id=str(conversation.id),
             owner_user_id=str(conversation.owner_user_id) if conversation.owner_user_id else None,
             attachment_count=int(attachment_count or 0),
@@ -207,6 +215,9 @@ class ConversationListingService:
             last_message_at=last_message_at,
             last_activity_at=last_activity,
         )
+        if summary_cache is not None:
+            await summary_cache.set(summary)
+        return summary
 
 
 class DocumentListingService:

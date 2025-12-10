@@ -13,6 +13,7 @@ from .conversation_service import (
     ConversationService,
     deterministic_conversation_id,
 )
+from .conversation_summary_cache import ConversationSummaryCache
 from .demo_reset_service import ConversationResetResult, DemoResetService, DocumentPurgeResult
 from .document_upload_service import (
     DocumentUploadData,
@@ -61,6 +62,7 @@ __all__ = [
     "ConversationResetResult",
     "ConversationService",
     "ConversationSummary",
+    "ConversationSummaryCache",
     "DemoResetService",
     "DocumentListEntry",
     "DocumentListingService",

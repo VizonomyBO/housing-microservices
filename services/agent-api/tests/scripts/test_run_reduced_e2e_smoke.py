@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -82,6 +83,7 @@ def _mock_success_flows(
     skip_main_flow: bool = False,
     localstack_url: str | None = None,
     real_mode: bool = False,
+    chat_requests: list[dict[str, Any]] | None = None,
 ) -> None:
     document_fixtures = fixtures.documents()
     verification_headers = (
@@ -289,6 +291,15 @@ def _mock_success_flows(
             doc_ids_for_prompt = [
                 attachment["document_id"] for attachment in body["message"]["attachments"]
             ]
+            if chat_requests is not None:
+                chat_requests.append(
+                    {
+                        "thread_id": body.get("thread_id"),
+                        "attachments": body["message"].get("attachments", []),
+                        "question": question,
+                        "prompt_id": prompt_id,
+                    }
+                )
             done_payload = {
                 "answer": answer,
                 "citations": [{"document_id": doc_id} for doc_id in doc_ids_for_prompt],
@@ -374,6 +385,7 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
     doc_ids = {
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
     }
+    chat_requests: list[dict[str, Any]] = []
     _mock_success_flows(
         respx_mock,
         fixtures=fixtures,
@@ -381,6 +393,7 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         prompt_answers=_prompt_answers(),
         conversation_id="conv-test",
         localstack_url="http://localstack.test",
+        chat_requests=chat_requests,
     )
 
     config = SmokeRunConfig(
@@ -404,6 +417,16 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
     assert summary.success is True
     assert summary.prompts
     assert all(result.success for result in summary.prompts)
+    assert len(chat_requests) == len(fixtures.prompts())
+    assert {req["thread_id"] for req in chat_requests} == {"conv-test"}
+    assert all(req.get("attachments") for req in chat_requests)
+    prompt_docs = {
+        prompt.id: {doc_ids[alias] for alias in prompt.document_aliases}
+        for prompt in fixtures.prompts()
+    }
+    for req in chat_requests:
+        attachments = {att["document_id"] for att in req.get("attachments", [])}
+        assert attachments == prompt_docs[req["prompt_id"]]
     assert config.report_path.exists()
     _assert_endpoint_subsequence(
         respx_mock,

@@ -117,6 +117,12 @@ class MetricsRegistry:
             ("event", "reason"),
             registry=self._registry,
         )
+        self.history_events = Counter(
+            "agent_history_events_total",
+            "Conversation history load/fallback events",
+            ("event", "route"),
+            registry=self._registry,
+        )
         self.rate_limiter_wait = Histogram(
             "agent_rate_limiter_wait_seconds",
             "Observed wait durations when requesting limiter permits",
@@ -192,6 +198,16 @@ class MetricsRegistry:
         self, *, model: str, route: str | None, wait_seconds: float
     ) -> None:
         self.rate_limiter_wait.labels(model, route or "none").observe(wait_seconds)
+
+    def record_history_event(
+        self,
+        *,
+        event: str,
+        route: str | None,
+        message_count: int | None = None,
+    ) -> None:
+        self.history_events.labels(event, route or "none").inc()
+        _ = message_count
 
     @contextmanager
     def span(self, name: str, *, attributes: Mapping[str, Any] | None = None) -> Iterator[Span]:
