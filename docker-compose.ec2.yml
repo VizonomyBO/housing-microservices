@@ -12,9 +12,15 @@ x-ec2-defaults: &ec2-defaults
 services:
   agent-api:
     <<: *ec2-defaults
+    user: root
     build:
       context: .
       dockerfile: services/agent-api/Dockerfile.reduced
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+      UV_CACHE_DIR: /tmp/uv-cache
     command:
       - uvicorn
       - main:app
@@ -28,10 +34,6 @@ services:
       - "${UVICORN_WORKERS:-1}"
     ports:
       - "${AGENT_API_PORT:-8000}:8000"
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -41,9 +43,18 @@ services:
 
   ingestion-service:
     <<: *ec2-defaults
+    user: root
     build:
       context: .
       dockerfile: services/ingestion-service/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
+      SIGNING_SECRET: ${INGESTION_SIGNING_SECRET:-}
+      UV_CACHE_DIR: /tmp/uv-cache
     command:
       - uvicorn
       - ingestion_service.main:app
@@ -53,13 +64,6 @@ services:
       - "${INGESTION_SERVICE_PORT:-8085}"
     ports:
       - "${INGESTION_SERVICE_PORT:-8085}:8085"
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      AUTH_BASE_URL: ${AUTH_BASE_URL:-}
-      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
-      SIGNING_SECRET: ${INGESTION_SIGNING_SECRET:-}
     depends_on:
       - auth-service
     healthcheck:
@@ -131,6 +135,24 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  nginx-gateway:
+    <<: *ec2-defaults
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./ArchaaS/configs/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /housing-frontend/build/client:/housing-frontend/dist:ro
+    depends_on:
+      - auth-service
+      - user-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 networks:
   ec2-net:

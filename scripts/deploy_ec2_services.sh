@@ -11,6 +11,11 @@ REMOTE_COMPOSE_FILE=${REMOTE_COMPOSE_FILE:-docker-compose.ec2.yml}
 REMOTE_ENV_FILE=${REMOTE_ENV_FILE:-.env.ec2}
 REMOTE_ACTIVE_ENV=${REMOTE_ACTIVE_ENV:-.env.active}
 
+HOUSING_FRONTEND_REPO_URL=${HOUSING_FRONTEND_REPO_URL:-https://github.com/VizonomyBO/housing-frontend.git}
+HOUSING_FRONTEND_BRANCH=${HOUSING_FRONTEND_BRANCH:-start-conversation}
+HOUSING_FRONTEND_PATH=${HOUSING_FRONTEND_PATH:-/housing-frontend}
+HOUSING_FRONTEND_BUILD_DIR=${HOUSING_FRONTEND_BUILD_DIR:-dist}
+
 SSH_USER=${SSH_USER:-ec2-user}
 SSH_PORT=${SSH_PORT:-22}
 SSH_KEY=${SSH_KEY:-}
@@ -45,6 +50,11 @@ Options:
   --no-sync                Skip rsync/tar upload (assumes code already on the host).
   --no-build               Skip docker compose build/pull (use existing images).
   -h, --help               Show this help text.
+
+Env vars (optional):
+  HOUSING_FRONTEND_REPO_URL   Repo to clone (default: VizonomyBO/housing-frontend.git).
+  HOUSING_FRONTEND_BRANCH     Branch/ref to deploy (default: main).
+  HOUSING_FRONTEND_PATH       Path on EC2 host (default: /housing-frontend).
 
 Examples:
   scripts/use_env.sh aws
@@ -218,6 +228,9 @@ open_security_group_ports() {
   local ports=("$AGENT_API_PORT" "$AUTH_SERVICE_PORT" "$USER_SERVICE_PORT" "$INGESTION_SERVICE_PORT")
   [[ "$INCLUDE_SWAGGER" -eq 0 ]] || ports+=("$SWAGGER_SERVICE_PORT")
 
+  # Add port 80 for nginx gateway
+  ports+=("80")
+
   log "Opening inbound ports on SG $sg_id: ${ports[*]}"
   for port in "${ports[@]}"; do
     AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" AWS_REGION="$AWS_REGION" AWS_DEFAULT_REGION="$AWS_REGION" \
@@ -248,6 +261,99 @@ sync_repo_to_remote() {
     ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" "sudo mkdir -p '$REMOTE_DIR' && sudo chown -R '$SSH_USER':'$SSH_USER' '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
 
   scp "${SCP_OPTS[@]}" "$ENV_FILE" "$SSH_USER@$REMOTE_HOST:$REMOTE_DIR/$REMOTE_ENV_FILE"
+}
+
+sync_housing_frontend_repo() {
+  [[ "$NO_SYNC" -eq 0 ]] || { log "Skipping housing-frontend sync (--no-sync)"; return; }
+  log "Syncing housing-frontend to $SSH_USER@$REMOTE_HOST:$HOUSING_FRONTEND_PATH (branch=$HOUSING_FRONTEND_BRANCH)"
+
+  ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" \
+    HOUSING_FRONTEND_REPO_URL="$HOUSING_FRONTEND_REPO_URL" \
+    HOUSING_FRONTEND_BRANCH="$HOUSING_FRONTEND_BRANCH" \
+    HOUSING_FRONTEND_PATH="$HOUSING_FRONTEND_PATH" \
+    SSH_USER="$SSH_USER" bash -s <<'EOF'
+set -euo pipefail
+
+REPO_URL="$HOUSING_FRONTEND_REPO_URL"
+BRANCH="$HOUSING_FRONTEND_BRANCH"
+TARGET="$HOUSING_FRONTEND_PATH"
+OWNER="$SSH_USER"
+
+if [[ -d "$TARGET/.git" ]]; then
+  cd "$TARGET"
+  git fetch --prune origin
+  git checkout "$BRANCH"
+  git reset --hard "origin/$BRANCH"
+  git clean -fdx
+else
+  # Remove old directory if it exists but isn't a git repo
+  sudo rm -rf "$TARGET"
+  # Create the directory owned by the deploy user so git clone works
+  sudo mkdir -p "$TARGET"
+  sudo chown "$OWNER":"$OWNER" "$TARGET"
+  # Clone into the existing empty directory
+  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$TARGET"
+fi
+EOF
+}
+
+build_housing_frontend() {
+  log "Building housing-frontend (branch=$HOUSING_FRONTEND_BRANCH)"
+  ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" \
+    HOUSING_FRONTEND_PATH="$HOUSING_FRONTEND_PATH" \
+    HOUSING_FRONTEND_BUILD_DIR="$HOUSING_FRONTEND_BUILD_DIR" bash -s <<'EOF'
+set -euo pipefail
+
+TARGET="$HOUSING_FRONTEND_PATH"
+BUILD_DIR="$HOUSING_FRONTEND_BUILD_DIR"
+
+if [[ ! -d "$TARGET" || ! -f "$TARGET/package.json" ]]; then
+  echo "housing-frontend not present or missing package.json; skipping build"
+  exit 0
+fi
+
+cd "$TARGET"
+
+if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v//' | cut -d. -f1)" -lt 20 ]]; then
+  echo "Installing Node.js 20.x..."
+  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+  sudo dnf install -y nodejs >/dev/null
+fi
+
+if command -v npm >/dev/null 2>&1; then
+  if [[ -f package-lock.json ]]; then
+    npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+  else
+    npm install --legacy-peer-deps
+  fi
+  npm run build 2>/dev/null || npm run build:prod 2>/dev/null || echo "No build script found; skipping build step"
+else
+  echo "npm not available even after Node install; skipping build"
+  exit 0
+fi
+
+if [[ -d "build" ]]; then
+  echo "Build complete: $TARGET/build"
+  
+  # Kill any existing frontend process
+  pkill -f "react-router-serve" 2>/dev/null || true
+  
+  # Start the frontend SSR server on port 3000
+  echo "Starting frontend SSR server on port 3000..."
+  cd "$TARGET"
+  PORT=3000 nohup npm start > /tmp/frontend.log 2>&1 &
+  sleep 3
+  
+  if curl -s http://localhost:3000 > /dev/null; then
+    echo "Frontend server started successfully on port 3000"
+  else
+    echo "WARNING: Frontend server may not have started. Check /tmp/frontend.log"
+    cat /tmp/frontend.log | tail -20
+  fi
+else
+  echo "Build directory 'build' not found after build; check frontend scripts"
+fi
+EOF
 }
 
 prepare_remote_env() {
@@ -342,10 +448,11 @@ EOF
 }
 
 ensure_remote_prereqs() {
-  log "Ensuring docker/python are present on $REMOTE_HOST"
+  log "Ensuring docker/python/git are present on $REMOTE_HOST"
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" bash -s <<'EOF'
 set -euo pipefail
 sudo dnf update -y >/dev/null
+command -v git >/dev/null 2>&1 || sudo dnf install -y git >/dev/null
 command -v docker >/dev/null 2>&1 || sudo dnf install -y docker >/dev/null
 command -v python3 >/dev/null 2>&1 || sudo dnf install -y python3 >/dev/null
 command -v tar >/dev/null 2>&1 || sudo dnf install -y tar >/dev/null
@@ -364,13 +471,13 @@ EOF
 }
 
 compose_services() {
-  local services="agent-api auth-service user-service ingestion-service"
+  local services="agent-api auth-service user-service ingestion-service nginx-gateway"
   [[ "$INCLUDE_SWAGGER" -eq 0 ]] || services="$services swagger-service"
   echo "$services"
 }
 
 stop_conflicting_containers() {
-  local ports=("$AGENT_API_PORT" "$AUTH_SERVICE_PORT" "$USER_SERVICE_PORT" "$INGESTION_SERVICE_PORT")
+  local ports=("$AGENT_API_PORT" "$AUTH_SERVICE_PORT" "$USER_SERVICE_PORT" "$INGESTION_SERVICE_PORT" "80")
   [[ "$INCLUDE_SWAGGER" -eq 0 ]] || ports+=("$SWAGGER_SERVICE_PORT")
   log "Stopping containers already bound to: ${ports[*]}"
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" bash -s <<EOF
@@ -439,16 +546,20 @@ main() {
   open_security_group_ports
   ensure_remote_prereqs
   sync_repo_to_remote
+  sync_housing_frontend_repo
+  build_housing_frontend
   prepare_remote_env
   stop_conflicting_containers
   run_compose
 
   log "Done. Health checks (from your machine):"
+  log "  curl -fsS http://$REMOTE_HOST/health                          # nginx gateway"
   log "  curl -fsS http://$REMOTE_HOST:$AUTH_SERVICE_PORT/health"
   log "  curl -fsS http://$REMOTE_HOST:$USER_SERVICE_PORT/v1/health"
   log "  curl -fsS http://$REMOTE_HOST:$AGENT_API_PORT/health"
   log "  curl -fsS http://$REMOTE_HOST:$INGESTION_SERVICE_PORT/health"
   [[ "$INCLUDE_SWAGGER" -eq 0 ]] || log "  curl -fsS http://$REMOTE_HOST:$SWAGGER_SERVICE_PORT/health"
+  log "Frontend: http://$REMOTE_HOST/"
 }
 
 main "$@"
