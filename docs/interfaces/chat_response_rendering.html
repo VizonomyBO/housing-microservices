@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Response Rendering Demo</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 24px;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: #0f172a;
+      background: radial-gradient(circle at 20% 20%, #f7f8ff, #eef2ff 40%, #f8fafc 100%);
+    }
+    .message {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      border: 1px solid #e2e8f0;
+      padding: 20px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .answer {
+      font-size: 16px;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .citation {
+      position: relative;
+      display: inline-block;
+      margin-left: 2px;
+      text-decoration: none;
+      color: #475569;
+      font-weight: 600;
+    }
+    .citation sup {
+      font-size: 11px;
+      vertical-align: super;
+      padding: 0 3px;
+      border-radius: 6px;
+      background: #e2e8f0;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .citation:focus sup,
+    .citation:hover sup {
+      background: #312e81;
+      color: #fff;
+    }
+    .citation-card {
+      position: absolute;
+      left: -10px;
+      top: 24px;
+      width: 260px;
+      background: #0b1221;
+      color: #e2e8f0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      box-shadow: 0 15px 35px rgba(12, 10, 29, 0.35);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      z-index: 10;
+    }
+    .citation-card strong { display: block; color: #cbd5f5; margin-bottom: 4px; }
+    .citation-card .meta { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+    .citation-card p { margin: 0; font-size: 13px; color: #e2e8f0; }
+    .citation:hover .citation-card,
+    .citation:focus .citation-card,
+    .citation:focus-within .citation-card {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    details.evidence {
+      margin-top: 12px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+      overflow: visible; /* allow hover cards to extend beyond the box */
+    }
+    details summary {
+      cursor: pointer;
+      padding: 14px 16px;
+      list-style: none;
+      font-weight: 700;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary:after {
+      content: "▸";
+      font-size: 12px;
+      color: #475569;
+      transition: transform 0.2s ease;
+    }
+    details[open] summary:after { transform: rotate(90deg); }
+    .evidence-body { padding: 0 16px 16px 16px; overflow: visible; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      background: #fff;
+      border-radius: 10px;
+      overflow: visible; /* allow hover cards to extend outside the table */
+      border: 1px solid #e2e8f0;
+      box-shadow: inset 0 1px 0 #f1f5f9;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      overflow: visible; /* ensure hover cards are not clipped by cells */
+    }
+    th { background: #f1f5f9; color: #0f172a; font-weight: 700; }
+    tr:last-child td { border-bottom: none; }
+    .footnotes {
+      margin-top: 12px;
+      padding-left: 16px;
+      color: #475569;
+      font-size: 14px;
+    }
+    .footnotes li { margin-bottom: 6px; }
+    .footnotes strong { color: #0f172a; }
+    @media (max-width: 640px) {
+      body { margin: 12px; }
+      .citation-card { width: 220px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="message">
+    <div class="answer">
+      The voucher program expanded to five districts
+      <a class="citation" href="#footnote-1">
+        <sup>1</sup>
+        <span class="citation-card">
+          <strong>Metro Housing Continuity Memo (Q2 FY25)</strong>
+          <div class="meta">page 1</div>
+          <p>Emergency voucher program expanded from three pilot districts to five districts; District 9 reserves 15% of slots for seniors.</p>
+        </span>
+      </a>
+      , and District 9 must reserve 15% of slots for seniors affected by the Harbor bridge retrofit
+      <a class="citation" href="#footnote-1">
+        <sup>1</sup>
+        <span class="citation-card">
+          <strong>Metro Housing Continuity Memo (Q2 FY25)</strong>
+          <div class="meta">page 1</div>
+          <p>District 9 must reserve 15% of slots for seniors impacted by the Harbor bridge retrofitting.</p>
+        </span>
+      </a>
+      . Harbor City shows a stability index of 87, comfortably above the resiliency band
+      <a class="citation" href="#footnote-2">
+        <sup>2</sup>
+        <span class="citation-card">
+          <strong>Metro KPI Snapshot — April 2025</strong>
+          <div class="meta">page 1</div>
+          <p>Harbor City Stability Index 87; Lakeview compliance plateauing.</p>
+        </span>
+      </a>
+      .
+    </div>
+
+    <details class="evidence">
+      <summary>View evidence (tables & sources)</summary>
+      <div class="evidence-body">
+        <table aria-label="SQL evidence table">
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>Value</th>
+              <th>Unit</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Expanded Districts</td>
+              <td>5</td>
+              <td>districts</td>
+              <td>
+                <a class="citation" href="#footnote-1">
+                  <sup>1</sup>
+                  <span class="citation-card">
+                    <strong>Metro Housing Continuity Memo (Q2 FY25)</strong>
+                    <div class="meta">page 1</div>
+                    <p>Emergency voucher program expanded from three pilot districts to five districts.</p>
+                  </span>
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td>Slots for Seniors</td>
+              <td>15</td>
+              <td>%</td>
+              <td>
+                <a class="citation" href="#footnote-1">
+                  <sup>1</sup>
+                  <span class="citation-card">
+                    <strong>Metro Housing Continuity Memo (Q2 FY25)</strong>
+                    <div class="meta">page 1</div>
+                    <p>District 9 must reserve 15% of slots for seniors affected by the Harbor bridge retrofit.</p>
+                  </span>
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td>Rent Relief Cap</td>
+              <td>32</td>
+              <td>%</td>
+              <td>
+                <a class="citation" href="#footnote-1">
+                  <sup>1</sup>
+                  <span class="citation-card">
+                    <strong>Metro Housing Continuity Memo (Q2 FY25)</strong>
+                    <div class="meta">page 1</div>
+                    <p>Rent relief cap lowered to 32% of household income for expansion districts.</p>
+                  </span>
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td>Harbor City Stability Index</td>
+              <td>87</td>
+              <td></td>
+              <td>
+                <a class="citation" href="#footnote-2">
+                  <sup>2</sup>
+                  <span class="citation-card">
+                    <strong>Metro KPI Snapshot — April 2025</strong>
+                    <div class="meta">page 1</div>
+                    <p>Harbor City dominates the KPI composite because of rapid landlord onboarding.</p>
+                  </span>
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <ol class="footnotes">
+          <li id="footnote-1">
+            <strong>Metro Housing Continuity Memo (Q2 FY25)</strong> — page 1. “Emergency voucher program expanded from three pilot districts to five districts; District 9 must reserve 15% of slots for seniors.”
+          </li>
+          <li id="footnote-2">
+            <strong>Metro KPI Snapshot — April 2025</strong> — page 1. “Harbor City Stability Index 87; Lakeview compliance plateauing.”
+          </li>
+        </ol>
+      </div>
+    </details>
+  </div>
+</body>
+</html>
