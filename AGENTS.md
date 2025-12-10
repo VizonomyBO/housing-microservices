@@ -79,7 +79,7 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 - Maintain the per-task plan + tracker files (`TASK_PLAN.md`, `TASK_PLAN_PROGRESS.md`) and keep them in sync with the outstanding steps (enforce attachment safety, LocalStack verification, AWS verification, cleanup/tests).
 - For the in-progress AWS smoke work (Step 9), review `notes/aws_step9_status.md` before making changes; it captures the latest commands, evidence paths (`/tmp/aws_smoke_step9/`), and outstanding actions.
 - Always run Python tooling via `services/agent-api/.venv` and prefer `uv run …` for formatting, linting, typing, and pytest.
-- Compose workflows must support pointing the locally running services at the AWS deployment by sourcing `.env.prod.aws`; LocalStack remains required for verification as well.
+- Compose workflows must support pointing the locally running services at the AWS deployment by sourcing `.env.prod`; LocalStack remains required for verification as well (use `.env.local` when testing LocalStack).
 - Perform the end-to-end curl walkthrough plus `scripts/prod_smoke_check.sh` in both LocalStack and AWS modes before completion; document commands and evidence in the tracker.
 - When AWS resources conflict, re-run Terraform with the provided `ArchaaS/terraform.v2.tfvars` (uses the `vizonomy-v2/dev2` suffix) instead of deleting user-managed infrastructure.
 - The remote Postgres host must expose **two** logical databases (`housing` for shared_data_layer/agent-api, `auth_db` for auth-service). Never co-mingle schemas by reusing `auth_db` for agent tables—create/fix the `housing` database instead.

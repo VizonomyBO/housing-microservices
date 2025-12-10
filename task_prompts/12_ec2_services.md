@@ -5,7 +5,7 @@ Package and run agent-api, auth-service, and user-service on the existing EC2 th
 
 ## Context (carry-over)
 - AWS infra already deployed (Postgres at 52.207.140.87:5432, API Gateway https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2). Auth/user should be AWS-ready after Task 10.
-- Env switching uses `scripts/use_env.sh <aws|localstack>` which refreshes `.env.active`; reuse/extend as needed. `.env*` edits are allowed; they’re gitignored.
+- Env selection uses `scripts/use_env.sh <prod|dev|local>` which returns the chosen env file; source it and pass `--env-file` to compose/deploy. `.env*` edits are allowed; they’re gitignored.
 - Real ingestion file: `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf` (current converter emits a placeholder; use a freshly generated PDF like `/tmp/ec2_policy_generated.pdf` for smoke runs). Smoke script is working in AWS.
 - LocalStack verification is deferred to the next task.
 
@@ -27,7 +27,7 @@ Package and run agent-api, auth-service, and user-service on the existing EC2 th
 
 ## Automation helper (updated)
 - Use `scripts/deploy_ec2_services.sh` to push the repo to the EC2 host (default `/opt/housing-microservices`), install Docker/Compose if missing, generate a public-host env, and run `docker-compose.ec2.yml` for `agent-api`, `auth-service`, `user-service` (optional `--include-swagger`). Marker-service is skipped by default; use `--include-marker` only if explicitly testing that legacy path.
-- Example: `scripts/use_env.sh aws && scripts/deploy_ec2_services.sh --host 52.207.140.87 --open-ports` (defaults to the terraform SSH key). `--action stop` tears the stack down; `--no-sync`/`--no-build` speed up restarts.
+- Example: `env_file=$(scripts/use_env.sh prod) && ENV_FILE="$env_file" scripts/deploy_ec2_services.sh --host 52.207.140.87 --open-ports` (defaults to the terraform SSH key). `--action stop` tears the stack down; `--no-sync`/`--no-build` speed up restarts.
 - The helper can update the EC2 security group for ports 8000/5001/5002/3000 when `--open-ports` is provided (requires AWS creds in the env file). Health checks and login curls are echoed after deployment.
 
 ## Deliverables

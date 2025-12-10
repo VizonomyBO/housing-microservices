@@ -2,20 +2,15 @@
 set -euo pipefail
 
 # Recreates the remote AWS stack (EC2 + Postgres) via Terraform, captures the
-# generated SSH key, patches .env.prod.aws with the latest public IP, and runs
+# generated SSH key, patches .env.prod with the latest public IP, and runs
 # the remote database bootstrap script.
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TF_DIR="$ROOT_DIR/ArchaaS"
-DEFAULT_ENV_FILE="$ROOT_DIR/.env.active"
-FALLBACK_ENV_FILE="$ROOT_DIR/.env.prod.aws"
+DEFAULT_ENV_FILE="$ROOT_DIR/.env.prod"
 ENV_FILE=${ENV_FILE:-}
 if [[ -z "$ENV_FILE" ]]; then
-  if [[ -f "$DEFAULT_ENV_FILE" ]]; then
-    ENV_FILE="$DEFAULT_ENV_FILE"
-  else
-    ENV_FILE="$FALLBACK_ENV_FILE"
-  fi
+  ENV_FILE="$DEFAULT_ENV_FILE"
 fi
 TF_VARS_FILE=${TF_VARS_FILE:-terraform.v2.tfvars}
 WORKSPACE_NAME=${TF_WORKSPACE:-prod}
@@ -32,7 +27,7 @@ Options:
   -h, --help             Show this help text.
 
 Environment:
-  ENV_FILE               Path to env file to source for AWS creds (default: .env.prod.aws).
+  ENV_FILE               Path to env file to source for AWS creds (default: .env.prod).
   TF_VARS_FILE           Same as --tfvars.
   TF_WORKSPACE           Same as --workspace (input only; script unsets before running terraform).
 EOF

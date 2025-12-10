@@ -1,7 +1,7 @@
 # Task 11 – Automate env switching (fresh session prompt)
 
 ## Objective
-Create a single source of truth to toggle between AWS and LocalStack (or future local emulation) for compose, scripts, and lambdas. It’s allowed to touch any `.env*` files (gitignored) and to add helper scripts/templates.
+Create a single source of truth to toggle between AWS, LocalStack, and hybrid dev for compose, scripts, and lambdas. It’s allowed to touch any `.env*` files (gitignored) and to add helper scripts/templates.
 
 ## Context (carry-over)
 - AWS mode is working (INGEST_BASE_URL=https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2, Postgres 52.207.140.87). LocalStack is deferred for now, but plan for it later. 
@@ -14,7 +14,7 @@ Create a single source of truth to toggle between AWS and LocalStack (or future 
 - Ensure compose, smoke scripts (`scripts/prod_smoke_check.sh`), terraform helpers, and runbooks can consume the toggle without manual edits.
 - Document how to switch (one or two commands).
 - If this changes defaults, update subsequent prompt files.
-- Toggle helper now lives at `scripts/use_env.sh`. Run `env_file=$(scripts/use_env.sh aws|localstack)` to refresh `.env.active`, then source it (`set -a && source "$env_file" && set +a`) and pass `--env-file "$env_file"` to compose.
+- Toggle helper now lives at `scripts/use_env.sh`. Run `env_file=$(scripts/use_env.sh prod|dev|local)` to select the target env file, then source it (`set -a && source "$env_file" && set +a`) and pass `--env-file "$env_file"` to compose.
 
 ## Suggested steps
 1) Inspect current env usage in compose overrides, scripts (`scripts/prod_smoke_check.sh`, terraform wrappers, runbooks).  

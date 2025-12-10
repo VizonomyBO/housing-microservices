@@ -6,16 +6,8 @@ set -euo pipefail
 # installs extensions, and runs migrations for both stacks).
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-DEFAULT_ENV_FILE="$ROOT_DIR/.env.active"
-FALLBACK_ENV_FILE="$ROOT_DIR/.env.prod.aws"
-ENV_FILE=${ENV_FILE:-}
-if [[ -z "$ENV_FILE" ]]; then
-  if [[ -f "$DEFAULT_ENV_FILE" ]]; then
-    ENV_FILE="$DEFAULT_ENV_FILE"
-  else
-    ENV_FILE="$FALLBACK_ENV_FILE"
-  fi
-fi
+DEFAULT_ENV_FILE="$ROOT_DIR/.env.prod"
+ENV_FILE=${ENV_FILE:-$DEFAULT_ENV_FILE}
 
 if [[ -f "$ENV_FILE" ]]; then
   echo "Loading env vars from $ENV_FILE"

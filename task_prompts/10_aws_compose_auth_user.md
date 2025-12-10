@@ -5,22 +5,22 @@ Run auth-service and user-service locally against the AWS Postgres host so JWT l
 
 ## Current state (context to avoid re-discovery)
 - AWS stack live: API Gateway `https://yozxw8xm0j.execute-api.us-east-1.amazonaws.com/dev2`; raw bucket `vizonomy-v2-raw-docs-dev2-4fd5a20a`; processed bucket `vizonomy-v2-processed-artifacts-dev2-4fd5a20a`; Postgres on EC2 `52.207.140.87:5432` (`housing`, `auth_db`, user/pass `vizonomy_user`/`iSQOjvXTBzJBcGCCt4koPDno`).
-- Compose already points agent-api at AWS via `.env.prod.aws` with `USE_LOCALSTACK=0`.
+- Compose already points agent-api at AWS via `.env.prod` with `USE_LOCALSTACK=0`.
 - AWS smoke is passing; tracker Step 9 is done. Real PDF lives at `services/agent-api/tests/data/reduced_e2e/doc_policy.pdf`.
 - Many files are dirty in git; do not revert unrelated work.
 
 ## Requirements
 - Update compose/override/env so auth-service and user-service use the remote Postgres when `USE_LOCALSTACK=0`.
 - Health-check auth endpoints (`/v1/auth/login`, `/v1/health`) with AWS DB to confirm JWT issuance.
-- Keep `.env*` updates in repo if needed (gitignored is fine); it’s allowed to edit `.env.prod.aws` and friends.
+- Keep `.env*` updates in repo if needed (gitignored is fine); it’s allowed to edit `.env.prod`/`.env.dev` and friends.
 - If changes affect later tasks, append a short note to the next prompt files in `task_prompts/`.
 
 ## Suggested steps
-1) Read `docker-compose.prod.override.yml` and `.env.prod.aws`; align `AUTH_DATABASE_URL`/`POSTGRES_HOST` for auth/user services to the AWS Postgres host.  
+1) Read `docker-compose.prod.override.yml` and `.env.prod`; align `AUTH_DATABASE_URL`/`POSTGRES_HOST` for auth/user services to the AWS Postgres host.  
 2) Restart only auth-service/user-service in AWS mode.  
 3) Run login curl using demo creds (`demo.client@example.com` / `ChangeMe!123`) to verify token issuance.  
 4) Update docs/runbooks if commands change; update tracker `TASK_PLAN_PROGRESS.md` row 10.  
-5) If you add env vars, propagate to any helper scripts that source `.env.prod.aws`.
+5) If you add env vars, propagate to any helper scripts that source `.env.prod`.
 
 ## Deliverables
 - Auth/user services working against AWS DB in compose AWS mode.

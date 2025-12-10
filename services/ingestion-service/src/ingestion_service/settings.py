@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Any, Sequence
 
@@ -52,7 +53,7 @@ class Settings(BaseSettings):
     worker_name: str = "ingestion-service"
 
     class Config:
-        env_file = ".env.active"
+        env_file = os.getenv("ENV_FILE", ".env.local")
         env_file_encoding = "utf-8"
         case_sensitive = False
 

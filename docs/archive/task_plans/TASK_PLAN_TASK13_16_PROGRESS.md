@@ -10,6 +10,6 @@ _Tracker for TASK_PLAN_TASK13_16.md (plan auto-approved). Leave in place per ses
 - [x] Step 7: Prepare commit/staging (prod-ready), leave plan/tracker files.
 
 Notes / evidence:
-- Commands/logs: `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh |& tee /tmp/prod_smoke_latest.log`
+- Commands/logs: `ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh |& tee /tmp/prod_smoke_latest.log`
 - Document IDs / hashes: policy `32b1ad98-309d-4cac-b5b4-2164bdc27989`, ledger `a7a58498-1ae4-47d6-a2dd-3152a5327519`, KPI `9c1954d8-4178-46c2-a5bf-0cd9de83d5e8` (stamped copies to avoid dedupe)
 - Smoke evidence path: `/tmp/prod_smoke_latest.log`, `prod_sample_run.json` (AWS mode)

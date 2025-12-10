@@ -11,4 +11,4 @@ _Tracks TASK_PLAN_SYNC_FASTAPI_INGESTION.md (auto-approved)._
 
 Notes:
 - New FastAPI service scaffold added under `services/ingestion-service` (MarkItDown conversion + chunk/embed pipeline) with Dockerfile and EC2 compose wiring; deploy script opens port 8085 and sets `INGEST_BASE_URL` to the new service.
-- Smoke (AWS via FastAPI ingestion): `ENV_FILE=.env.active bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_fastapi.log` succeeded; uploaded docs `2dc9b58f-217a-48a3-945c-8edae96c73c5`, `776f45dc-11e2-4b4a-b6b0-2c75bc39066c`, `bfbeb618-d493-47ef-a70a-f3d35d567277` ingested/attached and prompts completed.
+- Smoke (AWS via FastAPI ingestion): `ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_fastapi.log` succeeded; uploaded docs `2dc9b58f-217a-48a3-945c-8edae96c73c5`, `776f45dc-11e2-4b4a-b6b0-2c75bc39066c`, `bfbeb618-d493-47ef-a70a-f3d35d567277` ingested/attached and prompts completed.

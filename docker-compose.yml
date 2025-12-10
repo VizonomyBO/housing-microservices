@@ -1,7 +1,7 @@
 # Shared snippets to keep service definitions concise
 x-service-defaults: &service-defaults
   env_file:
-    - .env
+    - ${ENV_FILE:-.env.local}
 
 x-monorepo-build: &monorepo-build
   context: .

@@ -29,5 +29,5 @@ Refresh prod-facing docs and automation so the AWS stack is redeployable with ze
 3. Add an idempotent prod deploy entrypoint script covering Terraform apply + EC2 service bring-up; document usage alongside existing helpers.
 4. Ensure converter fail-on-parse is implemented (Task 15 requirement); adjust code/tests if missing.
 5. Refresh `README.md` to point to the runbook and endpoint reference; align any links.
-6. Run AWS smoke (`ENV_FILE=.env.active bash scripts/prod_smoke_check.sh` with unique PDFs) and capture evidence/logs; update tracker entries.
+6. Run AWS smoke (`ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh` with unique PDFs) and capture evidence/logs; update tracker entries.
 7. Leave plan/tracker files in place; stage/commit prod-ready changes when tasks above are done.
