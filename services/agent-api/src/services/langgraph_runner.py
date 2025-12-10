@@ -8,9 +8,10 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import polars as pl
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
@@ -30,8 +31,13 @@ from nodes.retrieval.graph_retriever_node import GraphRetrieverNode
 from nodes.retrieval.graph_summarizer_node import GraphSummarizerNode
 from nodes.retrieval.utils.language import LanguageDetectorProtocol
 from nodes.router.router_node import RouterNode
+from repositories.agent_checkpoint_repository import (
+    AgentCheckpointRepository,
+    CheckpointSaveOptions,
+)
 from repositories.conversation_scope_repository import ConversationScopeRepository
 from services.answer_composer import OpenAIAnswerComposer
+from services.conversation_summary_cache import ConversationSummaryCache
 from services.model_clients import OpenAIChatClientProtocol
 from services.numerical_fact_extractor import NumericFactExtractor
 from state.agent_state import (
@@ -75,6 +81,7 @@ class LangGraphChatRunner:
         openai_client: OpenAIChatClientProtocol | None,
         metrics: MetricsRegistry,
         fact_extractor: NumericFactExtractor | None = None,
+        summary_cache: ConversationSummaryCache | None = None,
     ) -> None:
         self._cache_client = cache_client
         self._cache_observability = cache_observability
@@ -84,6 +91,7 @@ class LangGraphChatRunner:
         self._metrics = metrics
         self._sql_generator = HeuristicSqlGenerator()
         self._fact_extractor = fact_extractor or NumericFactExtractor(client=openai_client)
+        self._summary_cache = summary_cache or ConversationSummaryCache(cache_client)
 
     async def run_chat(
         self,
@@ -107,7 +115,15 @@ class LangGraphChatRunner:
                 message="Database session is required",
                 status_code=503,
             )
-        state = self._build_initial_state(request)
+        checkpoint_repo = AgentCheckpointRepository(db_session)
+        conversation_uuid = self._parse_conversation_uuid(request.conversation_id)
+        state, history_count = await self._initialize_state(
+            request,
+            checkpoint_repo,
+            reduced_scope,
+            conversation_uuid,
+            metrics,
+        )
         context = RunnerContext(
             chat_request=request,
             request_context=request_context,
@@ -130,8 +146,18 @@ class LangGraphChatRunner:
                 status_code=500,
             ) from exc
 
-        payload = self._build_done_payload(request, final_state)
-        messages = self._build_messages(final_state)
+        final_state = self._append_assistant_message(final_state)
+        persisted_state = await self._persist_run(
+            repository=checkpoint_repo,
+            state=final_state,
+            new_message_start=history_count,
+            checkpoint_type="chat_run",
+            db_session=db_session,
+            conversation_uuid=conversation_uuid,
+            request=request,
+        )
+        payload = self._build_done_payload(request, persisted_state)
+        messages = self._build_messages(persisted_state)
         return ChatRunResult(done_payload=payload, messages=messages)
 
     async def _execute_pipeline(self, state: AgentState, context: RunnerContext) -> AgentState:
@@ -359,15 +385,17 @@ class LangGraphChatRunner:
             mapping[table.alias] = pl.DataFrame(rows or []).lazy()
         return mapping
 
-    def _build_initial_state(self, request: ChatRequestContext) -> AgentState:
-        snapshot = MessageSnapshot(
-            message=HumanMessage(content=request.message.content),
-            stored_at=datetime.now(UTC),
-            metadata={"role": "user"},
-        )
+    def _build_initial_state(
+        self,
+        request: ChatRequestContext,
+        *,
+        history: list[MessageSnapshot] | None = None,
+    ) -> AgentState:
+        messages = list(history or [])
+        messages.append(self._user_message(request))
         flags = request.reduced_scope or ReducedScopeFlags()
         return AgentState(
-            messages=[snapshot],
+            messages=messages,
             conversation_id=request.conversation_id,
             reduced_scope_flags=flags,
         )
@@ -399,6 +427,134 @@ class LangGraphChatRunner:
     def _build_messages(self, state: AgentState) -> list[dict[str, str]]:
         answer = state.answer or ""
         return [{"role": "assistant", "content": answer}]
+
+    async def _initialize_state(
+        self,
+        request: ChatRequestContext,
+        repository: AgentCheckpointRepository,
+        reduced_scope: ReducedScopeFlags | None,
+        conversation_uuid: UUID | None,
+        metrics: MetricsRegistry,
+    ) -> tuple[AgentState, int]:
+        history: list[MessageSnapshot] = []
+        if conversation_uuid is None:
+            if not request.allow_stateless:
+                raise GatewayError(
+                    code="VALIDATION_ERROR",
+                    message="conversation_id must be a valid UUID",
+                    status_code=400,
+                )
+            logger.warning(
+                "chat.history_fallback_stateless",
+                extra={
+                    "conversation_id": request.conversation_id,
+                    "owner_user_id": request.owner_user_id,
+                },
+            )
+            metrics.record_history_event(
+                event="stateless_fallback",
+                route=self._route_hint(request),
+                message_count=0,
+            )
+        else:
+            hydrated = await repository.load_latest(conversation_uuid)
+            if hydrated and hydrated.state and hydrated.state.messages:
+                history = list(hydrated.state.messages)
+            metrics.record_history_event(
+                event="history_loaded",
+                route=self._route_hint(request),
+                message_count=len(history),
+            )
+        state = self._build_initial_state(request, history=history)
+        # Align reduced-scope flags with the current request in case previous checkpoints differ.
+        state = state.model_copy(
+            update={"reduced_scope_flags": reduced_scope or ReducedScopeFlags()}
+        )
+        return state, len(history)
+
+    def _user_message(self, request: ChatRequestContext) -> MessageSnapshot:
+        return MessageSnapshot(
+            message=HumanMessage(content=request.message.content),
+            stored_at=datetime.now(UTC),
+            metadata={"role": "user"},
+        )
+
+    def _append_assistant_message(self, state: AgentState) -> AgentState:
+        messages = list(state.messages or [])
+        citations = []
+        for citation in state.citations:
+            if hasattr(citation, "model_dump"):
+                citations.append(citation.model_dump())
+            else:
+                citations.append(citation)
+        messages.append(
+            MessageSnapshot(
+                message=AIMessage(content=state.answer or ""),
+                stored_at=datetime.now(UTC),
+                metadata={"role": "assistant", "citations": citations},
+            )
+        )
+        return state.model_copy(update={"messages": messages})
+
+    async def _persist_run(
+        self,
+        *,
+        repository: AgentCheckpointRepository,
+        state: AgentState,
+        new_message_start: int,
+        checkpoint_type: str,
+        db_session: AsyncSession,
+        conversation_uuid: UUID | None,
+        request: ChatRequestContext,
+    ) -> AgentState:
+        new_messages = list(state.messages or [])[new_message_start:]
+        persisted_state = state
+        if conversation_uuid is not None:
+            if new_messages:
+                await repository.append_messages(conversation_uuid, new_messages)
+            persisted_state = await repository.save_checkpoint(
+                state,
+                CheckpointSaveOptions(
+                    checkpoint_type=checkpoint_type,
+                    metadata={"route": state.route.value if state.route else None},
+                ),
+            )
+        await self._commit(db_session)
+        if conversation_uuid is not None and self._summary_cache is not None:
+            await self._summary_cache.invalidate(str(conversation_uuid))
+        if conversation_uuid is not None:
+            logger.info(
+                "checkpoint.persist",
+                extra={
+                    "conversation_id": str(conversation_uuid),
+                    "checkpoint_type": checkpoint_type,
+                    "message_count": len(new_messages),
+                    "route": state.route.value if state.route else self._route_hint(request),
+                },
+            )
+        return persisted_state
+
+    def _parse_conversation_uuid(self, conversation_id: str) -> UUID | None:
+        try:
+            return UUID(str(conversation_id))
+        except (TypeError, ValueError):
+            return None
+
+    def _route_hint(self, request: ChatRequestContext) -> str | None:
+        try:
+            route = (request.hints or {}).get("route")
+        except Exception:
+            return None
+        if route:
+            return str(route)
+        return None
+
+    async def _commit(self, db_session: AsyncSession) -> None:
+        try:
+            await db_session.commit()
+        except Exception:
+            await db_session.rollback()
+            raise
 
 
 class HeuristicSqlGenerator(SqlGeneratorProtocol):

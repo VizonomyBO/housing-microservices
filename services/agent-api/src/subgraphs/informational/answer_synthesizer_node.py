@@ -31,6 +31,7 @@ class AnswerSynthesisContext:
     workflow_plan: WorkflowPlan | None
     attachment_scope: AttachmentScope | None
     reduced_scope_flags: ReducedScopeFlags | None = None
+    chat_history: list[dict[str, str]] | None = None
 
 
 @dataclass(slots=True)
@@ -101,8 +102,20 @@ class AnswerSynthesizerNode:
             if cache_result.hit and cache_result.payload is not None:
                 return self._serialize_cache_hit(state, cache_result)
 
+            history: list[dict[str, str]] | None = None
+            if state.messages:
+                history = []
+                # Keep a small, recent window to avoid blowing out token budgets.
+                for snapshot in list(state.messages)[-10:]:
+                    role = (snapshot.metadata or {}).get("role") or snapshot.message.type
+                    content = getattr(snapshot.message, "content", None)
+                    if not content:
+                        continue
+                    history.append({"role": str(role or "user"), "content": str(content)})
+
             context = AnswerSynthesisContext(
                 normalized_prompt=normalized_input.normalized_prompt,
+                chat_history=history,
                 graph_summary=state.graph_summary,
                 graph_context=state.graph_context,
                 workflow_plan=state.workflow_plan,

@@ -82,6 +82,7 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 - **Prod deploy + smoke (AWS/EC2)**: `ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports` then `ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`; full runbook at `docs/runbooks/prod_setup.md`.
 - **Ingestion service**: FastAPI on EC2 (`INGEST_BASE_URL` default `http://52.207.140.87:8085`) replaces the old Lambda/S3 flow; presign + upload handled via the ingestion service endpoints.
 - **Service map** (ports from env): agent-api 8000, ingestion-service 8085, auth-service 5001, user-service 5002, swagger-service 3000, Postgres 5432; LocalStack/valkey/otel only in local profiles.
+- **Multi-turn chat reminders**: `/v1/chat` enforces UUID + ownership for `thread_id` (4xx otherwise unless `allow_stateless=true`) and persists assistant messages with citations/tools. Reuse the same `thread_id` to keep history; transcripts paginate via `GET /v1/conversations/{id}`.
 
 ---
 

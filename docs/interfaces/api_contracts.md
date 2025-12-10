@@ -106,6 +106,12 @@ Missing `thread_id` triggers server-side creation (`thr_<uuid>`). `session_id` g
 - `scope` is echoed back in transcripts so clients know whether the doc is base (`base`) or user-provided (`user`).
 - `visibility` overrides default retrieval behavior (`visible`, `hidden`, `read_only`). Hidden attachments remain in the bridge for auditing but Retrieval honors the override.
 - Setting `constraints.auto_attach_base_docs=true` attaches the default per-country base set before LangGraph executes; explicit attachments win on conflicts.
+- `allow_stateless` defaults to `false`. Set it to `true` only when you intentionally want a stateless run (e.g., missing/non-UUID `thread_id`). Otherwise, invalid or foreign `thread_id` values return 4xx instead of silently resetting history.
+
+**History & state**:
+- Conversations are stateful; when `thread_id` is a valid UUID owned by the caller, the gateway loads prior turns and LangGraph includes the last messages when composing the answer. Invalid/foreign IDs return 400/404 unless `allow_stateless=true`, in which case the run proceeds without loading history and emits a stateless-fallback metric.
+- Attachments are conversation-scoped via `conversation_documents`; attaching documents before a chat ensures retrieval + citations work across multi-turn flows.
+- Assistant messages persist citations and tool metadata in JSON-serializable form so transcripts/exports can round-trip without schema issues.
 
 **Streaming response (SSE)**:
 Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store`. Event types:
@@ -128,6 +134,8 @@ Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store
 - Streaming responses set `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-store`, `Connection: keep-alive`, and `X-Accel-Buffering: no` so nginx/ALB do not buffer the feed. The gateway injects comment-based keep-alives (`: keep-alive`) at ≤10s intervals via `SSEEmitter`.
 - Blocking responses share the same request schema but add `Cache-Control: no-store` to guarantee intermediaries do not cache transcripts.
 - The gateway emits an initial `meta` frame (thread/session/request identifiers) before LangGraph fires node-level telemetry frames, and emits `task_error` when uncaught exceptions propagate. Clients should treat `task_error` as terminal and rely on the accompanying HTTP 5xx to trigger retries.
+- `/v1/chat` enforces ownership + UUID validation: foreign `thread_id` values return 404; malformed IDs return 400 unless `allow_stateless=true`, in which case the run proceeds without loading/persisting history and emits a stateless-fallback warning metric.
+- Multi-turn expectations: clients should reuse the same `thread_id` to maintain context; blocking responses include the assistant turn and are persisted alongside citations/tool metadata. Conversation transcripts and pagination are available via `GET /v1/conversations/{id}` (see §1.4).
 
 Blocking mode returns the final `done` payload plus `messages` array in a single JSON response. When reduced scope is active, the initial `meta` event (and blocking response envelope) also embed `"reduced_scope": {"text_only_chunks": true, "allowed_chunk_types": ["text"]}` so clients can surface demo-mode banners.
 
@@ -152,6 +160,7 @@ sequenceDiagram
 Retrieves normalized conversation transcript, optionally expanded with citations.
 
 **Query params**: `cursor`, `limit`, `include_citations` (default `false`), `before`/`after` ISO timestamps for slicing.
+- Transcript responses are paginated. `limit` defaults to 50 (max 200) and responses include `page_info.next_cursor` plus `page_info.remaining_count`. Invalid cursors return 400; clients should follow `next_cursor` until it becomes `null`.
 
 **Response 200**:
 ```json

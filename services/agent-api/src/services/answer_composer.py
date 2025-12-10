@@ -30,7 +30,7 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             return self._fallback_response(context)
 
         prompt = self._build_prompt(context)
-        messages = self._messages(prompt)
+        messages = self._messages(prompt, context.chat_history or [])
         text = await self.client.complete(
             messages,
             temperature=self.temperature,
@@ -91,11 +91,27 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             prompt_parts.append("References:\n" + attachment_overview)
         return "\n\n".join(prompt_parts)
 
-    def _messages(self, prompt: str) -> Sequence[dict[str, str]]:
-        return [
-            {"role": "system", "content": "You are a helpful analyst."},
-            {"role": "user", "content": prompt},
+    def _messages(self, prompt: str, history: Sequence[dict[str, str]]) -> Sequence[dict[str, str]]:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": "You are a helpful analyst."}
         ]
+        normalized_history: list[dict[str, str]] = []
+        for entry in history:
+            role = entry.get("role") or "user"
+            content = entry.get("content")
+            if not content:
+                continue
+            normalized_history.append({"role": role, "content": content})
+        if normalized_history:
+            # Ensure the final turn reflects the current normalized prompt.
+            if normalized_history[-1]["role"] == "user":
+                normalized_history[-1] = {"role": "user", "content": prompt}
+            else:
+                normalized_history.append({"role": "user", "content": prompt})
+            messages.extend(normalized_history)
+        else:
+            messages.append({"role": "user", "content": prompt})
+        return messages
 
     def _attachment_overview(self, scope: AttachmentScope | None) -> str:
         if scope is None or not scope.documents:
