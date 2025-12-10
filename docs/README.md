@@ -27,7 +27,22 @@ We recommend reading the documents in the following order to build a progressive
     *   `knowledge_graph.md`: Primer on the GraphRAG implementation.
 *   **[interfaces/](interfaces/)**: API and event definitions.
     *   `api_contracts.md`: REST API and event envelopes.
+    *   `chat_response_rendering.md`: Frontend parsing and citation rendering guide for `/v1/chat` responses.
 
 ## 🚦 Status & Roadmap
 
 For a current view of pending work, completed definitions, and the implementation roadmap, please refer to **[Project Status](overview/project_status.md)**.
+
+## 🔧 Patch Deploys (Python services on EC2)
+
+Use this flow to hot-patch running containers (agent-api/auth-service/user-service) without a full redeploy:
+
+1) Prep env + SSH: `env_file=$(scripts/use_env.sh prod); set -a && source "$env_file" && set +a`. Use the PEM from `ArchaaS/dist/vizonomy-v2-ec2-dev2.pem` and host `POSTGRES_HOST` from `.env.prod`. Quick check: `ssh -i ArchaaS/dist/vizonomy-v2-ec2-dev2.pem ec2-user@${POSTGRES_HOST} "echo ok && uptime"`.
+2) Copy patched file to EC2: `scp -i ArchaaS/dist/vizonomy-v2-ec2-dev2.pem path/to/local_file.py ec2-user@${POSTGRES_HOST}:/tmp/local_file.py`.
+3) Copy into the container: find the container name with `sudo docker ps --format '{{.Names}}' | grep agent-api` (or auth/user). Then `sudo docker cp /tmp/local_file.py <container>:/app/services/agent-api/src/.../file.py`.
+4) Restart the service: `sudo docker compose -f /opt/housing-microservices/docker-compose.ec2.yml restart agent-api` (swap service name as needed). Wait for health: `sudo docker ps --format '{{.Names}} {{.Status}}' | grep agent-api`.
+5) Verify: hit the service health (`curl http://localhost:8000/health` from EC2 or `${AGENT_BASE_URL}/health` remotely) and re-run a targeted `/v1/chat` or smoke script. Keep evidence under `/tmp/aws_smoke_step9/` when applicable.
+
+Notes:
+- Do not redeploy or rebuild images for small code patches; only copy the changed files and restart the affected container.
+- Avoid chunk IDs or internal metadata in user-facing responses when patching agent-api; keep evidence structured in citations/table_results.

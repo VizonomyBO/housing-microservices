@@ -84,6 +84,36 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 - **Service map** (ports from env): agent-api 8000, ingestion-service 8085, auth-service 5001, user-service 5002, swagger-service 3000, Postgres 5432; LocalStack/valkey/otel only in local profiles.
 - **Multi-turn chat reminders**: `/v1/chat` enforces UUID + ownership for `thread_id` (4xx otherwise unless `allow_stateless=true`) and persists assistant messages with citations/tools. Reuse the same `thread_id` to keep history; transcripts paginate via `GET /v1/conversations/{id}`.
 
+## 7. Patch Deploys on EC2 (Python services)
+
+Use this for hot patches without a full redeploy/build:
+
+1) Prep env/SSH  
+   - `env_file=$(scripts/use_env.sh prod); set -a && source "$env_file" && set +a`  
+   - Key/host: `ArchaaS/dist/vizonomy-v2-ec2-dev2.pem`, host=`$POSTGRES_HOST` from `.env.prod`.  
+   - Health check: `ssh -i ArchaaS/dist/vizonomy-v2-ec2-dev2.pem ec2-user@${POSTGRES_HOST} "echo ok && uptime"`.
+
+2) Copy patched file to EC2  
+   - `scp -i ArchaaS/dist/vizonomy-v2-ec2-dev2.pem path/to/local_file.py ec2-user@${POSTGRES_HOST}:/tmp/local_file.py`
+
+3) Copy into container  
+   - Find container: `sudo docker ps --format '{{.Names}}' | grep agent-api` (or auth/user).  
+   - Copy: `sudo docker cp /tmp/local_file.py <container>:/app/services/agent-api/src/.../file.py` (adjust path/service as needed).
+
+4) Restart service  
+   - `sudo docker compose -f /opt/housing-microservices/docker-compose.ec2.yml restart agent-api` (or auth-service/user-service).  
+   - Check health: `sudo docker ps --format '{{.Names}} {{.Status}}' | grep agent-api`.
+
+5) Verify  
+   - Health: `curl http://localhost:8000/health` on EC2 or `${AGENT_BASE_URL}/health` remotely.  
+   - Targeted check (preferred): run a `/v1/chat` request or `scripts/prod_smoke_check.sh` in AWS mode; store logs under `/tmp/aws_smoke_step9/`.
+
+Notes:  
+- Avoid full redeploys for small patches; copy+restart the affected container.  
+- Keep user-facing text free of chunk IDs and raw internals; evidence stays in `citations`/`table_results`.  
+- If multiple files change, repeat the `docker cp` step per file before a single restart.  
+- Use `.env.prod` for AWS targets; adjust service names if patching auth-service or user-service.
+
 ---
 
 ## 7. Task-Specific Requirements (Ingestion Reactivation)
