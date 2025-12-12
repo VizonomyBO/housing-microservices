@@ -36,6 +36,24 @@ variable "allowed_origins" {
   default     = ["https://*.vizonomy.com", "http://localhost:3000"]
 }
 
+variable "ses_domain" {
+  description = "Domain to verify for SES sending (leave blank to skip)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_from_email" {
+  description = "From email address for SES (should match the verified domain)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_configuration_set_name" {
+  description = "Optional SES configuration set name (leave blank to skip creation)"
+  type        = string
+  default     = ""
+}
+
 # Lambda Configuration
 variable "log_level" {
   description = "Lambda log level"

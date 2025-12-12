@@ -14,6 +14,7 @@ from slowapi.util import get_remote_address
 from app.dependencies import AuthenticatedUser, DatabaseSession
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
+from app.utils.email import EmailClient, SesConfig
 from app.utils.security import generate_reset_token, verify_password
 
 router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
@@ -470,16 +471,39 @@ async def forgot_password(
 
         if user:
             reset_token = generate_reset_token()
-            expires_at = datetime.now(UTC) + timedelta(hours=1)
+            # Store as naive UTC datetime for DB compatibility
+            expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
 
             if UserService.set_reset_token(session, user, reset_token, expires_at):
                 logger.info(
                     "Password reset token generated",
                     extra={"user_id": user.id, "email": payload.email},
                 )
-                # Note: Email sending should be implemented in production
-                # For development, log the token (REMOVE IN PRODUCTION)
-                logger.debug(f"Password reset token for {payload.email}: {reset_token}")
+                config = _get_config(request)
+                reset_url = f"{config.PASSWORD_RESET_URL}?token={reset_token}"
+                if not config.SES_SOURCE_EMAIL:
+                    logger.warning(
+                        "SES source email not configured; skip sending reset email",
+                        extra={"email": payload.email},
+                    )
+                else:
+                    try:
+                        ses_config = SesConfig(
+                            region=config.SES_REGION,
+                            source_email=config.SES_SOURCE_EMAIL,
+                            configuration_set=config.SES_CONFIGURATION_SET or None,
+                        )
+                        EmailClient(ses_config).send_password_reset_email(
+                            to_email=payload.email,
+                            reset_url=reset_url,
+                            token=reset_token,
+                            user_name=user.first_name or "",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to send password reset email via SES",
+                            extra={"email": payload.email},
+                        )
             else:
                 logger.error(
                     "Failed to set reset token", extra={"user_id": user.id, "email": payload.email}
@@ -514,7 +538,9 @@ async def reset_password(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
             )
 
-        if not user.reset_token_expires or datetime.now(UTC) > user.reset_token_expires:
+        # Compare as naive UTC datetimes (DB stores naive, so strip tzinfo for comparison)
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
+        if not user.reset_token_expires or now_utc > user.reset_token_expires:
             logger.warning("Password reset attempt with expired token", extra={"user_id": user.id})
             UserService.clear_reset_token(session, user)
             raise HTTPException(

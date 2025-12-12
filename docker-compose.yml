@@ -119,6 +119,11 @@ services:
       JWT_ACCESS_TOKEN_EXPIRES: ${JWT_ACCESS_TOKEN_EXPIRES:-900}
       JWT_REFRESH_TOKEN_EXPIRES: ${JWT_REFRESH_TOKEN_EXPIRES:-2592000}
       FLASK_ENV: ${FLASK_ENV:-production}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      SES_REGION: ${SES_REGION:-us-east-1}
+      SES_SOURCE_EMAIL: ${SES_SOURCE_EMAIL:-addis@vizonomy.com}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL:-https://app.vizonomy.com/reset-password}
       PORT: 5000
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
