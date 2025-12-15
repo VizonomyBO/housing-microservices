@@ -1,7 +1,13 @@
 {
   "Comment": "Document Ingestion Pipeline - Transforms raw documents into vectors and structured artifacts with progress tracking.",
-  "StartAt": "EmitConvertStarted",
+  "StartAt": "CaptureRequest",
   "States": {
+    "CaptureRequest": {
+      "Type": "Pass",
+      "Comment": "Preserve the original upload payload so optional fields (callback_url, tags, etc.) remain available",
+      "ResultPath": "$.request",
+      "Next": "EmitConvertStarted"
+    },
     "EmitConvertStarted": {
       "Type": "Task",
       "Resource": "arn:aws:states:::events:putEvents",
@@ -462,7 +468,7 @@
         "status": "failed",
         "error.$": "$.error",
         "trace_id.$": "$.trace_id",
-        "callback_url.$": "$.callback_url"
+        "callback_url": null
       },
       "ResultPath": "$.dlq_result",
       "Next": "EmitFailureEvent"
@@ -478,7 +484,8 @@
             "Detail": {
               "ingestion_id.$": "$.ingestion_id",
               "document_id.$": "$.document_id",
-              "failed_state.$": "$.error.state",
+              "failed_state": "unknown",
+              "error_name.$": "$.error.Error",
               "error_code.$": "$.error.Cause",
               "will_retry": false,
               "execution_arn.$": "$$.Execution.Id"

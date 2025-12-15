@@ -33,6 +33,9 @@ This document defines the infrastructure architecture and deployment strategy fo
 - **Container**: Docker image containing FastAPI + LangGraph runtime, deployed via systemd service.
 - **Load Balancer**: Application Load Balancer (ALB) distributing traffic across EC2 instances.
 
+#### Reduced Scope Demo Mode
+Task 3.5.3 introduces a workerless runtime so FastAPI can finish ingestion/pillar/export work inline. When `REDUCED_SCOPE_ENABLED=1`, the API skips Valkey and queues, instantiates `ReducedScopeWorkerRuntime`, and exposes Typer commands (`uv run python -m agent_api.cli ...`) for ops to run the same helpers out-of-band. Rolling back to the full architecture requires flipping the flag, re-enabling the worker ASGs/SQS endpoints, and updating runbooks so the CLI once again triggers queue jobs instead of inline DB writes.
+
 #### Autoscaling Policy
 - **Type**: Target Tracking
 - **Metrics**:
@@ -69,6 +72,21 @@ This document defines the infrastructure architecture and deployment strategy fo
 - **Platform**: AWS Lambda.
 - **Use Case**: S3 Event Notifications (e.g., new file uploaded → trigger ingestion workflow start).
 - **Runtime**: Python 3.11+.
+
+### 3.6 Local Development via Root Docker Compose (Epic 3.5)
+- **Purpose**: Ship a single developer workflow that can toggle between the reduced Agent API demo and the full platform without maintaining service-specific Compose files.
+- **Artifacts**:
+  - `docker-compose.yml` (repo root) — defines every service, profile, and dependency.
+  - `env.example` — canonical env template; copy to `.env`. `STACK_PROFILE` + `COMPOSE_PROFILES` pick the runtime (`reduced` vs `full`), while `USE_LOCALSTACK` determines whether AWS calls route through the embedded LocalStack container.
+  - `services/agent-api/scripts/seed_reduced_scope_data.py` — executed by `db-init` after Postgres is healthy so demos always have LangGraph sample data.
+  - `services/agent-api/scripts/verify_reduced_scope_compose.sh` — wraps `docker compose --profile reduced config` and `pytest -k reduced_scope_smoke` for CI smoke coverage.
+  - Runbooks: `docs/runbooks/reduced_scope_demo.md` (reduced profile) and `docs/runbooks/full_stack_compose.md` (full stack with LocalStack).
+- **Profiles & commands**:
+  - Reduced demo: `STACK_PROFILE=reduced COMPOSE_PROFILES=reduced docker compose --profile reduced up --build agent-api` (starts Postgres, db-init, agent-api, db-shell, LocalStack).
+- Full platform: `STACK_PROFILE=full COMPOSE_PROFILES=full docker compose --profile full up --build` (starts every service plus LocalStack, Valkey, otel-collector; marker removed).
+  - Default legacy stack: `docker compose up --build` (auth-service, user-service, swagger-service, postgres, LocalStack).
+- **Seeding & LocalStack**: `db-init` migrates + seeds against Postgres; rerun it manually via `docker compose run --rm db-init` if needed. LocalStack is enabled by default; set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env` to hit AWS directly.
+- **Reverting to full AWS mode**: flip `STACK_PROFILE=full`, `USE_LOCALSTACK=0`, restart AWS-aware containers (`docker compose restart agent-api`), and follow the AWS deployment sections in this doc for ECS/Fargate rollouts.
 
 ## 4. CI/CD Pipeline
 - **Platform**: GitHub Actions.

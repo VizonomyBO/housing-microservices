@@ -136,6 +136,8 @@ Constraints & indexes:
 
 Indexes: `(document_id, stage)` plus partial `(status) WHERE status IN ('pending','failed')`.
 
+> **Reduced Scope (Task 3.5.2):** The FastAPI gateway now calls `ReducedScopeIngestionJobService`, which inserts a single `ingestion_jobs` row per upload, stamps it with `stage='activate'`/`status='succeeded'`, and annotates `documents.metadata_.reduced_scope.ingestion = {"mode": "text_only", "auto_completed": true}`. This keeps the schema untouched while clearly signaling that the job was satisfied inline during the demo build.
+
 **Table: artifacts**
 
 | Column | Type | Notes |
@@ -168,6 +170,8 @@ Indexes: `(document_id, artifact_type)` and GIN on `metadata`.
 | `deleted_at` | `timestamptz` | Null unless detaching for audit. |
 
 Primary key `(conversation_id, document_id)`. Triggers increment/decrement `documents.active_chat_refs` when rows insert/delete (ignoring soft deletes until hard removal). Indexes on `(document_id)` and `(attach_source)` support GC and analytics.
+
+> **Reduced Scope:** Attachment APIs update `document.metadata_.reduced_scope.skipped` whenever a user tries to attach a document whose chunks include `image`/`table`. These metadata stubs preserve auditability without mutating the structural tables, and the HTTP layer returns `202 + Retry-After` so clients know the request was short-circuited.
 
 ### 3.4 Retrieval Units
 
@@ -254,6 +258,12 @@ Same base structure as prior doc, with highlights:
 
 `retrieval_runs` and `retrieval_run_items` unchanged except `retrieval_runs.document_scope` records base vs user doc IDs to aid auditing and caching decisions.
 
+`CacheObservability` (Task 13) now writes to these tables whenever a cache entry is created:
+
+- `retrieval_runs`: captures the normalized prompt, router route, intent tags, and attachment scope JSON so auditors can reproduce the context that produced the cached answer.
+- `retrieval_run_items`: one row per cited chunk (`chunk_id`, `chunk_country_code`, `score`, `rank`) derived from the cache payload’s citations. This ties Prometheus cache hit metrics back to the exact evidence rows in Postgres.
+- `chunk_metrics`: increments `retrieval_count`, updates `quality_score` (when provided), and stamps `last_seen_at` so the ingestion team can prune stale content without losing insight into what the agent actually served.
+
 ### 3.8 Postgres Extensions & Settings
 
 All schemas continue to live in Postgres, but we enable a few extensions cluster-wide:
@@ -269,6 +279,7 @@ All schemas continue to live in Postgres, but we enable a few extensions cluster
 Configuration updates:
 - Increase `work_mem` for graph + workflow materialization queries (recommend 64–128MB session-level in ingestion workers).
 - Set `pgvector.max_dimensions` high enough (2048) to accommodate future graph embeddings.
+- Enable `pg_stat_statements`/`pg_stat_monitor` in staging so spikes in `agent_rate_limiter_wait_seconds` or `agent_cache_hit_ratio` drops can be correlated with SQL backpressure.
 
 ### 3.9 Knowledge Graph Tables (GraphRAG)
 

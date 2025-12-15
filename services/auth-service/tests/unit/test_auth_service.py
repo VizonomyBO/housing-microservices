@@ -3,6 +3,7 @@ Unit tests for AuthService
 """
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import jwt
 import pytest
@@ -93,7 +94,7 @@ class TestGenerateAccessToken:
         # Decode without verification to inspect payload
         payload = jwt.decode(token, options={"verify_signature": False})
 
-        assert payload["user_id"] == sample_user.user_id
+        assert payload["user_id"] == str(sample_user.user_id)
         assert payload["username"] == sample_user.username
         assert payload["email"] == sample_user.email
         assert payload["type"] == "access"
@@ -155,7 +156,7 @@ class TestGenerateRefreshToken:
         token = AuthService.generate_refresh_token(db_session, sample_user, None, None, config)
         payload = jwt.decode(token, options={"verify_signature": False})
 
-        assert payload["user_id"] == sample_user.user_id
+        assert payload["user_id"] == str(sample_user.user_id)
         assert payload["type"] == "refresh"
         assert "exp" in payload
         assert "iat" in payload
@@ -173,7 +174,7 @@ class TestVerifyAccessToken:
 
         assert payload is not None
         assert error is None
-        assert payload["user_id"] == sample_user.user_id
+        assert payload["user_id"] == str(sample_user.user_id)
         assert payload["type"] == "access"
 
     def test_verify_expired_access_token(self, db_session, fastapi_app, sample_user):
@@ -262,7 +263,7 @@ class TestVerifyRefreshToken:
         config = fastapi_app.state.config
         # Create a valid JWT but not in database
         fake_payload = {
-            "user_id": 999,
+            "user_id": str(uuid4()),
             "exp": datetime.utcnow() + timedelta(days=1),
             "type": "refresh",
         }

@@ -9,6 +9,7 @@
 | --- | --- |
 | Auth | `Authorization: Bearer <token>` issued by upstream identity provider; gateway resolves `user_id`, `roles`, `scopes`, and country defaults (no org concept). |
 | Rate limits | `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` on 429. Permits allocated via centralized limiter described in [system_architecture.md §2.2.10](../overview/system_architecture.md#2210-rate-limiting). |
+| Demo mode headers | When `REDUCED_SCOPE_ENABLED=1`, responses include `X-RateLimit-Policy: demo-mode`, `X-Cache-Mode: text-only`, and `Viz-Demo-Mode: text-only` so clients know Valkey/rate limiting are bypassed. SSE streams emit `demo_mode_skipped` events for every suppressed capability. |
 | Idempotency | Optional `Idempotency-Key` header (UUID v4, ≤36 chars). Required on `POST /v1/documents/upload` and `POST /v1/export/pdf`, optional elsewhere. |
 | Correlation IDs | Gateway injects `Viz-Request-Id` (UUID) + `Traceparent` (W3C). Downstream services must echo them back. |
 | Error envelope | All 4xx/5xx return `{"error": {"code": "...", "message": "...", "details": {...}, "request_id": "...", "retry_after_sec": <optional>}}`. Codes map to enums: `VALIDATION_ERROR`, `RATE_LIMITED`, `NOT_FOUND`, `CONFLICT`, `UPSTREAM_TIMEOUT`, `INTERNAL_ERROR`. |
@@ -69,6 +70,8 @@ When the payload matches an existing `(owner_user_id, content_hash)` document, t
 - Duplicate `Idempotency-Key` returns the original payload with `status` reflecting latest pipeline stage.
 - Validation failures return `400 + VALIDATION_ERROR` with field-level issues.
 
+> **Reduced Scope (Epic 3.5):** `POST /v1/documents/upload` runs synchronously in text-only mode. Only `content_type="text/markdown"` + `chunk_type="text"` payloads are accepted. When callers submit image/table chunks the API returns `202 Accepted` with `{ "status": "feature_disabled" }`, a `Retry-After: 86400` header, and records the skipped capability inside `document.metadata_.reduced_scope.skipped`. Successful uploads immediately mark the document `active`, create a single text chunk, and return `status="COMPLETED"` plus `ingestion_id` referencing the auto-completed job.
+
 ### 1.3 POST /v1/chat
 Primary conversational endpoint anchored to LangGraph threads.
 
@@ -103,6 +106,12 @@ Missing `thread_id` triggers server-side creation (`thr_<uuid>`). `session_id` g
 - `scope` is echoed back in transcripts so clients know whether the doc is base (`base`) or user-provided (`user`).
 - `visibility` overrides default retrieval behavior (`visible`, `hidden`, `read_only`). Hidden attachments remain in the bridge for auditing but Retrieval honors the override.
 - Setting `constraints.auto_attach_base_docs=true` attaches the default per-country base set before LangGraph executes; explicit attachments win on conflicts.
+- `allow_stateless` defaults to `false`. Set it to `true` only when you intentionally want a stateless run (e.g., missing/non-UUID `thread_id`). Otherwise, invalid or foreign `thread_id` values return 4xx instead of silently resetting history.
+
+**History & state**:
+- Conversations are stateful; when `thread_id` is a valid UUID owned by the caller, the gateway loads prior turns and LangGraph includes the last messages when composing the answer. Invalid/foreign IDs return 400/404 unless `allow_stateless=true`, in which case the run proceeds without loading history and emits a stateless-fallback metric.
+- Attachments are conversation-scoped via `conversation_documents`; attaching documents before a chat ensures retrieval + citations work across multi-turn flows.
+- Assistant messages persist citations and tool metadata in JSON-serializable form so transcripts/exports can round-trip without schema issues.
 
 **Streaming response (SSE)**:
 Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store`. Event types:
@@ -115,9 +124,20 @@ Events are sent with `Content-Type: text/event-stream`, `Cache-Control: no-store
 | `tool_result` | Mirror of `tool_call` with `status`, `output`, `latency_ms`. |
 | `interrupt` | `{ "type": "clarification", "prompt": "Need GDP base year" }` |
 | `metrics` | `{ "tokens_prompt": 1234, "tokens_completion": 245, "retrieval": {"hybrid_k": 10}, "document_scope": {"base": ["doc_base_LBR_macro"], "user": ["doc_user_42_budget"]} }` |
+| `demo_mode_skipped` | `{ "capability": "vision", "reason": "reduced_scope", "metadata": {"allowed_chunk_types": ["text"]} }` emitted once per suppressed capability. |
 | `done` | `{ "status": "COMPLETED", "answer": "...", "citations": [{"doc_id": "doc_a12b3", "chunk_id": "ch_9"}], "cache_hit": false }` |
+| `task_error` | `{ "code": "INTERNAL_ERROR", "message": "boom", "retryable": false }` |
 
-Blocking mode returns the final `done` payload plus `messages` array in a single JSON response.
+**Gateway implementation notes**:
+
+- `POST /v1/chat` is now served directly from FastAPI via `services/agent-api/src/agent_api/http/app.py` and `services/agent-api/src/agent_api/http/routes/chat.py`. Requests inherit a `Viz-Request-Id` whether or not the caller supplies one, and the ID is echoed on every response (streaming + blocking).
+- Streaming responses set `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-store`, `Connection: keep-alive`, and `X-Accel-Buffering: no` so nginx/ALB do not buffer the feed. The gateway injects comment-based keep-alives (`: keep-alive`) at ≤10s intervals via `SSEEmitter`.
+- Blocking responses share the same request schema but add `Cache-Control: no-store` to guarantee intermediaries do not cache transcripts.
+- The gateway emits an initial `meta` frame (thread/session/request identifiers) before LangGraph fires node-level telemetry frames, and emits `task_error` when uncaught exceptions propagate. Clients should treat `task_error` as terminal and rely on the accompanying HTTP 5xx to trigger retries.
+- `/v1/chat` enforces ownership + UUID validation: foreign `thread_id` values return 404; malformed IDs return 400 unless `allow_stateless=true`, in which case the run proceeds without loading/persisting history and emits a stateless-fallback warning metric.
+- Multi-turn expectations: clients should reuse the same `thread_id` to maintain context; blocking responses include the assistant turn and are persisted alongside citations/tool metadata. Conversation transcripts and pagination are available via `GET /v1/conversations/{id}` (see §1.4).
+
+Blocking mode returns the final `done` payload plus `messages` array in a single JSON response. When reduced scope is active, the initial `meta` event (and blocking response envelope) also embed `"reduced_scope": {"text_only_chunks": true, "allowed_chunk_types": ["text"]}` so clients can surface demo-mode banners.
 
 **Errors**: Chat-specific codes include `THREAD_NOT_FOUND`, `INTERRUPT_REQUIRED`, `TOOL_FAILURE`, `CONTEXT_EXPIRED`.
 
@@ -140,6 +160,7 @@ sequenceDiagram
 Retrieves normalized conversation transcript, optionally expanded with citations.
 
 **Query params**: `cursor`, `limit`, `include_citations` (default `false`), `before`/`after` ISO timestamps for slicing.
+- Transcript responses are paginated. `limit` defaults to 50 (max 200) and responses include `page_info.next_cursor` plus `page_info.remaining_count`. Invalid cursors return 400; clients should follow `next_cursor` until it becomes `null`.
 
 **Response 200**:
 ```json
@@ -219,6 +240,77 @@ Returns latest precomputed pillar answers for the requested country.
 }
 ```
 Conditional caching allowed for 5 minutes via `ETag` / `If-None-Match`.
+
+> **Reduced Scope:** Pillar calls now return JSON payloads only; PDF/export workflows are paused until Valkey/worker features return. Only sources backed by `chunk_type="text"` are emitted, so image/table citations are silently skipped with `reduced_scope` metadata communicating the limitation.
+
+### 1.7 POST /v1/conversations/{id}/attachments
+Creates or reactivates a `conversation_documents` bridge row.
+
+**Request**:
+```json
+{
+  "document_id": "45e3...",
+  "visibility": "visible", // optional override
+  "role": "primary",
+  "auto_attach_base_docs": true
+}
+```
+
+**Response** `201/202`:
+```json
+{
+  "conversation_id": "thr_92aa2",
+  "document_id": "45e3...",
+  "status": "ATTACHED",
+  "attachment": {
+    "document_id": "45e3...",
+    "attach_source": "user_request",
+    "role": "primary",
+    "visibility": "visible"
+  },
+  "auto_attached": ["doc_base_LBR_macro"],
+  "request_id": "..."
+}
+```
+
+- If `auto_attach_base_docs=true`, the API also attaches active base documents for the conversation’s country and lists them under `auto_attached`.
+- Image/table documents are short-circuited with `202 Accepted`, `{ "status": "FEATURE_DISABLED" }`, and `Retry-After: 86400`. The skip is recorded in `document.metadata_.reduced_scope.skipped` for auditing.
+- Base-scope documents cannot be detached; clients should mark them `visibility=hidden` instead until the full workflow returns.
+
+### 1.7.1 POST /v1/conversations/{id}/attachments/bulk
+Attach multiple documents in one call by passing explicit document IDs (frontend can first query `/v1/documents?country_code=ARG` and forward those IDs).
+
+**Request**:
+```json
+{
+  "document_ids": ["doc_a12", "doc_b34"],
+  "visibility": "visible",
+  "role": "primary"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "conversation_id": "thr_92aa2",
+  "attached": ["doc_a12", "doc_b34"],
+  "skipped": [
+    {"document_id": "doc_c56", "reason": "Document not ready (status=ingesting, stage=chunk)"}
+  ],
+  "request_id": "..."
+}
+```
+
+Notes:
+- Enforces the same attachment guardrails (ingestion must be `active`, text-only in reduced scope, base doc immutability).
+- Ignores duplicate IDs in the request.
+- Returns per-document skip reasons instead of failing the whole batch.
+
+### 1.8 GET /v1/conversations/{id}/attachments
+Lists the effective attachment set with the same `AttachmentRecord` schema used in the mutation response. Hidden/read-only entries remain in the payload so clients can expose audit controls, but retrieval still honors the stored visibility.
+
+### 1.9 GET /v1/conversations/{id}/pillars
+Returns the same JSON structure as `GET /v1/pillars/{country_code}` scoped to the conversation’s active attachments. Only answers referencing the attached document set are returned; when no attachments exist, the API responds with an empty `pillars` array and still echoes the `conversation_id` + reduced-scope metadata so Task 03 can render deterministic screens.
 
 ## 2. Ingestion Workflow Event Contracts
 ### 2.1 S3 Trigger Event
@@ -419,6 +511,24 @@ When LangGraph raises an interrupt, it emits:
 }
 ```
 Gateway surfaces this via SSE `interrupt` event. Client responses must POST `/v1/chat` with the same `thread_id`, include `interrupt_token` issued in the event, and optionally `clarification_response`. LangGraph resumes from the serialized node state, guaranteeing idempotent continuation.
+
+**HITL SSE payloads** (Task 12 will stream these verbatim):
+
+```json
+{
+  "event": "hitl_pause",
+  "conversation_id": "conv_123",
+  "checkpoint_id": "chk_9f8b",
+  "resume_token": "f3d4c8...",
+  "reason": "low_confidence",
+  "route": "informational",
+  "confidence": 0.32,
+  "guardrail_codes": [],
+  "timestamp": "2025-12-02T17:04:22.123Z"
+}
+```
+
+On resume, the same schema is reused with `event="hitl_resume"`, `reason="hitl_resume"`, and `resume_token` set to the consumed token so clients can correlate transcripts.
 
 ---
 These contracts establish the concrete wire formats needed to implement the FastAPI gateway, ingestion workflow, and LangGraph orchestration without ambiguity, while leaving headroom for future routes (gRPC, webhooks) to reuse the same envelope patterns.

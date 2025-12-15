@@ -64,7 +64,7 @@ ERROR_MSG_INVALID_USER_DATA = "Invalid user data in response"
 class UserContext:
     """User context extracted from JWT token"""
 
-    user_id: int
+    user_id: str
     roles: list[str]
     country_code: str
     username: str | None = None
@@ -314,10 +314,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             # Enrich payload with user data from database
             # The JWT token doesn't include role and country_code, so we need to fetch them
-            user_id = payload.get("user_id")
-            if not isinstance(user_id, int):
-                logger.error("Invalid user_id in token payload", extra={"user_id": user_id})
+            user_id_raw = payload.get("user_id")
+            try:
+                user_uuid = uuid.UUID(str(user_id_raw))
+            except (ValueError, TypeError):
+                logger.error("Invalid user_id in token payload", extra={"user_id": user_id_raw})
                 return None, ERROR_MSG_INVALID_USER_DATA
+            user_id = str(user_uuid)
 
             # Look up user in database to get role and country_code
             try:
@@ -328,7 +331,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     """Enrich payload with user data from database"""
                     session = get_session()
                     try:
-                        user = session.query(User).filter_by(user_id=user_id).first()
+                        user = session.get(User, user_uuid)
                         if user:
                             payload["role"] = user.role
                             payload["roles"] = [user.role] if user.role else []
@@ -459,9 +462,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return None, ERROR_MSG_INVALID_RESPONSE
 
         if data.get("valid"):
-            user_id = data.get("user_id")
-            if not isinstance(user_id, int):
-                logger.error("Invalid user_id in response", extra={"user_id": user_id})
+            user_id_raw = data.get("user_id")
+            try:
+                user_id = str(uuid.UUID(str(user_id_raw)))
+            except (ValueError, TypeError):
+                logger.error("Invalid user_id in response", extra={"user_id": user_id_raw})
                 return None, ERROR_MSG_INVALID_USER_DATA
 
             # Extract roles - support both 'roles' (list) and 'role' (string) for backward compatibility
@@ -498,7 +503,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         logger.debug("Using mock token validation", extra={"token_length": len(token)})
         return (
             UserContext(
-                user_id=1,
+                user_id=str(uuid.uuid4()),
                 roles=["public"],
                 country_code="USA",
                 username="mock_user",

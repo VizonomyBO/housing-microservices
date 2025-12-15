@@ -114,7 +114,7 @@ class UserResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, extra="allow")
 
-    user_id: int = Field(..., alias="id")
+    user_id: str = Field(..., alias="id")
     email: EmailStr
     username: str | None = None
     first_name: str | None = None

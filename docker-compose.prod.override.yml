@@ -1,0 +1,16 @@
+services:
+  auth-service:
+    environment:
+      DATABASE_URL: ${AUTH_DATABASE_URL}
+
+  user-service:
+    environment:
+      DATABASE_URL: ${AUTH_DATABASE_URL}
+
+  agent-api:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+  db-init:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}

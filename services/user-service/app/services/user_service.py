@@ -1,14 +1,14 @@
-"""
-User service for managing user profiles and data
-"""
+"""User service for managing user profiles and data."""
 
 import logging
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import literal
 
 from app.models.user import User
 from app.utils.validators import (
@@ -26,9 +26,20 @@ class UserService:
     """Service for user management operations"""
 
     @staticmethod
-    def get_user_by_id(session: Session, user_id: int) -> User | None:
+    def _coerce_uuid(value: UUID | str) -> UUID:
+        if isinstance(value, UUID):
+            return value
+        return UUID(str(value))
+
+    @staticmethod
+    def get_user_by_id(session: Session, user_id: UUID | str) -> User | None:
         """Get user by ID"""
-        return session.query(User).filter_by(user_id=user_id).first()
+        try:
+            user_uuid = UserService._coerce_uuid(user_id)
+        except ValueError:
+            logger.warning("Invalid user_id supplied", extra={"user_id": user_id})
+            return None
+        return session.query(User).filter_by(user_id=user_uuid).first()
 
     @staticmethod
     def get_user_by_email(session: Session, email: str) -> User | None:
@@ -40,23 +51,41 @@ class UserService:
         session: Session,
         page: int = 1,
         per_page: int = 20,
-        role: str | None = None,
-        status: str | None = None,
-        country_code: str | None = None,
+        roles: list[str] | None = None,
+        statuses: list[str] | None = None,
+        countries: list[str] | None = None,
+        search: str | None = None,
     ) -> dict[str, Any]:
-        """Get all users with pagination and filtering"""
+        """Get all users with pagination and filtering."""
         query = session.query(User)
 
-        if role:
-            query = query.filter_by(role=role)
-        if status:
-            query = query.filter_by(status=status)
-        if country_code:
-            query = query.filter_by(country_code=country_code)
+        roles_filter = [role for role in (roles or []) if role]
+        if roles_filter:
+            query = query.filter(User.role.in_(roles_filter))
+
+        status_filter = [status for status in (statuses or []) if status]
+        if status_filter:
+            query = query.filter(User.status.in_(status_filter))
+
+        country_filter = [country.upper() for country in (countries or []) if country]
+        if country_filter:
+            query = query.filter(User.country_code.in_(country_filter))
+
+        trimmed_search = search.strip() if search else ""
+        if trimmed_search:
+            pattern = f"%{trimmed_search}%"
+            full_name = User.first_name + literal(" ") + User.last_name
+            query = query.filter(
+                or_(
+                    User.email.ilike(pattern),
+                    User.first_name.ilike(pattern),
+                    User.last_name.ilike(pattern),
+                    full_name.ilike(pattern),
+                )
+            )
 
         query = query.order_by(User.date_created.desc())
 
-        # Manual pagination
         total = query.count()
         offset = (page - 1) * per_page
         items = query.offset(offset).limit(per_page).all()
@@ -74,12 +103,21 @@ class UserService:
 
     @staticmethod
     def update_user(
-        session: Session, user_id: int, data: dict[str, Any], updated_by: int | None = None
+        session: Session,
+        user_id: UUID | str,
+        data: dict[str, Any],
+        updated_by: UUID | str | None = None,
     ) -> tuple[User | None, str | None]:
         """Update user information"""
-        user = UserService.get_user_by_id(session, user_id)
+        try:
+            user_uuid = UserService._coerce_uuid(user_id)
+        except ValueError:
+            logger.warning("Invalid user_id for update", extra={"user_id": user_id})
+            return None, "Invalid user ID"
+
+        user = UserService.get_user_by_id(session, user_uuid)
         if not user:
-            logger.warning("User not found for update", extra={"user_id": user_id})
+            logger.warning("User not found for update", extra={"user_id": str(user_uuid)})
             return None, "User not found"
         if "first_name" in data:
             is_valid, message = validate_name(data["first_name"], "First name")
@@ -96,14 +134,16 @@ class UserService:
         if "email" in data:
             if not validate_email_format(data["email"]):
                 logger.warning(
-                    "Invalid email format", extra={"user_id": user_id, "email": data["email"]}
+                    "Invalid email format",
+                    extra={"user_id": str(user_uuid), "email": data["email"]},
                 )
                 return None, "Invalid email format"
 
             existing_user = UserService.get_user_by_email(session, data["email"])
-            if existing_user and existing_user.user_id != user_id:
+            if existing_user and existing_user.user_id != user_uuid:
                 logger.warning(
-                    "Email already in use", extra={"user_id": user_id, "email": data["email"]}
+                    "Email already in use",
+                    extra={"user_id": str(user_uuid), "email": data["email"]},
                 )
                 return None, "Email already in use"
 
@@ -136,32 +176,43 @@ class UserService:
         try:
             session.commit()
             logger.info(
-                "User updated successfully", extra={"user_id": user_id, "updated_by": updated_by}
+                "User updated successfully",
+                extra={
+                    "user_id": str(user_uuid),
+                    "updated_by": str(updated_by) if updated_by else None,
+                },
             )
             return user, None
         except IntegrityError as e:
             session.rollback()
             logger.error(
-                "Database error during update", extra={"user_id": user_id, "error": str(e)}
+                "Database error during update",
+                extra={"user_id": str(user_uuid), "error": str(e)},
             )
             return None, f"Database error: {e!s}"
 
     @staticmethod
-    def delete_user(session: Session, user_id: int) -> tuple[bool, str | None]:
+    def delete_user(session: Session, user_id: UUID | str) -> tuple[bool, str | None]:
         """Delete a user"""
-        user = UserService.get_user_by_id(session, user_id)
+        try:
+            user_uuid = UserService._coerce_uuid(user_id)
+        except ValueError:
+            logger.warning("Invalid user_id for deletion", extra={"user_id": user_id})
+            return False, "Invalid user ID"
+
+        user = UserService.get_user_by_id(session, user_uuid)
         if not user:
-            logger.warning("User not found for deletion", extra={"user_id": user_id})
+            logger.warning("User not found for deletion", extra={"user_id": str(user_uuid)})
             return False, "User not found"
 
         try:
             session.delete(user)
             session.commit()
-            logger.info("User deleted", extra={"user_id": user_id})
+            logger.info("User deleted", extra={"user_id": str(user_uuid)})
             return True, None
         except Exception as e:
             session.rollback()
-            logger.error("Error deleting user", extra={"user_id": user_id, "error": str(e)})
+            logger.error("Error deleting user", extra={"user_id": str(user_uuid), "error": str(e)})
             return False, f"Error deleting user: {e!s}"
 
     @staticmethod
@@ -186,7 +237,7 @@ class UserService:
         return users
 
     @staticmethod
-    def update_last_login(session: Session, user_id: int) -> bool:
+    def update_last_login(session: Session, user_id: UUID | str) -> bool:
         """Update user's last login timestamp"""
         user = UserService.get_user_by_id(session, user_id)
         if not user:
@@ -196,9 +247,12 @@ class UserService:
 
         try:
             session.commit()
-            logger.debug("Last login updated", extra={"user_id": user_id})
+            logger.debug("Last login updated", extra={"user_id": str(user.user_id)})
             return True
         except Exception as e:
             session.rollback()
-            logger.error("Failed to update last login", extra={"user_id": user_id, "error": str(e)})
+            logger.error(
+                "Failed to update last login",
+                extra={"user_id": str(user.user_id), "error": str(e)},
+            )
             return False

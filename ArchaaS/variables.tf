@@ -36,6 +36,24 @@ variable "allowed_origins" {
   default     = ["https://*.vizonomy.com", "http://localhost:3000"]
 }
 
+variable "ses_domain" {
+  description = "Domain to verify for SES sending (leave blank to skip)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_from_email" {
+  description = "From email address for SES (should match the verified domain)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_configuration_set_name" {
+  description = "Optional SES configuration set name (leave blank to skip creation)"
+  type        = string
+  default     = ""
+}
+
 # Lambda Configuration
 variable "log_level" {
   description = "Lambda log level"
@@ -47,6 +65,13 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
   default     = 30
+}
+
+# Marker converter container image tag (for container-based Lambda)
+variable "marker_converter_image_tag" {
+  description = "ECR image tag to deploy for the marker-converter Lambda"
+  type        = string
+  default     = "markitdown-r4"
 }
 
 variable "presigned_url_expiry_sec" {

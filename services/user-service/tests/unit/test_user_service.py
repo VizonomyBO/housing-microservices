@@ -1,6 +1,6 @@
-"""
-Unit tests for UserService
-"""
+"""Unit tests for UserService."""
+
+from uuid import uuid4
 
 import pytest
 
@@ -20,7 +20,7 @@ class TestUserService:
 
     def test_get_user_by_id_not_found(self, db_session):
         """Test getting non-existent user"""
-        user = UserService.get_user_by_id(db_session, 99999)
+        user = UserService.get_user_by_id(db_session, uuid4())
         assert user is None
 
     def test_get_user_by_email(self, db_session, sample_user):
@@ -93,7 +93,7 @@ class TestUserService:
 
     def test_delete_user_not_found(self, db_session):
         """Test deleting non-existent user"""
-        success, error = UserService.delete_user(db_session, 99999)
+        success, error = UserService.delete_user(db_session, uuid4())
         assert success is False
         assert "not found" in error
 
@@ -118,6 +118,74 @@ class TestUserService:
 
     def test_get_all_users_filter_by_role(self, db_session, sample_user, admin_user):
         """Test filtering users by role"""
-        result = UserService.get_all_users(db_session, role="admin")
+        result = UserService.get_all_users(db_session, roles=["admin"])
         assert result["total"] >= 1
         assert all(u["role"] == "admin" for u in result["users"])
+
+    def test_get_all_users_filter_by_countries_and_statuses(self, db_session):
+        """Test filtering users by multiple countries and statuses"""
+        usa_user = User(
+            first_name="Alice",
+            last_name="Smith",
+            email="alice@example.com",
+            password_hash="hashed",
+            role="public",
+            status="active",
+            country_code="USA",
+        )
+        can_user = User(
+            first_name="Bob",
+            last_name="Jones",
+            email="bob@example.com",
+            password_hash="hashed",
+            role="staff",
+            status="inactive",
+            country_code="CAN",
+        )
+        db_session.add_all([usa_user, can_user])
+        db_session.commit()
+
+        result = UserService.get_all_users(
+            db_session,
+            roles=["staff"],
+            statuses=["inactive"],
+            countries=["can"],
+            page=1,
+            per_page=10,
+        )
+
+        assert result["total"] == 1
+        assert result["users"][0]["email"] == "bob@example.com"
+
+    def test_get_all_users_full_name_search(self, db_session):
+        """Test searching users by full name"""
+        match_user = User(
+            first_name="Maria",
+            last_name="Gomez",
+            email="maria.gomez@example.com",
+            password_hash="hashed",
+            role="public",
+            status="active",
+            country_code="PER",
+        )
+        non_match_user = User(
+            first_name="Laura",
+            last_name="Diaz",
+            email="laura.diaz@example.com",
+            password_hash="hashed",
+            role="public",
+            status="active",
+            country_code="PER",
+        )
+        db_session.add_all([match_user, non_match_user])
+        db_session.commit()
+
+        result = UserService.get_all_users(
+            db_session,
+            search="Maria Gomez",
+            page=1,
+            per_page=10,
+        )
+
+        assert result["total"] == 1
+        assert result["users"][0]["email"] == "maria.gomez@example.com"

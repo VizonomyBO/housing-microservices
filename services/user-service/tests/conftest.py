@@ -79,7 +79,7 @@ def client(fastapi_app):
                 session.close()
 
             return UserContext(
-                user_id=user_id,
+                user_id=str(user_id),
                 roles=roles,
                 country_code=country_code,
                 username=payload.get("username"),
@@ -204,9 +204,10 @@ def generate_token(client):
     secret = client.app.state.config.JWT_SECRET_KEY
 
     def _generate_token(user_id, role="public"):
+        user_id_str = str(user_id)
         payload = {
-            "sub": user_id,
-            "user_id": user_id,
+            "sub": user_id_str,
+            "user_id": user_id_str,
             "role": role,
             "roles": [role],
             "type": "access",

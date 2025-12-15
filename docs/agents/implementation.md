@@ -215,13 +215,82 @@ class AgentState(TypedDict):
     3. Merge explicit attachments from the request payload.
     4. Filter out `visibility="hidden"`, mark `read_only` docs for numerical guardrails, and persist new links / ref-count updates.
     5. Compute `scope_hash = hash(sorted(doc_version_ids + visibility states))` and stash it in state for cache and telemetry.
+    6. Emit `normalized_input` payloads via `services/agent-api/src/nodes/retrieval/input_normalizer_node.py`, including detected language/intent tags, tenant scope metadata, attachment provenance flags, and guardrail warnings to short-circuit Router/HITL logic when users reference hidden assets.
 - **Cache Key**: After normalization, compute `cache_key = hash(country_code, normalized_prompt, scope_hash, route_hint, tool_parameters, retrieval_parameters)` and set `state["cache_hit"]` if Valkey already stores a finalized answer matching that key.
 - **Tools**: None (Pure logic).
 
+**Example** (trimmed for brevity)
+
+```jsonc
+// gateway payload
+{
+  "thread_id": "thr_92aa2",
+  "message": {
+    "content": "  Compare Liberia base docs   ",
+    "attachments": [
+      {"type": "document_reference", "document_id": "doc_user_budget", "visibility": "visible"}
+    ]
+  },
+  "constraints": {"country_code": "LBR", "auto_attach_base_docs": true},
+  "hints": {"route": "analyst"}
+}
+
+// normalized_input stored in AgentState
+{
+  "normalized_prompt": "Compare Liberia base docs",
+  "language_code": "en",
+  "intent_tags": ["route:analyst"],
+  "tenant_scope": {
+    "conversation_id": "thr_92aa2",
+    "thread_id": "thr_92aa2",
+    "country_code": "LBR"
+  },
+  "attachment_refs": [
+    {"asset_type": "document", "document_id": "doc_user_budget", "provided_in_request": true},
+    {"asset_type": "document", "document_id": "doc_base_macro", "auto_attached": true}
+  ],
+  "scope_hash": "37e8…",
+  "warnings": ["Auto-attached 1 base document(s) for LBR"]
+}
+```
+
+**TODOs for follow-up tasks**: plug Valkey cache lookups into the same node (currently only the scope hash is produced) and extend the detector to choose country defaults when conversations omit `constraints.country_code`.
+
+#### **AttachmentScopeLoader**
+- **Function**: `load_attachment_scope(state: AgentState) -> AgentState`
+- **Logic**: Fetch hydrated documents + workflow graphs referenced by `normalized_input.attachment_refs` using shared data layer repositories (`ConversationScopeRepository` + `WorkflowGraphRepository`). Validates each reference is still visible, annotates read-only or missing assets with guardrail warnings, and emits a deterministic `attachment_scope` structure consumed by Retrieval/GraphRetriever nodes.
+- **Implementation**: `services/agent-api/src/nodes/retrieval/attachment_scope_loader_node.py` + `tests/nodes/retrieval/test_attachment_scope_loader_node.py` cover happy-path + missing asset scenarios. Missing docs/workflows populate `attachment_scope.missing_assets` so Router/HITL can request clarification before continuing.
+- **Data contract**: `attachment_scope.documents[]` carries canonical name, scope, language, visibility, and provenance flags (`auto_attached`, `read_only`). `attachment_scope.workflows[]` surfaces workflow domain/version/status metadata so WorkflowPlanner can diff against cached plans without another DB hit.
+
 #### **Router**
-- **Function**: `route_request(state: AgentState) -> dict`
-- **Logic**: Uses **GPT-5-mini** to classify intent.
-- **Output**: Updates `route` and `route_confidence`.
+- **Function**: `RouterNode(state: AgentState) -> dict`
+- **Logic**:
+    1. Run `GuardrailEngine` (`services/agent-api/src/guardrails/engine.py`) using the declarative policy in `src/guardrails/policy.py`. Violations populate `state.guardrail_findings`; blocking issues immediately set `route=escalate` and `next_subgraph=human_gate`.
+    2. When guardrails pass, deterministically rank intents via:
+        - `normalized_input.intent_tags` (`route:<hint>`) — yields 0.9 confidence and short-circuits classification.
+        - Keyword heuristics (`calculate`, `plan`, `image`, etc.) plus digit density.
+        - `workflow_plan.steps[].tool_hints` (e.g., `polars`, `vision`) to reinforce Numerical/Vision routes.
+    3. Emit structured output with `route`, `route_confidence`, `router_reason`, and `next_subgraph` aligning to LangGraph node names (`informational_subgraph`, `analyst_subgraph`, `numerical_subgraph`, `vision_subgraph`, `human_gate`).
+- **Implementation**: `services/agent-api/src/nodes/router/router_node.py` with tests in `tests/router/test_router_node.py`.
+- **Sample output**:
+
+```jsonc
+{
+  "route": "numerical",
+  "route_confidence": 0.9,
+  "router_reason": "hint",
+  "next_subgraph": "numerical_subgraph",
+  "guardrails_passed": true,
+  "guardrail_findings": [],
+  "cache_metadata": {"cache_key": "agent-api:retrieval:conv-7:route-numerical:..."}
+}
+```
+
+- Task 07 (CacheWriter) inspects `cache_metadata` + `route`, while Task 08 (HumanGate) relies on `guardrails_passed` + `guardrail_findings` to determine whether to pause the graph.
+
+- **Future hooks**: TODO Task 12 wires SSE telemetry (`router_decision` event) + Prometheus counters. Guardrail docs live in `docs/security/guardrails.md` / `docs/security/prompt_policy.md`.
+
+- **Reduced scope guard**: When `settings.reduced_scope.enabled` is true (Epic 3.5), the Router automatically downgrades `numerical`/`vision` routes to `informational`, emits a `demo_mode_skipped` SSE frame, and annotates `state.reduced_scope_flags`. This keeps the orchestration graph deterministic while still preserving the downstream nodes for post-demo reactivation.
 
 #### **Retrieval Orchestrator (Subgraph)**
 This is a crucial component handling the "RAG" part.
@@ -256,10 +325,54 @@ This is a crucial component handling the "RAG" part.
         ```
 
 4.  **GraphRAG + Workflow Graph**:
-    -   **GraphRetriever** queries the pre-built knowledge graph (entity + relationship store with community detection) using the user prompt, reranked hits, and document scope to pull the most relevant nodes/edges.
-    -   **GraphSummarizer** distills those neighborhoods into structured `graph_context` payloads (per-entity facts, cross-document narratives, freshness metadata) that ride alongside `final_context`.
+    -   **GraphRetriever** queries the pre-built knowledge graph (entity + relationship store with community detection) using the user prompt, reranked hits, and document scope to pull the most relevant nodes/edges. The node enforces a TTL-based refresh policy (configurable in `services/agent-api/src/nodes/retrieval/graph/config.py`) so repeated LangGraph runs reuse cached graph context until the scope hash, intent tags, or TTL change. `graph_hot_entities` seeds entity rankings while `graph_edge_evidence_rollup` injects chunk/evidence provenance; both filters honor tenant/attachment scope to avoid surfacing foreign tenants.
+        -   Each run records a telemetry stub (hit/miss) that Task 13 can later wire into Prometheus/OpenTelemetry without changing node internals.
+    -   **GraphSummarizer** distills those neighborhoods into structured `graph_context` payloads (per-entity facts, cross-document narratives, freshness metadata) and a deterministic `graph_summary` prompt. The summarizer respects token budgets (`GraphSummarySettings`) by truncating entities/relations in score order and emits a fallback headline when no graph evidence survives filters.
     -   **WorkflowPlanner** maps the active query onto a workflow graph catalog (coarse→fine troubleshooting sequences) to produce a `workflow_plan` with explicit steps, preconditions, and tool affordances. Analyst/Numerical routes can reuse the plan directly or refine it with HITL feedback.
-    -   Graph artifacts persist in state so downstream nodes consume them deterministically and caches stay valid.
+        -   Graph artifacts persist in state so downstream nodes consume them deterministically and caches stay valid. WorkflowPlanner downstream nodes consume `graph_summary` sections directly; a typical output looks like:
+
+```jsonc
+{
+  "headline": "3 entities linked via 2 relations",
+  "sections": [
+    {
+      "title": "Key entities",
+      "body": "- Grid Stability Taskforce: ... (sources: doc_base_resilience)\n- FEMA Region 7 Ops: ...",
+      "tokens": 112
+    },
+    {
+      "title": "Key relations",
+      "body": "- Grid Stability Taskforce -> FEMA Region 7 Ops [supports] (chunks: chunk_a,chunk_b)",
+      "tokens": 42
+    }
+  ],
+  "scope_hash": "c157a...",
+  "budget_tokens": 400
+}
+```
+
+        -   WorkflowPlanner reuses the structured sections in prompts to keep citations ordered and deterministic.
+        -   Cache keys for WorkflowPlanner are minted via `services/agent-api/src/cache/cache_keys.py::build_retrieval_cache_key`, producing strings shaped like `agent-api:retrieval:{conversation_id}:{intent}:{workflow_version}:{docs_sha256}`. Document hashes are lowercased, sorted, and hashed (SHA-256) so attachment reordering or casing differences never fragment the cache. Keys respect the 48-hour Valkey TTL noted in `docs/overview/system_architecture.md §4.3`, and diff refreshes (`workflow_version_diffs.last_refreshed_at`) trigger invalidation by bumping the `workflow_version` component. A sample entry looks like:
+
+```jsonc
+{
+  "cache_key": "agent-api:retrieval:conv-7:route-analyst:v2.1.0:docs-6ce5…",
+  "ttl_seconds": 172800,
+  "workflow_plan": {
+    "plan_id": "graph-1",
+    "version": "v2.1.0",
+    "diff_summary": {"added_nodes": ["coarse.2"], "removed_nodes": []},
+    "prerequisites": ["country_code:\"USA\"", "requires_doc:\"doc-budget\""],
+    "steps": [
+      {"key": "coarse.1", "description": "Assess impact", "tool_hints": ["graph"]},
+      {"key": "mid.1", "description": "Coordinate response", "tool_hints": ["polars"]}
+    ]
+  },
+  "cache_metadata": {"hit": false, "tag": "retrieval"}
+}
+```
+
+        -   Future nodes (Router, CacheWriter) can call `ValkeyCacheClientProtocol.tag_hit/tag_miss` to emit cache observability events without changing the key schema introduced here.
     -   Operational guardrails:
         -   Run nightly **Leiden/Louvain community detection** plus **dynamic PageRank** so GraphRetriever can bias toward influential nodes and fresh clusters (see Memgraph GraphRAG guidance).
         -   Multi-hop traversals are capped (e.g., 3 hops) unless the workflow plan explicitly demands deeper exploration, preventing runaway queries.
@@ -320,6 +433,42 @@ Designed for safe, sandboxed data analysis with **self-correction** and **HITL**
 -   **Purpose**: On cache hit, short-circuit execution and return the cached answer/citations/metrics. Cache entries are keyed by `hash(country_code, normalized_prompt, scope_hash, route, tool_parameters, retrieval_parameters, workflow_plan_version)` so replays remain deterministic and audit-friendly.
 -   **State Effects**: Populate `answer`, `citations`, `quality_score`, set `cache_hit=True`, and emit the same telemetry payload (metrics + document_scope) as a fresh run would.
 
+##### CacheWriter & Short-Circuit Helper (Task 07)
+-   `CacheWriter` now serializes positive answers via `CacheResponsePayload` before persisting them to Valkey. The payload is versioned (`schema_version`, default `1`) and captures `answer_text`, normalized `citations[]` (`doc_id`, `chunk_id`, `snippet`, optional metadata), deduplicated `chunk_ids[]`, `workflow_plan_excerpt` (plan id/version + ordered summary steps), `workflow_plan_id`, `model_metadata` (model name, temperature, token counts, etc.), and `created_at`. Deterministic serialization (`serialize_cache_response`) enforces sorted citations/chunk identifiers so payload bytes remain identical for equivalent answers, minimizing duplicate cache entries.
+-   `CacheWriter.write` only executes when `AgentState.cache_metadata.cache_key` exists and updates `cache_metadata.written_at` while tagging a placeholder `tag_miss(..., reason="write_through")` event. The telemetry hook feeds Task 13 so cache writes automatically show up in SSE metrics/Prometheus once those integrations land; for now the events accumulate in the in-memory client for testing.
+-   Demo mode sets `CacheWriter.disable_writes=True`, which skips Valkey sockets entirely while still recording observability hooks (`record_cache_write`) so telemetry/DB state stays consistent even though cached answers are stored only in-memory.
+-   Downstream nodes call `maybe_serve_from_cache(client=..., cache_metadata=state.cache_metadata)` before expensive work. On hit, it deserializes the payload, marks `cache_metadata.hit=True`/`hit_at=now`, and returns a `CacheShortCircuitResult` containing the structured payload. On miss it tags `tag_miss(..., reason="not_found")` and leaves metadata untouched. Guards swallow Valkey errors and log warnings so LangGraph never fails due to cache unavailability.
+-   **Example usage** (router/subgraph entrypoints):
+
+    ```python
+    cache_result = await maybe_serve_from_cache(
+        client=valkey_client,
+        cache_metadata=state.cache_metadata,
+    )
+    if cache_result.hit:
+        return {
+            "cache_metadata": cache_result.cache_metadata,
+            "answer": cache_result.payload.answer_text,
+            "citations": cache_result.payload.citations,
+            "cache_hit": True,
+        }
+    ```
+
+    Subsequent nodes may still call `CacheWriter` with enriched payloads (model metadata, workflow excerpts) to persist the latest answer.
+-   **SSE placeholder**: Router + CacheWriter will emit `metrics` events describing `cache_key`, `cache_hit`, TTL, and perceived reason (`write_through`, `not_found`, `hit`) once Task 12 wires the handler. Having deterministic payloads today means Task 12 only needs to forward these events without reshaping the schema.
+
+###### Valkey Client Configuration & Rollout (Task 16)
+
+- `ValkeyAsyncClient` (see `src/cache/valkey_async_client.py`) uses `valkey.asyncio` pools with shared retries/backoff, TLS, and Sentinel/cluster support. Settings live under `Settings.valkey_settings`, so every LangGraph entrypoint can reuse the same parsed config.
+- FastAPI lifespan now creates the cache client once, exposes it via `get_cache_client`, and tears it down on shutdown. When `VALKEY_URL` is missing (local unit tests, CI w/out Docker) we keep using `InMemoryValkeyClient`, so no other code changes are needed.
+- Supported env vars:
+  - Required to talk to production: `VALKEY_URL`, `VALKEY_USERNAME`, `VALKEY_PASSWORD` *or* `VALKEY_PASSWORD_FILE`, optional `VALKEY_DB` for single-instance deployments.
+  - Reliability + performance: `VALKEY_MAX_CONNECTIONS`, `VALKEY_SOCKET_TIMEOUT_SECONDS`, `VALKEY_CONNECT_TIMEOUT_SECONDS`, `VALKEY_HEALTHCHECK_INTERVAL_SECONDS`, `VALKEY_RETRY_*`, `VALKEY_DEFAULT_TTL_SECONDS` (feeds CacheWriter’s default TTL), `VALKEY_CLUSTER_MODE`, `VALKEY_SENTINEL_SERVICE`.
+  - TLS: `VALKEY_TLS_CA_CERT`, `VALKEY_TLS_CLIENT_CERT`, `VALKEY_TLS_CLIENT_KEY`, `VALKEY_TLS_SKIP_VERIFY`, or just supply a `valkeys://` URL when the managed cluster enforces TLS.
+- Local dev instructions: run `docker run --rm -p 6380:6379 valkey/valkey:8.0`, then export `VALKEY_URL=redis://127.0.0.1:6380/0`. Testcontainers (`tests/cache/test_valkey_client.py`) already exercises this path, so `uv run pytest -k valkey_client` is enough to validate connectivity.
+- Rollout checklist: (1) provision credentials/TLS secrets, (2) set env vars + restart the Agent API, (3) confirm logs show “Valkey client initialized” with the sanitized host, (4) watch `get_metrics_registry().cache_events` dashboards for non-zero hit/miss counts, (5) clear old cache namespaces if schema_version bumps are insufficient.
+- Failure handling: connection/timeouts raise retriable exceptions; after the configured attempts we log a warning and re-surface the exception to the caller, which causes `maybe_serve_from_cache` to degrade to a cache miss so LangGraph still executes.
+
 ### 3.3. Edges & Conditional Logic
 
 -   **`conditional_edge(Router)`**:
@@ -356,6 +505,20 @@ def human_gate(state: AgentState):
 2.  **Stuck Loop**: `retry_counter` exceeds limit in any subgraph.
 3.  **Missing Data**: Retrieval returns 0 results after expansion.
 
+#### 3.4.1 Checkpoint Persistence & HITL Metadata
+
+-   `services/agent-api/src/repositories/agent_checkpoint_repository.py` persists every LangGraph step into `agent_state_checkpoints` using the Task‑01 `AgentState` schema. The adapter serializes `BaseMessage` payloads with LangChain's `message_to_dict` helpers, then rehydrates them by replaying the canonical `messages` table (ordered by `ordinal`, `created_at`). This guarantees that retries and HITL resumptions always see the same transcript the FastAPI gateway stored, even if an older checkpoint JSON omitted a late-arriving message.
+-   Visible documents are stitched into each checkpoint via a join on `conversation_documents` + `documents`, honoring `visibility_override != 'hidden'` as described in `docs/data/schema_and_persistence.md` §3.6. Hidden attachments remain in the bridge for auditing but never leak into LangGraph state, preventing stale scopes from bypassing user removals.
+-   HITL pauses write the `resume_token`, `resume_status`, `hitl_operator_id`, and `interrupt_reason` fields into the checkpoint metadata column. `resume_from_hitl(conversation_id, resume_token)` atomically claims the paused row, clears the token so it cannot be reused, stamps `resumed_at`, and returns a `HydratedCheckpoint` object (state + attachment metadata). Downstream nodes can inspect `hydrated.metadata.consumed_resume_token` to emit SSE resume events or audit logs.
+-   `services/agent-api/src/services/checkpoint_service.py` is the thin orchestration layer LangGraph nodes call: `save_checkpoint` handles routine persistence, while `pause_for_hitl` enforces that an `interrupt_reason` exists and generates a `resume_token` (UUID4) when one isn't supplied. This keeps Task‑08's `HumanGate` node implementation focused on business logic rather than persistence plumbing.
+
+#### 3.4.2 HumanGate Node & Transcript Timeline
+
+-   `services/agent-api/src/hitl/human_gate_service.py` centralizes the pause/resume decision tree. It evaluates router confidence against configurable thresholds (`informational=0.55`, `analyst=0.65`, `numerical=0.70`, `vision=0.60`) and automatically escalates whenever `RouterRoute.ESCALATE` is emitted or any blocking guardrail violation is detected. These defaults keep HumanGate deterministic while still allowing future tuning via dependency injection.
+-   The service mints resume tokens before persisting checkpoints so the serialized `AgentState` always contains a deterministic HITL record. Tokens, reasons, route, confidence, and guardrail codes are recorded inside a new `AgentState.hitl_transcript[]` collection (see `src/state/agent_state.py`). Each entry captures `event` (`pause` or `resume`), timestamps, and the checkpoint id so transcripts and SSE streams stay aligned.
+-   `HumanGateNode` (`services/agent-api/src/nodes/human/human_gate_node.py`) is a thin LangGraph adapter that returns updated state deltas (`interrupt_reason`, `checkpoint_id`, `resume_token`, `hitl_transcript`). Controllers can also call `HumanGateNode.resume_from_hitl(conversation_id, resume_token)` to hydrate paused runs, append a `resume` transcript entry, and hand control back to the graph.
+-   Placeholder SSE payloads (`hitl_pause` / `hitl_resume`) are emitted inside the service with the eventual Task‑12 emitter signature (`event`, `conversation_id`, `checkpoint_id`, `resume_token`, `reason`, `confidence`). Task 12 will simply wire these payloads into the streaming transport without changing HumanGate internals.
+
 ### 3.5. Rate Limiting & Token Counting
 
 To ensure compliance with global quotas and prevent throttling, all LLM nodes integrate with the **Centralized Rate Limiter SDK** (backed by ElastiCache Valkey).
@@ -389,6 +552,8 @@ async def llm_node(state: AgentState):
     
     return {"messages": [response]}
 ```
+
+When the reduced-scope flag is enabled (`REDUCED_SCOPE_ENABLED=1`), the gateway swaps in `ReducedScopeRateLimiter`, which simply returns immediately, stamps responses with `X-RateLimit-Policy: demo-mode`, and emits `{"rate_limit_disabled": true}` inside SSE metadata so clients know Valkey/token buckets are intentionally bypassed for the demo build.
 
 ### 3.6. Status Reporting (SSE & Deterministic Templates)
 
@@ -442,6 +607,56 @@ async for event in agent.astream_events(inputs, version="v1"):
 # - optional status_text describing current phase
 ```
 
+#### 3.6.1. SSE Event Reference (Task 12)
+
+Task 12 introduces a first-class streaming helper stack located under `services/agent-api/src/streaming`. `events.py` codifies the envelopes from `docs/interfaces/api_contracts.md` §3, `sse_emitter.py` exposes an async iterator that formats `event:`/`data:` frames (plus comment-based keep-alives), and `with_sse.py` provides `lifecycle_span()` + cache/telemetry helpers so LangGraph nodes can emit events without bespoke plumbing.
+
+Every node now executes inside `lifecycle_span()` (Router, HumanGate, Retrieval pipeline, Informational/Analyst/Numerical/Vision subgraphs). The span emits `task_start` before user logic, tracks metadata via `streaming.with_sse.add_metadata()`, and emits `task_end` with `status=success|error`. `SSEEmitter.as_event_emitter()` plugs into `HumanGateService.evaluate/resume_from_hitl`, so HITL `pause`/`resume` payloads match §3.4 exactly.
+
+| Event | Trigger | Payload Snapshot |
+| --- | --- | --- |
+| `task_start` | `lifecycle_span()` entry for any LangGraph node | `TaskLifecyclePayload` → `{node, subgraph, route?, sequence?, metadata={"status":"running", ...}}` |
+| `task_end` | `lifecycle_span()` exit | same payload with `metadata.status="success"` or `"error"` plus accumulated keys (`attachments`, `execution_ms`, etc.) |
+| `cache_hit` | `maybe_serve_from_cache` returns a value | `CacheEventPayload` → `{cache_key, namespace, hit:true, latency_ms?, payload_hash?}` |
+| `cache_miss` | cache lookup misses while a key exists | `{cache_key, namespace, hit:false, metadata.reason}` |
+| `cache_write` | `CacheWriter.write` persists an answer | `{cache_key, namespace, ttl_seconds, payload_hash?}` |
+| `hitl_pause` | `HumanGateService.pause_for_hitl` | `HitlEventPayload` → `{conversation_id, checkpoint_id, resume_token, reason, route, confidence, guardrail_codes}` |
+| `hitl_resume` | `resume_from_hitl` rehydrates a checkpoint | same schema with `reason="hitl_resume"` and consumed token |
+| `telemetry_snapshot` | Nodes publish structured metrics (graph cache ratios, Polars execution time, etc.) | `TelemetrySnapshotPayload` → `{metrics:{...}, labels:{...}, window_ms?}` |
+
+**Sample stream excerpt**
+
+```
+event: task_start
+data: {"event":"task_start","timestamp":"2025-12-02T14:48:31.201Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"node":"router","subgraph":"control","route":null,"sequence":null,"metadata":{"status":"running","normalized_scope":"scope-f3"}}}
+
+event: cache_miss
+data: {"event":"cache_miss","timestamp":"2025-12-02T14:48:31.205Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"cache_key":"agent-api:retrieval:thr_92aa2:v1","namespace":"agent-api","hit":false,"source":"valkey","latency_ms":1.2,"metadata":{"reason":"not_found"}}}
+
+event: task_end
+data: {"event":"task_end","timestamp":"2025-12-02T14:48:31.506Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"node":"router","subgraph":"control","route":"informational","sequence":null,"metadata":{"status":"success","router_reason":"numerical_signal","route_confidence":0.82}}}
+
+event: telemetry_snapshot
+data: {"event":"telemetry_snapshot","timestamp":"2025-12-02T14:48:31.750Z","conversation_id":"thr_92aa2","task_id":"run_a1","payload":{"metrics":{"numerical.polars.execution_ms":134.2},"labels":{"table_aliases":"gdp"}}}
+```
+
+Keep-alive comments `: keep-alive` are emitted whenever the stream is idle, satisfying the SSE spec and preventing intermediaries from closing long-lived chat sessions. When reduced-scope mode is active, the gateway also emits a single `demo_mode_skipped` event per suppressed capability and adds a `reduced_scope` object (`{"text_only_chunks": true, "allowed_chunk_types": ["text"]}`) to the `meta` frame so clients can surface demo banners consistently.
+
+#### 3.6.2. Metrics, Prometheus & Cache Observability (Task 13)
+
+Task 13 introduces a dedicated telemetry stack (`src/telemetry/metrics_registry.py` + `src/telemetry/cache_observability.py`) that fans metrics to both Prometheus and OpenTelemetry:
+
+- **Prometheus primitives** – `MetricsRegistry` registers `agent_node_latency_seconds`, `agent_token_usage_total`, `agent_cache_events_total`, `agent_cache_hit_ratio`, `agent_hitl_events_total`, `agent_guardrail_violations_total`, and `agent_rate_limiter_wait_seconds`. `lifecycle_span()` now captures each LangGraph node’s duration and emits an OTel span (`langgraph.<node>`) with `agent.node`, `agent.subgraph`, and `agent.route` attributes so traces can be correlated with streaming metadata.
+- **SSE metric refs** – cache + HITL events add `metric_refs` so dashboards know which Prometheus series to highlight when a frame arrives (`["agent_cache_events_total","agent_cache_hit_ratio"]` for cache events, `["agent_hitl_events_total"]` for HITL).
+- **Cache observability** – `CacheObservability` tracks Valkey hit/miss/write counters, rate-limiter waits, and writes retrieval telemetry to the shared data layer: `retrieval_runs` (per prompt + chunk ranks), `chunk_metrics` (per chunk quality counters), and `pillar_answers` (+ `pillar_answer_sources`) when a cache write succeeds and tenant/document IDs are known.
+- **Scraping metrics** – expose `MetricsRegistry.render_prometheus()` behind the FastAPI `/metrics` route (protected by the existing auth middleware). Grafana dashboards should chart hit ratio + latency histograms with `namespace="agent-api"`, while alerting on `agent_hitl_events_total{event="pause"}` spikes and `agent_guardrail_violations_total` growth.
+- **Staging replays** – run `uv run pytest tests/telemetry` or call `CacheObservability.record_cache_write(..., session=db_session)` inside a staging shell to backfill telemetry rows and validate dashboards without touching production. `CacheObservability.snapshot_valkey_stats()` mirrors the counters Task 12 SSE frames emit, so you can diff them against Prometheus scraped values when debugging Valkey pools.
+- **Gateway wiring** – `services/agent-api/src/agent_api/http/app.py` initializes the singleton registry + `CacheObservability` during the FastAPI lifespan and stores them on `app.state`. `services/agent-api/src/agent_api/http/deps.py` exposes `get_metrics_registry_dep`, `get_cache_observability`, and `maybe_get_db_session`, and `/v1/chat` now injects those handles into `build_streaming_response` / `run_blocking_chat` so every LangGraph invocation receives the same counters plus a shared `AsyncSession` for cache telemetry writes.
+- **Metrics endpoint auth** – `services/agent-api/src/agent_api/http/routes/metrics.py` mounts `GET /metrics` with `Content-Type: text/plain; version=0.0.4` and `X-Accel-Buffering: no`. Scrapers must send `METRICS_AUTH_TOKEN` via the `Authorization` header (override header/scheme with `METRICS_AUTH_HEADER` / `METRICS_AUTH_SCHEME` env vars). Missing or invalid tokens return 401/403, ensuring only the Prometheus sidecar can scrape the registry.
+
+Rate limiter integrations should call `MetricsRegistry.record_rate_limiter_wait(model=<provider>, route=<router_route>, wait_seconds=<elapsed>)` whenever the Valkey permit gate enforces a delay. Valkey pooling guidance (docs/overview §3.7–3.8) now expects these waits plus the cache hit ratio to sit on the same dashboard so operators can see when low hit rates are lifting limiter pressure.
+
+
 ### 3.7. Service Interface (FastAPI + LangServe)
 
 The FastAPI gateway and the LangGraph executor now live in the same ASGI process, exposed through **FastAPI** augmented with **LangServe**.
@@ -456,21 +671,7 @@ The FastAPI gateway and the LangGraph executor now live in the same ASGI process
 **Implementation**:
 The service runs as a standalone FastAPI container/process, listening on an internal port (e.g., 8000) and fronted by an ALB or API Gateway HTTP API. Because the FastAPI router already fronts the public interface, no separate Go proxy is required—the `/agent` streaming endpoint is mounted directly in FastAPI.
 
-```python
-from fastapi import FastAPI
-from langserve import add_routes
-from graph import graph # The compiled LangGraph
-
-app = FastAPI(title="Vizonomy Agent Service")
-
-# 1. Standard Agent Routes (Invoke, Stream, Batch)
-add_routes(
-    app,
-    graph,
-    path="/agent",
-    enabled_endpoints=["invoke", "stream_events"], # We focus on streaming
-)
-```
+`services/agent-api/src/agent_api/http/app.py` hosts the FastAPI factory while `src/agent_api/http/routes/chat.py` wires `/v1/chat` and delegates to `src/agent_api/http/streaming.py` for SSE orchestration. The streaming helper wraps `SSEEmitter`, injects gateway metadata (`meta` frames), enforces keep-alives, and forwards LangGraph events to `text/event-stream` responses or buffers them for blocking callers. Future LangServe wiring can mount subgraphs alongside the bespoke `/v1/chat` router by extending the app in `src/main.py`.
 
 **Scalability**:
 -   **Stateless**: The service itself is stateless (state is persisted in Postgres/Redis via the Checkpointer).
@@ -584,3 +785,8 @@ client.run_on_dataset(
     -   Implement `tools.py` with Polars SQL wrapper.
 4.  **Build Graph**: Create `graph.py` wiring nodes and edges.
 5.  **Test**: Run with `MemorySaver` and mock data.
+
+### Reduced-scope HTTP helpers (Epic 3.5)
+- `ReducedScopeIngestionJobService` (services/ingestion_job_service.py) auto-completes `ingestion_jobs` rows for markitdown uploads, stamps `documents.metadata_.reduced_scope.ingestion`, and enforces `allowed_chunk_types` before any chunk writes occur.
+- `DocumentUploadService` and `AttachmentService` gate `/v1/documents/upload` + `/v1/conversations/{id}/attachments` so only `chunk_type="text"` assets proceed. Feature-disabled flows return `202` with `Retry-After: 86400` while preserving skipped metadata for follow-up work.
+- `PillarService` materializes JSON pillar answers synchronously (country + conversation scopes) and drops any source rows whose chunks are not text, keeping the frontend aligned with the demo-mode dataset until the PDF/export workers return.

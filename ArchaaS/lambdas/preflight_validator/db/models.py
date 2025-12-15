@@ -3,13 +3,14 @@ Database models for document management.
 
 Enums aligned with database_schema_persistence_rules.md and 001_create_documents_table.sql
 """
+
 from enum import Enum
 
 
 class DocumentStatus(str, Enum):
     """
     Document lifecycle status enum.
-    
+
     Per database_schema_persistence_rules.md Section 3.2:
     - PENDING_UPLOAD: Awaiting file upload to S3
     - registered: Initial record created
@@ -19,7 +20,7 @@ class DocumentStatus(str, Enum):
     - failed: Processing failed
     - archived: Soft-deleted/archived
     """
-    
+
     PENDING_UPLOAD = "PENDING_UPLOAD"
     REGISTERED = "registered"
     VALIDATING = "validating"
@@ -32,13 +33,13 @@ class DocumentStatus(str, Enum):
 class AccessScope(str, Enum):
     """
     Document access scope enum.
-    
+
     Per database_schema_persistence_rules.md:
     - base: Shared corpus, country-scoped, owner_user_id IS NULL
     - user_private: Owner-only access
     - user_shared: Owner can share with others
     """
-    
+
     BASE = "base"
     USER_PRIVATE = "user_private"
     USER_SHARED = "user_shared"
@@ -47,7 +48,7 @@ class AccessScope(str, Enum):
 class IngestionStage(str, Enum):
     """
     Ingestion pipeline stages.
-    
+
     Per database_schema_persistence_rules.md Section 3.2 and migration:
     - preflight: Validation, dedup check, artifact placeholder creation
     - convert: PDF/DOCX to Markdown/JSON conversion
@@ -56,7 +57,7 @@ class IngestionStage(str, Enum):
     - index: Database indexing
     - activate: Final activation
     """
-    
+
     PREFLIGHT = "preflight"
     CONVERT = "convert"
     CHUNK = "chunk"
@@ -68,13 +69,13 @@ class IngestionStage(str, Enum):
 class Visibility(str, Enum):
     """
     Document visibility enum.
-    
+
     Per database_schema_persistence_rules.md:
     - private: Owner only
     - shared: Shared with authorized users
     - base_admin: Base docs managed by admin
     """
-    
+
     PRIVATE = "private"
     SHARED = "shared"
     BASE_ADMIN = "base_admin"
@@ -83,14 +84,13 @@ class Visibility(str, Enum):
 class ManagedBy(str, Enum):
     """
     Document management source.
-    
+
     Per database_schema_persistence_rules.md:
     - user: User-uploaded document
     - system: System/pipeline managed
     - admin: Admin-uploaded base document
     """
-    
+
     USER = "user"
     SYSTEM = "system"
     ADMIN = "admin"
-

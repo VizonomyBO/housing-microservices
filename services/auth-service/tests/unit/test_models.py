@@ -191,7 +191,7 @@ class TestRefreshTokenModel:
         token_dict = refresh_token_obj.to_dict()
 
         assert token_dict["id"] == refresh_token_obj.id
-        assert token_dict["user_id"] == refresh_token_obj.user_id
+        assert token_dict["user_id"] == str(refresh_token_obj.user_id)
         assert token_dict["is_revoked"] == refresh_token_obj.is_revoked
         assert "created_at" in token_dict
         assert "expires_at" in token_dict

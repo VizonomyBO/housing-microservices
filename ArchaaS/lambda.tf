@@ -23,8 +23,11 @@ resource "aws_lambda_function" "document_upload" {
 
   role = aws_iam_role.document_upload_lambda.arn
 
-  # Use shared Lambda layer for Python dependencies
-  layers = [aws_lambda_layer_version.python_deps.arn]
+  # Use shared Lambda layers for runtime + shared helpers/data models
+  layers = [
+    aws_lambda_layer_version.python_deps.arn,
+    aws_lambda_layer_version.shared_data_layer.arn,
+  ]
 
   # VPC configuration for database access
   vpc_config {
@@ -65,6 +68,7 @@ resource "aws_lambda_function" "document_upload" {
     aws_iam_role_policy_attachment.document_upload_vpc,
     aws_iam_role_policy_attachment.document_upload_s3,
     aws_lambda_layer_version.python_deps,
+    aws_lambda_layer_version.shared_data_layer,
   ]
 }
 
@@ -118,4 +122,3 @@ output "document_upload_lambda_name" {
   description = "Name of the document upload Lambda function"
   value       = aws_lambda_function.document_upload.function_name
 }
-

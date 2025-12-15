@@ -1,0 +1,107 @@
+scenarios:
+  - name: reduced_e2e_simple_guardrails
+    description: "Simple QA using policy memo guardrails from reduced E2E smoke."
+    dataset: "reduced_e2e"
+    tags: ["smoke", "reduced_e2e", "policy"]
+    doc_refs:
+      - document_id: "fb400d68-3200-4e07-9231-cea9ee7163eb"
+        title: "Metro Housing Continuity Memo – Q2 FY25"
+        content_path: "tests/data/reduced_e2e/doc_policy.md"
+    turns:
+      - role: user
+        content: "What two guardrails did the latest housing memo add for voucher expansion?"
+    expectations:
+      - label: "policy_guardrails"
+        rubric: "Answer references five districts and the 32% rent cap."
+        expected_answer: "Voucher expansion now covers five districts and caps rent relief at 32% of income."
+        citations_required: true
+    metrics:
+      - name: faithfulness
+        threshold: 0.2
+      - name: answer_relevance
+        threshold: 0.2
+      - name: citation_coverage
+        threshold: 0.5
+      - name: latency
+        threshold: null
+
+  - name: reduced_e2e_cross_doc_reasoning
+    description: "Cross-document reasoning combining policy memo and ledger to help District 9."
+    dataset: "reduced_e2e"
+    tags: ["smoke", "reduced_e2e", "reasoning"]
+    doc_refs:
+      - document_id: "fb400d68-3200-4e07-9231-cea9ee7163eb"
+        title: "Metro Housing Continuity Memo – Q2 FY25"
+        content_path: "tests/data/reduced_e2e/doc_policy.md"
+      - document_id: "6806e86f-549f-4588-84de-2dd089a8f7da"
+        title: "FY25 Rental Assistance Ledger (Q2 extract)"
+        content_path: "tests/data/reduced_e2e/doc_ledger.md"
+    turns:
+      - role: user
+        content: "Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters."
+    expectations:
+      - label: "district_9_plan"
+        rubric: "Two actions referencing District 9, funding shift, and reporting cadence."
+        expected_answer: "District 9 should reserve voucher slots and reallocate ledger funds to bridge retrofit seniors, with monthly KPI digests."
+        citations_required: true
+    metrics:
+      - name: faithfulness
+        threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.5
+      - name: latency
+        threshold: null
+
+  - name: reduced_e2e_ledger_aggregate
+    description: "Numerical aggregate prompt based on ledger totals."
+    dataset: "reduced_e2e"
+    tags: ["smoke", "reduced_e2e", "ledger"]
+    doc_refs:
+      - document_id: "6806e86f-549f-4588-84de-2dd089a8f7da"
+        title: "FY25 Rental Assistance Ledger (Q2 extract)"
+        content_path: "tests/data/reduced_e2e/doc_ledger.md"
+    turns:
+      - role: user
+        content: "Sum the total rental assistance disbursed this quarter and highlight the highest-funded city."
+    expectations:
+      - label: "ledger_total"
+        rubric: "Total equals $7.35M and highlights District 9 at $1.8M."
+        expected_answer: "Total disbursed is $7.35M this quarter and District 9 received the highest $1.8M allocation."
+        citations_required: true
+    metrics:
+      - name: faithfulness
+        threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.5
+      - name: latency
+        threshold: null
+
+  - name: reduced_e2e_kpi_table_reasoning
+    description: "SQL-style KPI grouping prompt based on the KPI snapshot."
+    dataset: "reduced_e2e"
+    tags: ["smoke", "reduced_e2e", "kpi"]
+    doc_refs:
+      - document_id: "232d5d61-f083-448f-ae2f-2aa9b9a1a3c0"
+        title: "Metro KPI Snapshot – April 2025"
+        content_path: "tests/data/reduced_e2e/doc_kpi.md"
+    turns:
+      - role: user
+        content: "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."
+    expectations:
+      - label: "kpi_trigger"
+        rubric: "Names Harbor City at 87, mentions every city once, and calls out the over-80 action."
+        expected_answer: "Harbor City is at 87 above the 80-point trigger and should keep onboarding landlords; Lakeview and Southridge need follow-ups but remain below 80."
+        citations_required: true
+    metrics:
+      - name: faithfulness
+        threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.5
+      - name: latency
+        threshold: null

@@ -7,9 +7,9 @@ import os
 import secrets
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import jwt
-from sqlalchemy import BigInteger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -109,7 +109,7 @@ class AuthService:
             if user.status == "pending":
                 logger.warning(
                     "Authentication failed: account pending activation",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
+                    extra={"user_id": str(user.user_id), "login": login, "status": user.status},
                 )
                 return (
                     None,
@@ -118,19 +118,19 @@ class AuthService:
             if user.status == "suspended":
                 logger.warning(
                     "Authentication failed: account suspended",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
+                    extra={"user_id": str(user.user_id), "login": login, "status": user.status},
                 )
                 return None, "Account has been suspended. Please contact support."
             if user.status == "inactive":
                 logger.warning(
                     "Authentication failed: account inactive",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
+                    extra={"user_id": str(user.user_id), "login": login, "status": user.status},
                 )
                 return None, "Account is inactive. Please contact support."
             if user.status != "active":
                 logger.warning(
                     "Authentication failed: invalid account status",
-                    extra={"user_id": user.user_id, "login": login, "status": user.status},
+                    extra={"user_id": str(user.user_id), "login": login, "status": user.status},
                 )
                 return None, f"Account status is {user.status}. Please contact support."
 
@@ -140,13 +140,13 @@ class AuthService:
             if not verify_password(password_hash, password):
                 logger.warning(
                     "Authentication failed: invalid password",
-                    extra={"user_id": user.user_id, "login": login},
+                    extra={"user_id": str(user.user_id), "login": login},
                 )
                 return None, "Invalid credentials"
 
             logger.info(
                 "Authentication successful",
-                extra={"user_id": user.user_id, "login": login, "email": user.email},
+                extra={"user_id": str(user.user_id), "login": login, "email": user.email},
             )
             return user, None
         except SQLAlchemyError as e:
@@ -164,15 +164,16 @@ class AuthService:
     def generate_access_token(user: User, config: "Config | None" = None) -> str:
         """Generate JWT access token"""
         try:
+            user_id_str = str(user.user_id)
             logger.debug(
-                "Generating access token", extra={"user_id": user.user_id, "email": user.email}
+                "Generating access token", extra={"user_id": user_id_str, "email": user.email}
             )
 
             expires = _get_jwt_access_token_expires(config)
             secret_key = _get_jwt_secret_key(config)
 
             payload = {
-                "user_id": user.user_id,
+                "user_id": user_id_str,
                 "username": user.username,
                 "email": user.email,
                 "exp": datetime.now(UTC) + expires,
@@ -186,13 +187,13 @@ class AuthService:
 
             logger.debug(
                 "Access token generated successfully",
-                extra={"user_id": user.user_id, "email": user.email},
+                extra={"user_id": user_id_str, "email": user.email},
             )
             return token
         except Exception as e:
             logger.exception(
                 "Failed to generate access token",
-                extra={"user_id": user.user_id, "email": user.email, "error": str(e)},
+                extra={"user_id": user_id_str, "email": user.email, "error": str(e)},
             )
             raise
 
@@ -206,16 +207,17 @@ class AuthService:
     ) -> str:
         """Generate and store refresh token"""
         try:
+            user_id_str = str(user.user_id)
             logger.debug(
                 "Generating refresh token",
-                extra={"user_id": user.user_id, "email": user.email, "ip_address": ip_address},
+                extra={"user_id": user_id_str, "email": user.email, "ip_address": ip_address},
             )
 
             expires = _get_jwt_refresh_token_expires(config)
             secret_key = _get_jwt_secret_key(config)
 
             payload = {
-                "user_id": user.user_id,
+                "user_id": user_id_str,
                 "exp": datetime.now(UTC) + expires,
                 "iat": datetime.now(UTC),
                 "type": "refresh",
@@ -241,7 +243,7 @@ class AuthService:
             logger.info(
                 "Refresh token generated and stored successfully",
                 extra={
-                    "user_id": user.user_id,
+                    "user_id": user_id_str,
                     "email": user.email,
                     "ip_address": ip_address,
                     "token_id": refresh_token.id if hasattr(refresh_token, "id") else None,
@@ -253,7 +255,7 @@ class AuthService:
             logger.exception(
                 "Database error while generating refresh token",
                 extra={
-                    "user_id": user.user_id,
+                    "user_id": user_id_str,
                     "email": user.email,
                     "ip_address": ip_address,
                     "error": str(e),
@@ -265,7 +267,7 @@ class AuthService:
             logger.exception(
                 "Failed to generate refresh token",
                 extra={
-                    "user_id": user.user_id,
+                    "user_id": user_id_str,
                     "email": user.email,
                     "ip_address": ip_address,
                     "error": str(e),
@@ -299,7 +301,16 @@ class AuthService:
             # Enrich payload with current user data from database
             user_id = payload.get("user_id")
             if user_id:
-                user = session.query(User).get(user_id)
+                try:
+                    user_uuid = UUID(str(user_id))
+                except ValueError:
+                    logger.error(
+                        "Invalid user_id in token payload",
+                        extra={"user_id": user_id},
+                    )
+                    return None, "Invalid token payload"
+
+                user = session.get(User, user_uuid)
                 if user:
                     # Add country_code and ensure role is current
                     payload["country_code"] = user.country_code
@@ -430,17 +441,18 @@ class AuthService:
                 return None, None, error if error else "Invalid refresh token"
 
             # Get user
-            user: User | None = session.query(User).get(token_obj.user_id)
+            user: User | None = session.get(User, token_obj.user_id)
             if not user:
                 logger.warning(
-                    "Token refresh failed: user not found", extra={"user_id": token_obj.user_id}
+                    "Token refresh failed: user not found",
+                    extra={"user_id": str(token_obj.user_id)},
                 )
                 return None, None, "User not found or inactive"
 
             if user.status != "active":
                 logger.warning(
                     "Token refresh failed: user not active",
-                    extra={"user_id": user.user_id, "status": user.status},
+                    extra={"user_id": str(user.user_id), "status": user.status},
                 )
                 return None, None, "User not found or inactive"
 
@@ -451,7 +463,7 @@ class AuthService:
                 logger.debug(
                     "Old refresh token revoked",
                     extra={
-                        "user_id": user.user_id,
+                        "user_id": str(user.user_id),
                         "token_id": token_obj.id if hasattr(token_obj, "id") else None,
                     },
                 )
@@ -459,7 +471,7 @@ class AuthService:
                 session.rollback()
                 logger.exception(
                     "Database error while revoking old refresh token",
-                    extra={"user_id": user.user_id, "error": str(e)},
+                    extra={"user_id": str(user.user_id), "error": str(e)},
                 )
                 raise
 
@@ -477,7 +489,7 @@ class AuthService:
             logger.info(
                 "Token refresh successful",
                 extra={
-                    "user_id": user.user_id,
+                    "user_id": str(user.user_id),
                     "email": user.email,
                     "ip_address": token_obj.ip_address,
                 },
@@ -502,7 +514,7 @@ class AuthService:
                 logger.info(
                     "Refresh token revoked successfully",
                     extra={
-                        "user_id": refresh_token.user_id,
+                        "user_id": str(refresh_token.user_id),
                         "token_id": refresh_token.id if hasattr(refresh_token, "id") else None,
                     },
                 )
@@ -521,35 +533,43 @@ class AuthService:
             return False
 
     @staticmethod
-    def revoke_all_user_tokens(session: Session, user_id: int | BigInteger) -> bool:
+    def revoke_all_user_tokens(session: Session, user_id: UUID | str) -> bool:
         """Revoke all refresh tokens for a user"""
         try:
-            logger.info("Attempting to revoke all tokens for user", extra={"user_id": user_id})
+            user_uuid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+        except ValueError as exc:
+            logger.error("Invalid user_id provided for revocation", extra={"user_id": user_id})
+            raise ValueError("user_id must be a valid UUID") from exc
+
+        try:
+            logger.info(
+                "Attempting to revoke all tokens for user", extra={"user_id": str(user_uuid)}
+            )
 
             result = (
                 session.query(RefreshToken)
-                .filter_by(user_id=user_id, is_revoked=False)
+                .filter_by(user_id=user_uuid, is_revoked=False)
                 .update({"is_revoked": True})
             )
             session.commit()
 
             logger.info(
                 "All user tokens revoked successfully",
-                extra={"user_id": user_id, "tokens_revoked": result},
+                extra={"user_id": str(user_uuid), "tokens_revoked": result},
             )
             return True
         except SQLAlchemyError as e:
             session.rollback()
             logger.exception(
                 "Database error while revoking all user tokens",
-                extra={"user_id": user_id, "error": str(e)},
+                extra={"user_id": str(user_uuid), "error": str(e)},
             )
             raise
         except Exception as e:
             session.rollback()
             logger.exception(
                 "Unexpected error while revoking all user tokens",
-                extra={"user_id": user_id, "error": str(e)},
+                extra={"user_id": str(user_uuid), "error": str(e)},
             )
             return False
 

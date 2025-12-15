@@ -20,6 +20,11 @@ This directory contains the Epics required to build the Vizonomy system.
 - **Execute [Epic 3: Agent Core](03.md)**
     - **Why**: Build the logic in isolation using unit tests and the data ingested in Phase 2.
 
+### Phase 3.5: Reduced Scope MVP (Week 5)
+
+- **Execute [Epic 3.5: Reduced Scope MVP Adaptation](035.md)**
+    - **Why**: Provides a demo-ready, text-only build that keeps the advanced architecture (images, tables, rate limits) intact but bypassed until after the management review.
+
 ### Phase 4: Service Layer (Weeks 5-6)
 
 - **Execute [Epic 4: API Gateway](04.md)**

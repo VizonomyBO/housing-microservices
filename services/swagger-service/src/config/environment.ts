@@ -23,7 +23,9 @@ export const config = {
   httpTimeout: parseInt(process.env.HTTP_TIMEOUT || '5000', 10),
 
   // CORS
-  corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['*'],
+  corsOrigins:
+    process.env.CORS_ORIGINS?.split(',') ||
+    ['http://localhost:3000', 'http://localhost:5173', '*'],
 
   // Application metadata
   appName: 'Swagger Aggregator Service',

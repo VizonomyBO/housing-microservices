@@ -51,8 +51,15 @@ dist/
 # Environment
 .env
 .env.local
+.env.dev
+.env.prod
+.env.prod.*
+.env.active
+.env.active.mode
 .env.*.local
+env-archive/
 .venv
+.venv.tooling/
 venv/
 ENV/
 env/
@@ -88,6 +95,7 @@ dist/
 # Logs
 logs/
 *.log
+prod_sample_run.json
 assistant-folder/
 .cursor/
 .cursorrules
@@ -110,4 +118,6 @@ override.tf.json
 **/layer_package/
 **/dist/*.zip
 *.zip
-*.md
+Documents/
+services/agent-api/tests/evals/artifacts/
+services/agent-api/.deepeval/

@@ -1,13 +1,14 @@
-"""
-Refresh Token model for JWT token rotation
-"""
+"""Refresh Token model for JWT token rotation."""
+
+from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.models.types import GUID
 
 
 class RefreshToken(Base):  # type: ignore[misc,valid-type]
@@ -16,11 +17,7 @@ class RefreshToken(Base):  # type: ignore[misc,valid-type]
     __tablename__ = "refresh_tokens"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        BigInteger().with_variant(Integer, "sqlite"),
-        ForeignKey("users.user_id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    user_id = Column(GUID(), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     token = Column(String(500), unique=True, nullable=False, index=True)
 
     # Token metadata
@@ -49,9 +46,10 @@ class RefreshToken(Base):  # type: ignore[misc,valid-type]
 
     def to_dict(self):
         """Convert token to dictionary"""
+        user_id = str(self.user_id) if self.user_id is not None else None
         return {
             "id": self.id,
-            "user_id": self.user_id,
+            "user_id": user_id,
             "is_revoked": self.is_revoked,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,

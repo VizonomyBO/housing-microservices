@@ -445,10 +445,12 @@ flowchart TB
 
 **Cross-cutting**: CacheReturn, Guardrails, ErrorHandler/Retry, RateLimiter
 
+**Router + Guardrails**: `services/agent-api/src/nodes/router/router_node.py` now runs `GuardrailEngine` (policy defined in `src/guardrails/policy.py`) before emitting any route. Violations populate `state.guardrail_findings` and automatically set `next_subgraph = human_gate`, ensuring HumanGate (Task 08) has everything it needs. Clean runs classify via intent tags, workflow hints, and keyword heuristics—no LLM dependency—keeping routing deterministic and cache-friendly.
+
 #### 2.2.5. Control Flow
 
 - **Entry/Exit**: START → InputNormalizer; cache hit → CacheReturn → END  
-- **Routing**: SessionLoader → Router; low confidence triggers human-in-the-loop interrupt  
+- **Routing**: SessionLoader → Router; guardrail failures or low confidence trigger HumanGate/interrupts  
 - **Retrieval**: Score thresholds trigger expansion, keyword fallback, or filter relaxation; bounded loops  
 - **Tools**: Enforces single tool call per loop iteration  
 - **Verification**: Failed citations trigger targeted retrieval repair with retry limits; graceful degradation on exhaustion  
@@ -470,6 +472,7 @@ flowchart TB
 
 - **Interrupts**: Nodes raise interrupts for clarification/disambiguation  
 - **Resume**: Continues from same node with injected input; nodes should be idempotent
+- **HumanGateService** (`services/agent-api/src/hitl/human_gate_service.py`) evaluates Router output and guardrail findings against per-route confidence thresholds before raising an interrupt. It persists checkpoints via `CheckpointService.pause_for_hitl`, records the resume token + reason into `AgentState.hitl_transcript`, and issues placeholder `hitl_pause` SSE payloads so Task 12 can simply forward them. Resuming through `resume_from_hitl` appends a matching transcript entry and emits `hitl_resume`, ensuring the LangGraph timeline and gateway transcript stay in sync even when operators inject new context.
 
 #### 2.2.9. Error Handling
 
@@ -681,6 +684,38 @@ flowchart LR
 
 **Persistence**: Citations attached to answers/messages for analytics/audits
 
+### 3.5. Telemetry & Cache Observability
+
+- **Metrics registry** (`services/agent-api/src/telemetry/metrics_registry.py`): exposes Prometheus counters/histograms for node latency (`agent_node_latency_seconds`), cache ratio (`agent_cache_hit_ratio`), token consumption (`agent_token_usage_total`), guardrail violations, HITL pauses, and limiter waits. Each LangGraph node executes inside a `lifecycle_span()` that emits `task_start`/`task_end` SSE frames and a matching OpenTelemetry span (`langgraph.<node>`), keeping traces aligned with streaming metadata.
+- **Cache observability** (`services/agent-api/src/telemetry/cache_observability.py`): wraps Valkey clients so hits/misses/writes update the Prometheus counters, snapshot Valkey pool health (`snapshot_valkey_stats()`), and write structured telemetry into `retrieval_runs`, `retrieval_run_items`, `chunk_metrics`, `pillar_answers`, and `pillar_answer_sources`. The helper uses the normalized prompt + attachment scope to persist document_scope JSON for each retrieval, enabling deterministic replays.
+- **SSE metric references**: Cache and HITL events now include `metric_refs` (e.g., `["agent_cache_events_total","agent_cache_hit_ratio"]`) so Grafana panels can jump directly to the correlated Prometheus series when an SSE frame is received.
+- **Rate limiter guidance**: When Valkey token buckets defer an LLM call, record the wait via `MetricsRegistry.record_rate_limiter_wait(model, route, wait_seconds)`. Dashboards should chart these waits next to cache hit ratio because low hit rates typically raise limiter pressure.
+- **Gateway wiring**: `services/agent-api/src/agent_api/http/app.py` instantiates the registry + `CacheObservability` during startup, while `src/agent_api/http/deps.py` exposes dependency helpers (`get_metrics_registry_dep`, `get_cache_observability`, `maybe_get_db_session`) so `/v1/chat` passes the singletons and a shared `AsyncSession` into every LangGraph runner call.
+- **Secure scraping**: `src/agent_api/http/routes/metrics.py` exposes `GET /metrics` with `Content-Type: text/plain; version=0.0.4; charset=utf-8`, `Cache-Control: no-store`, and `X-Accel-Buffering: no`. Scrapers must provide `Authorization: Bearer ${METRICS_AUTH_TOKEN}` (override header/scheme via `METRICS_AUTH_HEADER`/`METRICS_AUTH_SCHEME`). Requests without the token return 401/403 to keep internal metrics private.
+- **Scraping & replay**: Mount a FastAPI `/metrics` route that calls `MetricsRegistry.render_prometheus()` for Prometheus to scrape. In staging, run `uv run pytest tests/telemetry` or call `CacheObservability.record_cache_write(..., session=db_session)` to backfill telemetry rows and confirm dashboards before promoting a change.
+
+### 3.6. Valkey Client & Cache Deployment
+
+- `services/agent-api/src/cache/valkey_async_client.py` uses the official `valkey.asyncio` client to create a pooled connection (cluster and sentinel aware) with bounded retries/backoff, TLS hooks, and best-effort telemetry when `tag_hit/tag_miss` fire. When `VALKEY_URL` is not configured we automatically fall back to `InMemoryValkeyClient` so unit tests/local dev stay deterministic.
+- FastAPI wiring (`agent_api/http/app.py` + `agent_api/http/deps.py`) instantiates the production client during lifespan startup, exposes it via `get_cache_client`, and closes the pool on shutdown. LangGraph runners can inject the dependency directly, so CacheWriter/maybe_serve_from_cache now talk to the real cluster without custom plumbing.
+- Core environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VALKEY_URL` | _(unset)_ | `redis://`, `valkeys://`, or `sentinel://host1:26379,host2:26379/0` endpoint. When unset we keep the stub. |
+| `VALKEY_USERNAME` / `VALKEY_PASSWORD` / `VALKEY_PASSWORD_FILE` | _(unset)_ | Credentials for managed Valkey. `_FILE` lets us mount secrets without echoing them in envs. |
+| `VALKEY_DB` | `None` | Database index for single-instance deployments. |
+| `VALKEY_DEFAULT_TTL_SECONDS` | `172800` | CacheWriter TTL (48h per §3.3). |
+| `VALKEY_MAX_CONNECTIONS` | `64` | Pool ceiling before the client starts queueing. |
+| `VALKEY_SOCKET_TIMEOUT_SECONDS` / `VALKEY_CONNECT_TIMEOUT_SECONDS` | `3.0` / `1.0` | Command + connect timeouts forwarded to the pool. |
+| `VALKEY_HEALTHCHECK_INTERVAL_SECONDS` | `30` | Background health probes so idle pools recover gracefully. |
+| `VALKEY_RETRY_ATTEMPTS` / `VALKEY_RETRY_BACKOFF_SECONDS` / `VALKEY_RETRY_MAX_BACKOFF_SECONDS` / `VALKEY_RETRY_JITTER_SECONDS` | `3` / `0.05` / `0.5` / `0.01` | Bounded exponential backoff for transient errors. |
+| `VALKEY_SENTINEL_SERVICE` | _(unset)_ | Enable async Sentinel discovery when paired with a `sentinel://` URL. |
+| `VALKEY_CLUSTER_MODE` | `false` | Switches to `valkey.asyncio.RedisCluster` for shared clusters. |
+| `VALKEY_TLS_CA_CERT`, `VALKEY_TLS_CLIENT_CERT`, `VALKEY_TLS_CLIENT_KEY`, `VALKEY_TLS_SKIP_VERIFY` | _(unset)_ | Supply CA/client material for mTLS. Setting `valkeys://` also forces TLS. |
+
+- Local development: `docker run --rm -p 6380:6379 --name valkey-dev valkey/valkey:8.0` then export `VALKEY_URL=redis://127.0.0.1:6380/0`. Integration tests (`tests/cache/test_valkey_client.py`) spin up the same image via Testcontainers, so CI verifies real get/set/TTL paths without managing external infrastructure.
+- Rollout: set `VALKEY_URL`, credentials, and TLS values, then restart the gateway. The service logs a sanitized Valkey host when the pool comes up; if initialization fails we log a warning and reuse the stub so requests keep flowing. To rotate cache schemas bump `CacheResponsePayload.schema_version` and/or `VALKEY_DEFAULT_TTL_SECONDS`—existing keys age out automatically.
 ## 4. Interface Design
 
 ### 4.1. API Design
@@ -726,6 +761,9 @@ FastAPI Gateway provides RESTful interface:
 
 **Cache TTL**: 48-72 hours for Valkey TTL cache
 
+- Retrieval graph cache: `GraphRefreshSettings` (see `services/agent-api/src/nodes/retrieval/graph/config.py`) defaults to 15 minutes so GraphRetriever only re-queries `graph_hot_entities` / `graph_edge_evidence_rollup` when the attachment scope hash or intent tags change, or the TTL expires. The TTL metadata (`graph_context.fetched_at/expires_at`) lives inside the AgentState payload, keeping refresh decisions deterministic across LangGraph restarts.
+- LangGraph write-through responses now flow through `CacheWriter`, which serializes `CacheResponsePayload` (answer text, citations, chunk_ids, workflow excerpt, model metadata, schema_version) before calling `ValkeyCacheClientProtocol.set`. Deterministic ordering plus schema versioning lets us invalidate stale formats cheaply—bumping `schema_version` instantly sidesteps existing entries without manual deletes. `maybe_serve_from_cache` handles cache hits and records placeholder `tag_hit`/`tag_miss` telemetry so Task 12/13 can surface cache ratios via SSE + Prometheus without changing node logic.
+
 **Human-in-the-Loop**: Checkpointer required for interrupts; stable thread_id across resumptions (Not necessary in the first stage)
 
 ### 4.3. Cache Key Generation
@@ -742,3 +780,9 @@ hash(
 )
 
 **Operations**: Cache check after InputNormalizer; write-through after finalization
+
+**Implementation Notes**
+
+- `services/agent-api/src/cache/cache_keys.py::build_retrieval_cache_key` now enforces the concrete namespace `agent-api:retrieval:{conversation}:{intent}:{workflow_version}:{docs_sha256}`. Conversation/intent/workflow components are slugified and lowercased, while the trailing document fingerprint is `SHA256("|".join(sorted(content_hashes_or_ids)))`, preventing attachment order or casing from fragmenting the cache.
+- WorkflowPlanner writes the computed key to `AgentState.cache_metadata` before Router executes, so downstream nodes only need to call `ValkeyCacheClientProtocol.tag_hit` / `tag_miss` instead of recomputing keys.
+- TTL is pinned to 48 hours for workflow/retrieval entries (aligning with §3.3’s Valkey sizing notes). When `workflow_version_diffs` publishes a newer `to_version` or attachment scope hashes change, the namespaced key automatically shifts because the normalized `workflow_version`/doc fingerprint portion changes, delivering deterministic invalidation without bespoke purge scripts.

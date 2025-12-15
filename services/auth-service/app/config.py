@@ -33,17 +33,21 @@ class Config:
     COOKIE_SECURE = os.getenv("COOKIE_SECURE", "True").lower() == "true"
 
     # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+    # Default includes common local frontends (localhost:3000, localhost:5173) plus "*"
+    CORS_ORIGINS = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,*",
+    ).split(",")
 
     # Rate Limiting
     RATELIMIT_STORAGE_URL = "memory://"
 
     # Email (for password reset)
-    SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-    SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-    SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
-    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-    EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@app.com")
+    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    SES_REGION = os.getenv("SES_REGION", AWS_REGION)
+    SES_SOURCE_EMAIL = os.getenv("SES_SOURCE_EMAIL", os.getenv("EMAIL_FROM", "addis@vizonomy.com"))
+    SES_CONFIGURATION_SET = os.getenv("SES_CONFIGURATION_SET", "")
+    PASSWORD_RESET_URL = os.getenv("PASSWORD_RESET_URL", "https://app.vizonomy.com/reset-password")
 
     # Application
     APP_NAME = "Account Management Service"

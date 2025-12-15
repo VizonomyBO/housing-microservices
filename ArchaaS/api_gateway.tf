@@ -7,9 +7,9 @@ resource "aws_apigatewayv2_api" "main" {
   description   = "Vizonomy Document Services API"
 
   cors_configuration {
-    allow_origins = [for origin in var.allowed_origins : origin if origin != "*"]
-    allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allow_headers = ["Content-Type", "Authorization", "X-Request-Id", "Idempotency-Key", "Viz-Request-Id"]
+    allow_origins     = [for origin in var.allowed_origins : origin if origin != "*"]
+    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers     = ["Content-Type", "Authorization", "X-Request-Id", "Idempotency-Key", "Viz-Request-Id"]
     expose_headers    = ["X-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"]
     max_age           = 3600
     allow_credentials = true

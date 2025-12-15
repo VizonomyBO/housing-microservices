@@ -12,24 +12,25 @@ Flow:
 3. S3 triggers preflight Lambda which calculates hash & checks duplicates
 4. Preflight Lambda starts Step Function if new document
 """
+
+import asyncio
 import json
 import os
 import uuid
-import asyncio
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
 from functools import wraps
+from typing import Any
 
 import aioboto3
-from pydantic import BaseModel, Field, field_validator, ValidationError
-
-from db.repository import DocumentRepository
-from db.models import DocumentStatus, AccessScope
 from core.exceptions import (
-    ValidationError as AppValidationError,
     DatabaseError,
 )
+from core.exceptions import (
+    ValidationError as AppValidationError,
+)
 from core.logging import get_logger
+from db.repository import DocumentRepository
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,9 @@ logger = get_logger(__name__)
 S3_BUCKET = os.environ.get("RAW_DOCUMENTS_BUCKET", "vizonomy-raw-documents")
 S3_KEY_PREFIX = os.environ.get("S3_KEY_PREFIX", "raw")
 PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY_SEC", "900"))
-MAX_FILE_SIZE_BYTES = int(os.environ.get("MAX_FILE_SIZE_BYTES", str(100 * 1024 * 1024)))  # 100MB
+MAX_FILE_SIZE_BYTES = int(
+    os.environ.get("MAX_FILE_SIZE_BYTES", str(100 * 1024 * 1024))
+)  # 100MB
 
 # Allowed source types and their MIME mappings
 ALLOWED_SOURCE_TYPES = {
@@ -56,19 +59,19 @@ ALLOWED_SOURCE_TYPES = {
 class DocumentUploadRequest(BaseModel):
     """
     Request model for document upload endpoint.
-    
+
     Note: content_hash is NOT required - it will be calculated
     after upload by the preflight Lambda.
     """
-    
+
     document_name: str = Field(..., min_length=1, max_length=255)
     source_type: str = Field(...)
-    country_code: Optional[str] = Field(default=None, min_length=2, max_length=3)
+    country_code: str | None = Field(default=None, min_length=2, max_length=3)
     language: str = Field(default="en", min_length=2, max_length=5)
     tags: list[str] = Field(default_factory=list)
     file_size_bytes: int = Field(...)
     access_scope: str = Field(default="user_private")
-    callback_url: Optional[str] = Field(default=None)
+    callback_url: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("source_type")
@@ -102,6 +105,7 @@ class DocumentUploadRequest(BaseModel):
 
 class UploadInfo(BaseModel):
     """Presigned URL info for S3 upload."""
+
     url: str
     fields: dict[str, str]
     expires_in_sec: int
@@ -109,19 +113,22 @@ class UploadInfo(BaseModel):
 
 class DocumentUploadResponse(BaseModel):
     """Response model for document upload endpoint."""
+
     document_id: str
-    status: str  # PENDING_UPLOAD initially
+    status: str  # registered initially until preflight picks up the file
     upload: UploadInfo
     message: str
-    request_id: Optional[str] = None
+    request_id: str | None = None
 
 
 # Helper functions
 def async_handler(f):
     """Decorator to run async handlers in Lambda."""
+
     @wraps(f)
     def wrapper(event, context):
         return asyncio.get_event_loop().run_until_complete(f(event, context))
+
     return wrapper
 
 
@@ -129,7 +136,7 @@ def create_response(status_code: int, body: dict, request_id: str = None) -> dic
     """Create API Gateway response."""
     if request_id:
         body["request_id"] = request_id
-    
+
     return {
         "statusCode": status_code,
         "headers": {
@@ -166,7 +173,7 @@ async def generate_presigned_url(
 ) -> UploadInfo:
     """Generate S3 presigned POST URL for direct upload."""
     session = aioboto3.Session()
-    
+
     async with session.client("s3") as s3:
         # Use presigned POST for browser-compatible uploads
         presigned = await s3.generate_presigned_post(
@@ -181,7 +188,7 @@ async def generate_presigned_url(
             ],
             ExpiresIn=PRESIGNED_URL_EXPIRY,
         )
-        
+
         return UploadInfo(
             url=presigned["url"],
             fields=presigned["fields"],
@@ -206,19 +213,19 @@ def extract_user_from_event(event: dict) -> tuple[str, list[str]]:
     Returns user_id as UUID string for database compatibility.
     """
     import base64
-    
+
     request_context = event.get("requestContext", {})
     authorizer = request_context.get("authorizer", {})
-    
+
     # Try JWT claims from authorizer first
     claims = authorizer.get("claims", authorizer.get("lambda", {}))
     user_id = claims.get("sub") or claims.get("user_id")
-    
+
     # If no authorizer claims, try to decode JWT from Authorization header
     if not user_id:
         headers = event.get("headers", {})
         auth_header = headers.get("authorization") or headers.get("Authorization", "")
-        
+
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             try:
@@ -234,18 +241,23 @@ def extract_user_from_event(event: dict) -> tuple[str, list[str]]:
                     claims = jwt_claims
             except Exception as e:
                 logger.warning(f"Failed to decode JWT: {e}")
-    
+
     roles = claims.get("roles", [])
     if isinstance(roles, str):
         roles = roles.split(",")
-    
+
     if not user_id:
         raise AppValidationError("Missing user_id in authorization context")
-    
-    # Convert integer user_id to UUID format for database compatibility
-    user_id_int = int(user_id)
-    user_uuid = int_to_uuid(user_id_int)
-    
+
+    # Prefer UUID inputs; fall back to deterministic int→UUID mapping for legacy tokens
+    try:
+        user_uuid = str(uuid.UUID(str(user_id)))
+    except (ValueError, TypeError):
+        try:
+            user_uuid = int_to_uuid(int(user_id))
+        except (ValueError, TypeError) as exc:
+            raise AppValidationError("user_id must be a UUID string") from exc
+
     return user_uuid, roles
 
 
@@ -263,24 +275,24 @@ def validate_base_scope_access(access_scope: str, roles: list[str]) -> None:
 async def handler(event: dict, context: Any) -> dict:
     """
     Main Lambda handler for document upload.
-    
+
     This is a simplified flow:
     1. Validate request
     2. Create document record with UPLOADING status
     3. Return presigned URL for S3 upload
-    
+
     After user uploads to S3, the preflight Lambda will:
     - Calculate the content hash
     - Check for duplicates
     - Start the Step Function if new document
     """
     request_id = event.get("requestContext", {}).get("requestId", str(uuid.uuid4()))
-    
+
     logger.info(
         "Processing document upload request",
         extra={"request_id": request_id},
     )
-    
+
     # Parse and validate request body
     try:
         body = json.loads(event.get("body", "{}"))
@@ -300,7 +312,7 @@ async def handler(event: dict, context: Any) -> dict:
             details={"errors": e.errors()},
             request_id=request_id,
         )
-    
+
     # Extract user from token
     try:
         user_id, roles = extract_user_from_event(event)
@@ -311,7 +323,7 @@ async def handler(event: dict, context: Any) -> dict:
             message=str(e),
             request_id=request_id,
         )
-    
+
     # Validate access scope permissions
     try:
         validate_base_scope_access(request_data.access_scope, roles)
@@ -322,17 +334,24 @@ async def handler(event: dict, context: Any) -> dict:
             message=str(e),
             request_id=request_id,
         )
-    
+
     # Generate IDs
     document_id = str(uuid.uuid4())
-    
+
     # Determine S3 key and content type
     file_extension = request_data.source_type
     content_type = ALLOWED_SOURCE_TYPES[request_data.source_type]
     s3_key = f"{S3_KEY_PREFIX}/{document_id}/source.{file_extension}"
-    
+
     # Create document record with UPLOADING status
     repository = DocumentRepository()
+    pending_hash = f"pending::{document_id}"
+
+    metadata_payload = {
+        **request_data.metadata,
+        "callback_url": request_data.callback_url,
+    }
+
     document_data = {
         "id": document_id,
         "owner_user_id": user_id if request_data.access_scope != "base" else None,
@@ -341,17 +360,16 @@ async def handler(event: dict, context: Any) -> dict:
         "country_code": request_data.country_code,
         "language": request_data.language,
         "tags": request_data.tags,
-        "status": "PENDING_UPLOAD",  # Will change to PENDING_VALIDATION after S3 upload
-        "content_hash": None,  # Will be calculated by preflight Lambda
+        "status": "registered",
+        # shared_data_layer migrations enforce NOT NULL, so stash a deterministic
+        # placeholder until preflight updates the real SHA-256.
+        "content_hash": pending_hash,
         "source_uri": f"s3://{S3_BUCKET}/{s3_key}",
         "byte_size": request_data.file_size_bytes,
-        "metadata": json.dumps({
-            **request_data.metadata,
-            "callback_url": request_data.callback_url,
-        }),
-        "created_at": datetime.now(timezone.utc),
+        "metadata": metadata_payload,
+        "created_at": datetime.now(UTC),
     }
-    
+
     try:
         await repository.create_document(document_data)
     except DatabaseError as e:
@@ -365,7 +383,7 @@ async def handler(event: dict, context: Any) -> dict:
             message="Failed to create document record",
             request_id=request_id,
         )
-    
+
     # Generate presigned URL for upload
     try:
         upload_info = await generate_presigned_url(
@@ -384,7 +402,7 @@ async def handler(event: dict, context: Any) -> dict:
             message="Failed to generate upload URL",
             request_id=request_id,
         )
-    
+
     logger.info(
         "Document upload initiated",
         extra={
@@ -393,15 +411,15 @@ async def handler(event: dict, context: Any) -> dict:
             "s3_key": s3_key,
         },
     )
-    
+
     response = DocumentUploadResponse(
         document_id=document_id,
-        status="PENDING_UPLOAD",
+        status="registered",
         upload=upload_info,
         message="Upload your file to the presigned URL. After upload, the system will automatically validate and process your document.",
         request_id=request_id,
     )
-    
+
     return create_response(
         status_code=201,
         body=response.model_dump(),

@@ -7,6 +7,10 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Explicitly set the handler so the Lambda entrypoint always finds it
+ENV _HANDLER=handler.handler
+ENV AWS_LAMBDA_FUNCTION_HANDLER=handler.handler
+
 # Copy handler
 COPY handler.py .
 COPY core/ ./core/

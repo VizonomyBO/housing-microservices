@@ -1,31 +1,110 @@
-version: '3.8'
+# Shared snippets to keep service definitions concise
+x-service-defaults: &service-defaults
+  env_file:
+    - ${ENV_FILE:-.env.local}
+
+x-monorepo-build: &monorepo-build
+  context: .
 
 services:
   postgres:
-    image: pgvector/pgvector:pg15
-    container_name: vizonomy-postgres
+    <<: *service-defaults
+    image: pgvector/pgvector:pg16
+    container_name: housing-postgres
+    restart: unless-stopped
     environment:
-      # Primary database for shared_data_layer (documents, chunks, etc.)
       POSTGRES_DB: ${POSTGRES_DB:-housing}
       POSTGRES_USER: ${POSTGRES_USER:-vizonomy_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      # Additional database for auth-service (users, tokens)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AUTH_DB: ${AUTH_DB:-auth_db}
+      AGENT_API_DB: ${AGENT_API_DB:-agent_reduced}
+      AGENT_API_DB_USER: ${AGENT_API_DB_USER:-agent_api}
+      AGENT_API_DB_PASSWORD: ${AGENT_API_DB_PASSWORD:-agent_api_pass}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vizonomy_user} -d ${POSTGRES_DB:-housing}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-vizonomy_user} -d ${POSTGRES_DB:-housing}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
-      - microservices-network
+      - microservices-net
+
+  db-init:
+    <<: *service-defaults
+    build:
+      <<: *monorepo-build
+      dockerfile: services/agent-api/Dockerfile.reduced
+    profiles:
+      - reduced
+      - full
+      - ops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
+    command: >-
+      bash -c "uv run python ../../packages/shared_data_layer/src/shared_data_layer/manage.py migrate && uv run python scripts/seed_reduced_scope_data.py --if-empty"
+    networks:
+      - microservices-net
+
+  agent-api:
+    <<: *service-defaults
+    build:
+      <<: *monorepo-build
+      dockerfile: services/agent-api/Dockerfile.reduced
+    profiles:
+      - reduced
+      - full
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    ports:
+      - "${AGENT_API_PORT:-8000}:8000"
+    environment:
+      SERVICE_MODE: ${SERVICE_MODE:-reduced}
+      REDUCED_SCOPE_USE_REAL_TOOLS: ${REDUCED_SCOPE_USE_REAL_TOOLS:-0}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
+      USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
+      LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}
+      LOCALSTACK_EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    networks:
+      - microservices-net
+      - localstack-net
+
+  db-shell:
+    <<: *service-defaults
+    image: postgres:16
+    profiles:
+      - ops
+      - reduced
+      - full
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["bash", "-c", "sleep infinity"]
+    environment:
+      PGPASSWORD: ${AGENT_API_DB_PASSWORD:-agent_api_pass}
+    networks:
+      - microservices-net
 
   auth-service:
-    build: 
+    <<: *service-defaults
+    build:
+      <<: *monorepo-build
       context: ./services/auth-service
       dockerfile: Dockerfile
     container_name: auth-service
@@ -35,25 +114,31 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # auth-service uses its own database (auth_db) for users and tokens
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${AUTH_DB:-auth_db}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
-      - JWT_ACCESS_TOKEN_EXPIRES=${JWT_ACCESS_TOKEN_EXPIRES:-900}
-      - JWT_REFRESH_TOKEN_EXPIRES=${JWT_REFRESH_TOKEN_EXPIRES:-2592000}
-      - FLASK_ENV=${FLASK_ENV:-production}
-      - PORT=5000
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
+      JWT_ACCESS_TOKEN_EXPIRES: ${JWT_ACCESS_TOKEN_EXPIRES:-900}
+      JWT_REFRESH_TOKEN_EXPIRES: ${JWT_REFRESH_TOKEN_EXPIRES:-2592000}
+      FLASK_ENV: ${FLASK_ENV:-production}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      SES_REGION: ${SES_REGION:-us-east-1}
+      SES_SOURCE_EMAIL: ${SES_SOURCE_EMAIL:-addis@vizonomy.com}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL:-https://app.vizonomy.com/reset-password}
+      PORT: 5000
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 20s
     networks:
-      - microservices-network
+      - microservices-net
 
   user-service:
-    build: 
+    <<: *service-defaults
+    build:
+      <<: *monorepo-build
       context: ./services/user-service
       dockerfile: Dockerfile
     container_name: user-service
@@ -65,27 +150,31 @@ services:
       auth-service:
         condition: service_healthy
     environment:
-      # user-service uses auth_db for user management
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD}@postgres:5432/${AUTH_DB:-auth_db}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ACCESS_TOKEN_EXPIRES_MINUTES=${JWT_ACCESS_TOKEN_EXPIRES_MINUTES:-15}
-      - AUTH_SERVICE_URL=http://auth-service:5000
-      - FLASK_ENV=${FLASK_ENV:-production}
-      - PORT=5001
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
+      JWT_ACCESS_TOKEN_EXPIRES_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRES_MINUTES:-15}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:5000}
+      FLASK_ENV: ${FLASK_ENV:-production}
+      PORT: 5001
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/v1/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 20s
     networks:
-      - microservices-network
+      - microservices-net
 
   swagger-service:
-    build: 
+    <<: *service-defaults
+    build:
+      <<: *monorepo-build
       context: ./services/swagger-service
       dockerfile: Dockerfile
+    profiles:
+      - ops
+      - full
     container_name: swagger-service
     ports:
       - "${SWAGGER_SERVICE_PORT:-3000}:3000"
@@ -95,24 +184,98 @@ services:
       user-service:
         condition: service_healthy
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - PORT=3000
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - ACCOUNT_SERVICE_URL=http://auth-service:5000
-      - USER_SERVICE_URL=http://user-service:5001
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ACCOUNT_SERVICE_URL: ${ACCOUNT_SERVICE_URL:-http://auth-service:5000}
+      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:5001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 20s
     networks:
-      - microservices-network
+      - microservices-net
+      - public-edge
+
+  localstack:
+    <<: *service-defaults
+    image: localstack/localstack:latest
+    container_name: localstack
+    profiles:
+      - reduced
+      - aws-mock
+      - full
+      - agent-api
+      - default
+    ports:
+      - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
+    environment:
+      SERVICES: ${LOCALSTACK_SERVICES:-s3,sqs,sns,events,secretsmanager}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -f http://localhost:4566/_localstack/health || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - microservices-net
+      - localstack-net
+
+  valkey:
+    <<: *service-defaults
+    image: valkey/valkey:7
+    profiles:
+      - full
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "valkey-cli ping || redis-cli ping"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - shared_cache:/data
+    networks:
+      - microservices-net
+
+  otel-collector:
+    <<: *service-defaults
+    image: otel/opentelemetry-collector:0.99.0
+    profiles:
+      - full
+    command:
+      - "--config=/etc/otel-collector-config.yaml"
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
+      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+    depends_on:
+      localstack:
+        condition: service_started
+    networks:
+      - microservices-net
 
 volumes:
   postgres_data:
+  localstack_data:
+  shared_cache:
 
 networks:
-  microservices-network:
+  microservices-net:
+    driver: bridge
+  localstack-net:
+    driver: bridge
+  public-edge:
     driver: bridge

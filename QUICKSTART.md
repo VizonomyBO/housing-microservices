@@ -1,172 +1,65 @@
 # Quick Start Guide
 
-Get the microservices platform up and running in 5 minutes!
+Spin up the Housing microservices stack (FastAPI gateway + legacy services) with the new root `docker compose` workflow. Follow these steps and you can interact with the demo in a few minutes.
 
-## Prerequisites
+## 1. Prerequisites
+- Docker Desktop / Engine 25.x with Compose V2 (`docker compose`).
+- Git + a bash-compatible shell.
+- Optional: [uv](https://github.com/astral-sh/uv) if you need to run scripts or tests locally.
 
-- Docker Desktop installed and running
-- Git installed
-
-## Step 1: Clone and Setup (1 minute)
-
+## 2. Clone & Copy Env
 ```bash
-# Clone the repository
-git clone <your-repo-url>
-cd ia-project
-
-# Copy environment file
+git clone <repo-url>
+cd housing-microservices
 cp env.example .env
 ```
+Edit `.env` to set secure passwords, JWT secrets, and AWS credentials (if you plan to hit real AWS). Use `.env.local` for personal overrides.
 
-## Step 2: Start Services (2 minutes)
+## 3. Choose a Profile
+| Profile | Command | Starts |
+| --- | --- | --- |
+| Reduced Agent API demo | `docker compose --profile reduced up --build agent-api` | Postgres + db-init + agent-api + db-shell + LocalStack for AWS mocks. |
+| Full platform | `docker compose --profile full up --build` | All services (auth, user, swagger, agent, marker), LocalStack, Valkey, otel-collector. |
+| Default (auth + user + swagger) | `docker compose up --build` | Legacy stack without agent-api (marker removed). |
 
+Set `STACK_PROFILE=reduced` or `STACK_PROFILE=full` in your shell (or `.env`) so services know which runtime to activate. Override `COMPOSE_PROFILES` if you need extra helpers (e.g., `COMPOSE_PROFILES=full,ops`).
+
+## 4. Launch & Verify
 ```bash
-# Build and start all services
-docker-compose up --build -d
+# Reduced profile example
+STACK_PROFILE=reduced \
+COMPOSE_PROFILES=reduced \
+  docker compose --profile reduced up --build agent-api
 
-# Wait for services to be healthy (about 30-60 seconds)
-docker-compose ps
+# Full stack example
+STACK_PROFILE=full \
+COMPOSE_PROFILES=full \
+  docker compose --profile full up --build
 ```
+Once healthy, visit:
+- Swagger UI: `http://localhost:${SWAGGER_SERVICE_PORT:-3000}`
+- Agent API: `http://localhost:${AGENT_API_PORT:-8000}/docs`
+- Auth health: `curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health`
+- LocalStack status: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`
 
-You should see all services with "healthy" status.
+## 5. Seed & Admin Tasks
+- Seeding happens automatically via the `db-init` service. To rerun: `docker compose run --rm db-init`.
+- Inspect the database: `docker compose --profile reduced run --rm db-shell psql -h postgres -U agent_api -d agent_reduced`.
+- Run FastAPI CLI helpers: `docker compose --profile reduced exec agent-api uv run agent_api.cli --help`.
+- Smoke test reduced profile: `services/agent-api/scripts/verify_reduced_scope_compose.sh`.
 
-## Step 3: Verify Everything Works (1 minute)
+## 6. LocalStack vs AWS
+- LocalStack is enabled by default (`USE_LOCALSTACK=1`).
+- To use real AWS, set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env`, then restart services that talk to AWS (`docker compose restart agent-api`).
 
-### Check Service Health
-
+## 7. Tear Down & Troubleshooting
 ```bash
-# Check all services
-curl http://localhost:3000/api/status
+docker compose down              # stop containers, keep volumes
+docker compose down -v           # nuke Postgres + LocalStack data
 ```
+Common fixes:
+- **Ports busy**: `lsof -i :8000` and stop conflicting processes.
+- **db-init failed**: confirm passwords in `.env` match `scripts/init-databases.sh`, then `docker compose run --rm db-init`.
+- **LocalStack unhealthy**: check `docker compose logs localstack`, or temporarily set `USE_LOCALSTACK=0`.
 
-### Open API Documentation
-
-Open in your browser:
-- **API Docs**: http://localhost:3000/docs
-- **Landing Page**: http://localhost:3000
-
-## Step 4: Test the API (1 minute)
-
-### Register a User
-
-```bash
-curl -X POST http://localhost:5000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "demo@example.com",
-    "username": "demouser",
-    "password": "DemoPass123!",
-    "first_name": "Demo",
-    "last_name": "User"
-  }'
-```
-
-### Login
-
-```bash
-curl -X POST http://localhost:5000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "login": "demo@example.com",
-    "password": "DemoPass123!"
-  }'
-```
-
-## 🎉 You're Done!
-
-### What's Running?
-
-- **Swagger Aggregator**: http://localhost:3000 - Unified API documentation
-- **Account Service**: http://localhost:5000 - Authentication API
-- **PostgreSQL**: localhost:5432 - Database
-
-### Next Steps
-
-- Explore the interactive API docs at http://localhost:3000/docs
-- Check system status at http://localhost:3000/api/status
-- View detailed metrics at http://localhost:3000/health/metrics
-- Read the full README.md for advanced features
-
-### Useful Commands
-
-```bash
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-
-# Restart services
-docker-compose restart
-
-# Clean everything (including database)
-docker-compose down -v
-```
-
-### Using Make (Optional)
-
-If you have `make` installed:
-
-```bash
-make help          # Show all available commands
-make up            # Start services
-make logs          # View logs
-make health        # Check health
-make status        # Show system status
-make test-register # Test registration
-make test-login    # Test login
-make open-docs     # Open docs in browser
-```
-
-## Troubleshooting
-
-### Port Already in Use
-
-If you get port conflicts:
-
-```bash
-# Check what's using the ports
-lsof -i :3000
-lsof -i :5000
-lsof -i :5432
-
-# Kill the process or change ports in docker-compose.yml
-```
-
-### Services Not Healthy
-
-```bash
-# Check logs for errors
-docker-compose logs
-
-# Restart services
-docker-compose restart
-
-# Rebuild from scratch
-docker-compose down -v
-docker-compose up --build
-```
-
-### Database Connection Failed
-
-```bash
-# Check PostgreSQL is running
-docker-compose ps postgres
-
-# View database logs
-docker-compose logs postgres
-
-# Access database directly
-docker-compose exec postgres psql -U account_user -d account_db
-```
-
-## Need Help?
-
-- Check the full [README.md](README.md) for detailed documentation
-- Review logs: `docker-compose logs`
-- Check service status: `curl http://localhost:3000/api/status`
-
----
-
-Happy coding! 🚀
-
+For deeper instructions, read `docs/runbooks/reduced_scope_demo.md` (reduced profile) and `docs/runbooks/full_stack_compose.md` (full stack).

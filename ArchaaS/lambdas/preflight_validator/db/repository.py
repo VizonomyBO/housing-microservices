@@ -4,12 +4,12 @@ Document Repository for database operations.
 Uses asyncpg for async PostgreSQL operations.
 Extended for preflight validation operations.
 """
+
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import asyncpg
-
 from core.exceptions import DatabaseError
 from core.logging import get_logger
 
@@ -17,21 +17,20 @@ logger = get_logger(__name__)
 
 # Database configuration from environment
 DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://vizonomy_user:postgres@localhost:5432/housing"
+    "DATABASE_URL", "postgresql://vizonomy_user:postgres@localhost:5432/housing"
 )
 
 
 class DocumentRepository:
     """
     Repository for document database operations.
-    
+
     Implements async database access using asyncpg connection pool.
     Extended with methods needed for preflight validation.
     """
-    
-    _pool: Optional[asyncpg.Pool] = None
-    
+
+    _pool: asyncpg.Pool | None = None
+
     async def _get_pool(self) -> asyncpg.Pool:
         """Get or create the connection pool."""
         if self._pool is None:
@@ -46,21 +45,21 @@ class DocumentRepository:
                 logger.error(f"Failed to create database pool: {e}")
                 raise DatabaseError(f"Database connection failed: {e}")
         return self._pool
-    
-    async def get_document_by_id(self, document_id: str) -> Optional[dict[str, Any]]:
+
+    async def get_document_by_id(self, document_id: str) -> dict[str, Any] | None:
         """
         Get document by ID.
-        
+
         Full column list per database_schema_persistence_rules.md
-        
+
         Args:
             document_id: The document ID
-        
+
         Returns:
             Document record or None if not found
         """
         pool = await self._get_pool()
-        
+
         query = """
             SELECT 
                 id,
@@ -88,7 +87,7 @@ class DocumentRepository:
             WHERE id = $1
               AND deleted_at IS NULL
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, document_id)
@@ -96,26 +95,26 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Database query failed: {e}")
             raise DatabaseError(f"Failed to query document: {e}")
-    
+
     async def find_by_owner_and_hash(
         self,
         owner_user_id: str,
         content_hash: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Find document by owner_user_id and content_hash for deduplication.
-        
+
         Full column list per database_schema_persistence_rules.md
-        
+
         Args:
             owner_user_id: The document owner's user ID
             content_hash: SHA-256 hash of document content
-        
+
         Returns:
             Document record if found, None otherwise
         """
         pool = await self._get_pool()
-        
+
         query = """
             SELECT 
                 id,
@@ -146,7 +145,7 @@ class DocumentRepository:
               AND status NOT IN ('failed', 'archived')
             LIMIT 1
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, owner_user_id, content_hash)
@@ -154,30 +153,30 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Database query failed: {e}")
             raise DatabaseError(f"Failed to query documents: {e}")
-    
+
     async def update_document_status(
         self,
         document_id: str,
         status: str,
-        ingestion_stage: Optional[str] = None,
-        ingestion_started_at: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        ingestion_stage: str | None = None,
+        ingestion_started_at: str | None = None,
+    ) -> dict[str, Any] | None:
         """
         Update document status and optionally the ingestion stage.
-        
+
         Per database_schema_persistence_rules.md, also tracks ingestion timing.
-        
+
         Args:
             document_id: The document ID to update
             status: New status value
             ingestion_stage: Optional new ingestion stage
             ingestion_started_at: Optional ingestion start timestamp
-        
+
         Returns:
             Updated document record or None if not found
         """
         pool = await self._get_pool()
-        
+
         if ingestion_stage and ingestion_started_at:
             query = """
                 UPDATE documents
@@ -208,7 +207,7 @@ class DocumentRepository:
                 RETURNING *
             """
             params = (document_id, status)
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, *params)
@@ -216,24 +215,24 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to update document status: {e}")
             raise DatabaseError(f"Failed to update document: {e}")
-    
+
     async def update_document_content_hash(
         self,
         document_id: str,
         content_hash: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Update document content hash (when computed post-upload).
-        
+
         Args:
             document_id: The document ID
             content_hash: Computed SHA-256 hash
-        
+
         Returns:
             Updated document record
         """
         pool = await self._get_pool()
-        
+
         query = """
             UPDATE documents
             SET content_hash = $2,
@@ -241,7 +240,7 @@ class DocumentRepository:
             WHERE id = $1
             RETURNING id, content_hash
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, document_id, content_hash)
@@ -249,24 +248,24 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to update content hash: {e}")
             raise DatabaseError(f"Failed to update document: {e}")
-    
+
     async def update_document_artifacts(
         self,
         document_id: str,
         artifacts: dict[str, str],
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Update document metadata with artifact URIs.
-        
+
         Args:
             document_id: The document ID
             artifacts: Dictionary of artifact type -> S3 URI
-        
+
         Returns:
             Updated document record
         """
         pool = await self._get_pool()
-        
+
         # Merge artifacts into existing metadata
         query = """
             UPDATE documents
@@ -275,7 +274,7 @@ class DocumentRepository:
             WHERE id = $1
             RETURNING id, metadata
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -287,27 +286,27 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to update artifacts: {e}")
             raise DatabaseError(f"Failed to update document: {e}")
-    
+
     async def mark_ingestion_completed(
         self,
         document_id: str,
         status: str = "active",
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Mark document ingestion as completed.
-        
+
         Per database_schema_persistence_rules.md, sets ingestion_completed_at
         and updates status to 'active'.
-        
+
         Args:
             document_id: The document ID
             status: Final status (default 'active')
-        
+
         Returns:
             Updated document record
         """
         pool = await self._get_pool()
-        
+
         query = """
             UPDATE documents
             SET status = $2,
@@ -316,7 +315,7 @@ class DocumentRepository:
             WHERE id = $1
             RETURNING *
         """
-        
+
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(query, document_id, status)
@@ -324,10 +323,9 @@ class DocumentRepository:
         except Exception as e:
             logger.error(f"Failed to mark ingestion completed: {e}")
             raise DatabaseError(f"Failed to update document: {e}")
-    
+
     async def close(self) -> None:
         """Close the connection pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
-

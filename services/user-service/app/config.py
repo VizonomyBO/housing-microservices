@@ -33,7 +33,11 @@ class Config:
     AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:5001")
 
     # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+    # Default includes common local frontends (localhost:3000, localhost:5173) plus "*"
+    CORS_ORIGINS = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,*",
+    ).split(",")
 
     # Service Info
     SERVICE_NAME = "user-service"

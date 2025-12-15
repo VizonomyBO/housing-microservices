@@ -3,6 +3,15 @@
 ## Overview
 This document outlines the architecture for asynchronous background processing in the Housing Service. We use message queues (e.g., SQS) to decouple ingestion, PDF generation, and other long-running tasks from the main API request/response cycle.
 
+### Reduced Scope Runtime (Task 3.5.3)
+For the demo build, `services/agent-api` exposes a `ReducedScopeWorkerRuntime` that executes ingestion completion, pillar generation, and artifact creation inline. Instead of launching SQS/SFN workers, FastAPI routes and the Typer CLI call these helpers directly:
+
+- `uv run python -m agent_api.cli run-ingestion --document-id <uuid>`
+- `uv run python -m agent_api.cli generate-pillars --country-code LBR` (or `--conversation-id ...`)
+- `uv run python -m agent_api.cli generate-artifact --conversation-id ... --artifact-type chat_export`
+
+Each helper writes to the same tables (`ingestion_jobs`, `pillar_answers`, `pillar_answer_sources`, `artifacts`) and stubs PDF generation with `metadata.reduced_scope.status="skipped"`. When re-enabling the async workers, flip `REDUCED_SCOPE_ENABLED=0`, restore the queue consumers, and update the CLI/route docs to point back to the SQS pipelines described below.
+
 ## Job Types & Payloads
 
 ### 1. Ingestion & Embedding
