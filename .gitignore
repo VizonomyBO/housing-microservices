@@ -119,3 +119,5 @@ override.tf.json
 **/dist/*.zip
 *.zip
 Documents/
+services/agent-api/tests/evals/artifacts/
+services/agent-api/.deepeval/

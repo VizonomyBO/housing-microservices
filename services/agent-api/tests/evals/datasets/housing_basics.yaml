@@ -1,0 +1,26 @@
+scenarios:
+  - name: housing_basics_overview
+    description: "Answer a simple housing question using existing reference docs."
+    dataset: "housing_basics"
+    tags: ["smoke", "eval"]
+    doc_refs:
+      - document_id: "fb400d68-3200-4e07-9231-cea9ee7163eb"
+        title: "Metro Housing Continuity Memo – Q2 FY25"
+        content_path: "tests/data/reduced_e2e/doc_policy.md"
+    turns:
+      - role: user
+        content: "Give me a two sentence overview of the housing memo, mentioning the five voucher districts and the 32% rent cap."
+    expectations:
+      - label: "overview"
+        rubric: "Summarize the housing memo guardrails: five districts and 32% cap."
+        expected_answer: "The memo expands vouchers to five districts and caps rent relief at 32% of income."
+        citations_required: true
+    metrics:
+      - name: faithfulness
+        threshold: 0.25
+      - name: answer_relevance
+        threshold: 0.25
+      - name: citation_coverage
+        threshold: 0.5
+      - name: latency
+        threshold: null
