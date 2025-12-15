@@ -66,6 +66,8 @@ uv run pytest -n auto
 ## 5. Runtime Safety, Permissions & Tooling
 
 - **Golden rule:** Do not introduce stubs, fixtures, or mocking unless explicitly requested. Default to using real services, LLMs, and data paths with production-like configs.
+- **Never bake eval scenarios into prompts or code paths.** Do not hardcode eval questions, expected answers, or rubric-specific outputs inside agent prompts, templates, or control flow. Evaluation content must remain external (datasets/test harness), and the agent should rely on retrieval and generic instructions only.
+- **No retrieval/citation shortcuts for evals or prod:** Exercise the real retrieval stack (vector + BM25/FTS when available) instead of “preview-only” or heuristic-only rerankers. Citation checks must validate against the actual retrieved chunks—not just bracket markers.
 
 Ask the user before:
 - Modifying other packages (unless the task explicitly requires cross-package changes).

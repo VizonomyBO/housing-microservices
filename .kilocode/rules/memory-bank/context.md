@@ -12,6 +12,9 @@ The project is currently focused on verifying the AWS deployment and ensuring th
 -   **Ingestion Architecture**: Replaced Lambda-based ingestion with a dedicated FastAPI `ingestion-service` running on EC2.
 -   **Shared Data Layer**: Consolidated database models and repositories into `packages/shared_data_layer`.
 -   **Tooling**: Standardized on `uv` for dependency management and environment setup.
+-   **Testing Docs**: Updated `docs/testing/llm_eval_quality_improvements.md` with HyDE + numeric rerank guidance, structured outputs with citations, and a pytest runbook for evals.
+-   **Agent Eval Hardening**: Agent answer composer now performs HyDE-style rewrites + numeric-aware reranking of attachment chunks, builds structured prompts with per-fact [c#] citations, and appends citation footnotes; eval thresholds in `tests/evals/datasets/reduced_e2e_smoke.yaml` raised to 0.5 faithfulness/relevance and 0.8 citation coverage. Attachment previews widened (8 chunks/2400 chars).
+-   **No eval shortcuts**: AGENTS.md and task docs now require using real retrieval (vector + BM25/FTS where available) instead of preview-only heuristics, and citation validation must align to actual retrieved chunks.
 
 ## Next Steps
 1.  Run `scripts/prod_smoke_check.sh` in AWS mode.
