@@ -9,7 +9,7 @@ from typing import Any
 class JudgeModel(str, Enum):
     """Supported judge models."""
 
-    GPT_4O = "gpt-4o"
+    GPT_51_REASONING_MEDIUM = "gpt-5.1-reasoning-medium"
 
 
 @dataclass(slots=True)
@@ -46,7 +46,7 @@ class JudgeSelector:
     def __init__(
         self,
         *,
-        default_model: str = os.getenv("EVAL_JUDGE_MODEL", JudgeModel.GPT_4O.value),
+        default_model: str = os.getenv("EVAL_JUDGE_MODEL", JudgeModel.GPT_51_REASONING_MEDIUM.value),
         cache: JudgeCache | None = None,
     ) -> None:
         self.default_model = default_model

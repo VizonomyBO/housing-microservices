@@ -9,6 +9,7 @@ from typing import Any
 from datasets import Dataset
 from deepeval.metrics import GEval
 from deepeval.models import GPTModel
+from deepeval.models.llms import openai_model as deepeval_openai_model
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from langchain_openai import ChatOpenAI
 from ragas import evaluate
@@ -355,7 +356,23 @@ class MetricEngine:
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for eval metrics.")
         normalized = model_name
-        return GPTModel(model=normalized, api_key=api_key)
+        try:
+            valid_models = getattr(deepeval_openai_model, "valid_gpt_models", None)
+            if valid_models is not None and normalized not in valid_models:
+                try:
+                    valid_models.append(normalized)
+                except AttributeError:
+                    valid_models.add(normalized)
+        except Exception:
+            pass
+        cost_input = float(os.environ.get("EVAL_JUDGE_COST_INPUT", 0) or 0)
+        cost_output = float(os.environ.get("EVAL_JUDGE_COST_OUTPUT", 0) or 0)
+        return GPTModel(
+            model=normalized,
+            api_key=api_key,
+            cost_per_input_token=cost_input,
+            cost_per_output_token=cost_output,
+        )
 
     def _env_value_from_root(self, key: str) -> str | None:
         env_path = Path(__file__).resolve().parents[5] / ".env.prod"

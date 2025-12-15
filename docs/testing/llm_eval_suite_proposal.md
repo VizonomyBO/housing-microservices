@@ -6,13 +6,13 @@
 - Attach existing prod documents stored in AWS Postgres/S3, load conversation history, and evaluate responses with LLM-as-judge metrics.
 - Capture retrieval traces (chunk IDs, scores, latency) for metrics and write eval artifacts to JSON under `artifacts/evals/` (gitignored).
 - Treat eval runs as read-only at the product level: create real conversations/attachments but avoid custom in-memory stores or bypassed persistence layers.
-- Enable a focused metric stack (faithfulness, answer/context relevance, latency, grounding) with a single default judge model (`gpt-4o`) and an env override.
+- Enable a focused metric stack (faithfulness, answer/context relevance, latency, grounding) with a single default judge model (`gpt-5.1-reasoning-medium`) and an env override.
 
 ## Recommended Stack (grounded in research)
 - **DeepEval** for pytest-friendly LLM-as-judge metrics and typed test cases (30+ metrics, supports component/e2e eval) [deepeval docs](https://deepeval.com/docs/getting-started).
 - **Ragas** for retrieval-oriented metrics (faithfulness, answer relevancy, context precision/recall) with pytest CI mode [ragas pytest guide](https://docs.ragas.io/en/v0.3.0/howtos/applications/add_to_ci/).
 - **TruLens RAG triad** (context relevance, groundedness, answer relevance) as a conceptual baseline for custom metrics [trulens RAG triad](https://www.trulens.org/getting_started/core_concepts/rag_triad/).
-- **Judge models**: Default to **gpt-4o** for gating; allow overrides via `EVAL_JUDGE_MODEL` but keep the surface limited to OpenAI judges to avoid drift.
+- **Judge models**: Default to **gpt-5.1-reasoning-medium** for gating; allow overrides via `EVAL_JUDGE_MODEL` but keep the surface limited to OpenAI judges to avoid drift.
 
 ## Proposed Architecture & Abstractions
 - **Type-safe scenario models (Pydantic v2)**:
@@ -30,7 +30,7 @@
   - Ragas metrics for retrieval quality: context precision/recall, answer relevance, faithfulness using retrieved chunks vs. answer.
   - DeepEval metrics for factuality/hallucination, toxicity, coherence, and custom GEval rubrics per `Expectation`.
   - Custom deterministic metrics: latency budgets, citation coverage (% of sentences with citations), empty-context guard.
-  - Support per-scenario thresholds and judge model overrides; default to `gpt-4o` for gating with an env override when needed.
+  - Support per-scenario thresholds and judge model overrides; default to `gpt-5.1-reasoning-medium` for gating with an env override when needed.
 - **Result handling**:
   - Write `artifacts/evals/<timestamp>/<scenario>.json` containing input turns, retrieved chunks (IDs and text hashes), raw model outputs, metric scores, and LLM judge transcripts.
   - Optionally emit a single merged `summary.json` for dashboards; never write to application DB.
@@ -82,7 +82,7 @@ def test_eval_scenario(scenario):
 - **Retrieval**: context precision/recall, answer relevance, groundedness (TruLens triad), chunk coverage (% of cited chunks).
 - **Response quality**: faithfulness/hallucination (GEval/DeepEval), fluency/coherence, safety/toxicity.
 - **Operational**: latency budgets per scenario, token/price accounting, fallback/dedupe detection.
-- **Judges**: default `gpt-4o` with env override; keep the judge surface limited to OpenAI for consistency and cache calls locally to stabilize runs.
+- **Judges**: default `gpt-5.1-reasoning-medium` with env override; keep the judge surface limited to OpenAI for consistency and cache calls locally to stabilize runs.
 
 ## Execution Commands (proposed)
 - Local dev: `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
@@ -91,7 +91,7 @@ def test_eval_scenario(scenario):
 ## Current Eval Suite (implemented)
 - Dataset coverage: `datasets/housing_basics.yaml` (policy memo overview) and `datasets/reduced_e2e_smoke.yaml` (reduced E2E prompts: guardrails, District 9 plan, ledger aggregate, KPI trigger). Scenarios attach the prod-seeded reduced E2E docs: policy `fb400d68-3200-4e07-9231-cea9ee7163eb`, ledger `6806e86f-549f-4588-84de-2dd089a8f7da`, KPI `232d5d61-f083-448f-ae2f-2aa9b9a1a3c0` (content from `tests/data/reduced_e2e/*.md`).
 - Harness wiring: Real HTTP calls to the Agent API (`AGENT_BASE_URL`) using HS256 tokens from `AUTH_SHARED_SECRET`; creates conversations via `/v1/conversations`, bulk-attaches documents, then posts `/v1/chat` with `allow_stateless=false`. No stubs; requires `.env.prod`, `EVAL_USER_ID`, and OPENAI credentials.
-- Metrics: DeepEval GEval (faithfulness/relevance) + Ragas (context precision/recall) + deterministic citation check. Judge default = `gpt-4o` for all metrics (override via `EVAL_JUDGE_MODEL`); other judge models are intentionally not wired.
+- Metrics: DeepEval GEval (faithfulness/relevance) + Ragas (context precision/recall) + deterministic citation check. Judge default = `gpt-5.1-reasoning-medium` for all metrics (override via `EVAL_JUDGE_MODEL`); other judge models are intentionally not wired.
 - Artifacts: JSON under `tests/evals/artifacts/evals/<ts>/<scenario>/result.json` (gitignored) unless `EVAL_ARTIFACTS_DIR` is set.
 - Running locally/CI: `cd services/agent-api && uv run pytest tests/evals -m eval` after `source .env.prod` and `export EVAL_USER_ID=11111111-2222-3333-4444-555555555555`. Adds new conversations/attachments in prod; ensure credentials are present.
 
