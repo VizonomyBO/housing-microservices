@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -7,11 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
-from deepeval.metrics import GEval
-from deepeval.models import GPTModel
-from deepeval.models.llms import openai_model as deepeval_openai_model
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from ragas import evaluate
 from ragas.llms import LangchainLLMWrapper
 from ragas.metrics import context_precision, context_recall
@@ -86,29 +85,17 @@ class MetricEngine:
         question: str,
     ) -> MetricResult:
         judge_model = self.judge_selector.resolve(spec.judge, local=False)
-        metric = GEval(
-            name="faithfulness",
-            evaluation_params=[
-                LLMTestCaseParams.INPUT,
-                LLMTestCaseParams.ACTUAL_OUTPUT,
-                LLMTestCaseParams.CONTEXT,
-            ],
-            criteria=expectation.rubric,
-            model=self._build_deepeval_model(judge_model),
-            threshold=spec.threshold or 0.5,
+        score, reasoning = self._reasoning_score(
+            model=judge_model,
+            rubric=expectation.rubric,
+            question=question,
+            answer=response_text,
+            contexts=contexts,
         )
-        test_case = LLMTestCase(
-            input=question,
-            actual_output=response_text,
-            expected_output=expectation.expected_answer,
-            context=contexts,
-            retrieval_context=contexts,
-        )
-        metric.measure(test_case)
         decision = JudgeDecision(
             model=judge_model,
-            score=float(metric.score),
-            reasoning=getattr(metric, "reason", "") or "",
+            score=score,
+            reasoning=reasoning,
             raw={"criteria": expectation.rubric},
         )
         return MetricResult(
@@ -132,29 +119,17 @@ class MetricEngine:
         question: str,
     ) -> MetricResult:
         judge_model = self.judge_selector.resolve(spec.judge, local=False)
-        metric = GEval(
-            name="answer_relevance",
-            evaluation_params=[
-                LLMTestCaseParams.INPUT,
-                LLMTestCaseParams.ACTUAL_OUTPUT,
-                LLMTestCaseParams.CONTEXT,
-            ],
-            criteria=expectation.rubric,
-            model=self._build_deepeval_model(judge_model),
-            threshold=spec.threshold or 0.5,
+        score, reasoning = self._reasoning_score(
+            model=judge_model,
+            rubric=expectation.rubric,
+            question=question,
+            answer=response_text,
+            contexts=contexts,
         )
-        test_case = LLMTestCase(
-            input=question,
-            actual_output=response_text,
-            expected_output=expectation.expected_answer,
-            context=contexts,
-            retrieval_context=contexts,
-        )
-        metric.measure(test_case)
         decision = JudgeDecision(
             model=judge_model,
-            score=float(metric.score),
-            reasoning=getattr(metric, "reason", "") or "",
+            score=score,
+            reasoning=reasoning,
             raw={"criteria": expectation.rubric},
         )
         return MetricResult(
@@ -351,36 +326,59 @@ class MetricEngine:
         )
         return float(result[metric.name]) if metric.name in result else None
 
-    def _build_deepeval_model(self, model_name: str) -> GPTModel:
-        api_key = os.environ.get("OPENAI_API_KEY") or self._env_value_from_root("OPENAI_API_KEY")
+    def _reasoning_score(
+        self,
+        *,
+        model: str,
+        rubric: str,
+        question: str,
+        answer: str,
+        contexts: list[str],
+    ) -> tuple[float, str]:
+        client = self._openai_client()
+        reasoning_effort = os.environ.get("EVAL_REASONING_EFFORT", "medium")
+        prompt = (
+            "You are an evaluation judge. Score the candidate answer from 0 to 1 based on the rubric. "
+            "Return only a JSON object with fields 'score' (float 0-1) and 'reason' (short text)."
+        )
+        body = {
+            "model": model,
+            "input": [
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "rubric": rubric,
+                            "question": question,
+                            "contexts": contexts,
+                            "answer": answer,
+                        }
+                    ),
+                },
+            ],
+            "reasoning": {"effort": reasoning_effort},
+        }
+        response = client.responses.create(**body)
+        output_text = getattr(response, "output_text", None) or ""
+        try:
+            data = json.loads(output_text)
+            score = float(data.get("score", 0.0))
+            reason = str(data.get("reason", ""))
+        except Exception:
+            score = 0.0
+            reason = f"Unparseable judge output: {output_text}"
+        score = max(0.0, min(1.0, score))
+        return score, reason
+
+    def _openai_client(self) -> OpenAI:
+        env_path = Path(__file__).resolve().parents[5] / ".env.prod"
+        load_dotenv(env_path, override=False)
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for eval metrics.")
-        normalized = model_name
-        try:
-            valid_models = getattr(deepeval_openai_model, "valid_gpt_models", None)
-            if valid_models is not None and normalized not in valid_models:
-                try:
-                    valid_models.append(normalized)
-                except AttributeError:
-                    valid_models.add(normalized)
-        except Exception:
-            pass
-        cost_input = float(os.environ.get("EVAL_JUDGE_COST_INPUT", 0) or 0)
-        cost_output = float(os.environ.get("EVAL_JUDGE_COST_OUTPUT", 0) or 0)
-        return GPTModel(
-            model=normalized,
-            api_key=api_key,
-            cost_per_input_token=cost_input,
-            cost_per_output_token=cost_output,
-        )
-
-    def _env_value_from_root(self, key: str) -> str | None:
-        env_path = Path(__file__).resolve().parents[5] / ".env.prod"
-        if env_path.exists():
-            for line in env_path.read_text().splitlines():
-                if not line or line.strip().startswith("#") or "=" not in line:
-                    continue
-                name, _, value = line.partition("=")
-                if name.strip() == key:
-                    return value.strip().strip('"').strip("'")
-        return None
+        base_url = os.environ.get("OPENAI_BASE_URL")
+        kwargs: dict[str, Any] = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAI(**kwargs)
