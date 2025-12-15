@@ -36,6 +36,30 @@ resource "aws_sesv2_email_identity" "test_recipient" {
   email_identity = "xdaddisxd@gmail.com"
 }
 
+resource "aws_sesv2_email_identity" "ricardo_vizonomy" {
+  email_identity = "ricardo@vizonomy.com"
+}
+
+resource "aws_sesv2_email_identity" "catherine_worldbank" {
+  email_identity = "clynch@worldbank.org"
+}
+
+resource "aws_sesv2_email_identity" "sujung_worldbank" {
+  email_identity = "ssong5@worldbank.org"
+}
+
+resource "aws_sesv2_email_identity" "jisoo_worldbank" {
+  email_identity = "jlee52@worldbank.org"
+}
+
+resource "aws_sesv2_email_identity" "danilson_vizonomy" {
+  email_identity = "danilson@vizonomy.com"
+}
+
+resource "aws_sesv2_email_identity" "danilson_gmail" {
+  email_identity = "burgoadanilson@gmail.com"
+}
+
 resource "aws_iam_policy" "ses_send_email" {
   count = local.ses_enabled ? 1 : 0
 
