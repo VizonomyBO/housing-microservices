@@ -73,15 +73,15 @@ class EvalRunner:
         self.judge_selector = judge_selector or JudgeSelector()
         self.metric_engine = metric_engine or MetricEngine(judge_selector=self.judge_selector)
 
-    def run(self, scenario: EvalScenario, *, use_local_judge: bool = False) -> EvalResult:
+    def run(self, scenario: EvalScenario) -> EvalResult:
         telemetry = EvalTelemetrySink()
-        base_url = scenario.run_config.base_url or os.environ.get("AGENT_BASE_URL")
+        base_url = scenario.run_config.base_url or self._env_value("AGENT_BASE_URL")
         if not base_url:
             raise RuntimeError("EVAL_BASE_URL or AGENT_BASE_URL is required for eval runs.")
         token = self._mint_token(
             user_id=scenario.run_config.user_id,
             tenant_id=scenario.run_config.tenant_id,
-            secret=scenario.run_config.auth_shared_secret,
+            secret=scenario.run_config.auth_shared_secret or self._env_value("AUTH_SHARED_SECRET"),
         )
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -121,7 +121,6 @@ class EvalRunner:
                     telemetry=telemetry,
                     latency_ms=latency_ms,
                     specs=scenario.metrics,
-                    use_local_judge=use_local_judge,
                     contexts=contexts,
                     question=scenario.turns[-1].content,
                 )
@@ -174,6 +173,19 @@ class EvalRunner:
         if not conversation_id:
             raise RuntimeError("Conversation creation did not return an id.")
         return conversation_id
+
+    def _env_value(self, key: str) -> str | None:
+        if key in os.environ:
+            return os.environ.get(key)
+        env_path = Path(__file__).resolve().parents[5] / ".env.prod"
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                if not line or line.strip().startswith("#") or "=" not in line:
+                    continue
+                name, _, value = line.partition("=")
+                if name.strip() == key:
+                    return value.strip().strip('"').strip("'")
+        return None
 
     def _attach_documents(
         self, *, client: httpx.Client, conversation_id: str, scenario: EvalScenario

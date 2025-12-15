@@ -65,6 +65,8 @@ uv run pytest -n auto
 
 ## 5. Runtime Safety, Permissions & Tooling
 
+- **Golden rule:** Do not introduce stubs, fixtures, or mocking unless explicitly requested. Default to using real services, LLMs, and data paths with production-like configs.
+
 Ask the user before:
 - Modifying other packages (unless the task explicitly requires cross-package changes).
 - Adding heavy dependencies or changing deployment infrastructure outside the scope of the assigned task.

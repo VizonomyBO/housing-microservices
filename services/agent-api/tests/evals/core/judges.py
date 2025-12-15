@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -8,10 +9,7 @@ from typing import Any
 class JudgeModel(str, Enum):
     """Supported judge models."""
 
-    GPT_5_1_REASONING = "gpt-5.1-reasoning-medium"
-    GPT_4O_MINI = "gpt-4o-mini"
-    CLAUDE_3_5 = "claude-3-5-sonnet-latest"
-    OFFLINE_STUB = "offline-stub"
+    GPT_4O = "gpt-4o"
 
 
 @dataclass(slots=True)
@@ -48,35 +46,13 @@ class JudgeSelector:
     def __init__(
         self,
         *,
-        default_model: str = JudgeModel.GPT_5_1_REASONING.value,
-        local_default: str = JudgeModel.GPT_4O_MINI.value,
+        default_model: str = os.getenv("EVAL_JUDGE_MODEL", JudgeModel.GPT_4O.value),
         cache: JudgeCache | None = None,
     ) -> None:
         self.default_model = default_model
-        self.local_default = local_default
         self.cache = cache or JudgeCache()
 
     def resolve(self, override: str | None = None, local: bool = False) -> str:
         if override:
             return override
-        return self.local_default if local else self.default_model
-
-
-def offline_judge_score(
-    *, expected: str | None, actual: str, rubric: str, threshold: float | None
-) -> JudgeDecision:
-    """Deterministic offline judge used when LLM access is unavailable."""
-
-    score = 0.0
-    if expected:
-        overlap = len(set(actual.lower().split()) & set(expected.lower().split()))
-        score = overlap / max(len(expected.split()), 1)
-    if rubric and rubric.lower() in actual.lower():
-        score = max(score, 0.6)
-    reasoning = "offline stub judge"
-    return JudgeDecision(
-        model=JudgeModel.OFFLINE_STUB.value,
-        score=score,
-        reasoning=reasoning,
-        raw={"rubric": rubric, "expected": expected},
-    )
+        return self.default_model

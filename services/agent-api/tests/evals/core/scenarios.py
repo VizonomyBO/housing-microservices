@@ -33,7 +33,7 @@ class MetricSpec(BaseModel):
     )
     judge: str | None = Field(
         default=None,
-        description="Optional override for the judge model (e.g., gpt-5.1-reasoning-medium).",
+        description="Optional override for the judge model (defaults to gpt-4o).",
     )
     weight: float = Field(default=1.0, ge=0.0)
     timeout_seconds: float | None = Field(default=None, ge=0.0)
@@ -96,10 +96,12 @@ class EvalRunConfig(BaseModel):
     """Defaults for how an eval should be executed."""
 
     judge_model_default: str = Field(
-        default="gpt-5.1-reasoning-medium", description="Used for CI gating metrics."
+        default_factory=lambda: os.environ.get("EVAL_JUDGE_MODEL", "gpt-4o"),
+        description="Used for gating metrics (defaults to gpt-4o unless overridden).",
     )
     judge_model_local: str = Field(
-        default="gpt-4o-mini", description="Used for quick local iterations."
+        default_factory=lambda: os.environ.get("EVAL_JUDGE_MODEL", "gpt-4o"),
+        description="Used for local iterations; matches judge_model_default.",
     )
     base_url: str | None = Field(
         default_factory=lambda: os.environ.get("EVAL_BASE_URL") or os.environ.get("AGENT_BASE_URL"),

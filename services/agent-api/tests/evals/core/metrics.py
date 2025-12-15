@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
@@ -46,7 +48,6 @@ class MetricEngine:
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
         specs: Iterable[MetricSpec] | None = None,
-        use_local_judge: bool = False,
         contexts: list[str] | None = None,
         question: str | None = None,
     ) -> list[MetricResult]:
@@ -64,7 +65,6 @@ class MetricEngine:
                 expectation=expectation,
                 telemetry=telemetry,
                 latency_ms=latency_ms,
-                use_local_judge=use_local_judge,
                 contexts=contexts or [],
                 question=question or "",
             )
@@ -81,11 +81,10 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
-        judge_model = self.judge_selector.resolve(spec.judge, local=use_local_judge)
+        judge_model = self.judge_selector.resolve(spec.judge, local=False)
         metric = GEval(
             name="faithfulness",
             evaluation_params=[
@@ -94,7 +93,7 @@ class MetricEngine:
                 LLMTestCaseParams.CONTEXT,
             ],
             criteria=expectation.rubric,
-            model=GPTModel(model=judge_model),
+            model=self._build_deepeval_model(judge_model),
             threshold=spec.threshold or 0.5,
         )
         test_case = LLMTestCase(
@@ -128,11 +127,10 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
-        judge_model = self.judge_selector.resolve(spec.judge, local=use_local_judge)
+        judge_model = self.judge_selector.resolve(spec.judge, local=False)
         metric = GEval(
             name="answer_relevance",
             evaluation_params=[
@@ -141,7 +139,7 @@ class MetricEngine:
                 LLMTestCaseParams.CONTEXT,
             ],
             criteria=expectation.rubric,
-            model=GPTModel(model=judge_model),
+            model=self._build_deepeval_model(judge_model),
             threshold=spec.threshold or 0.5,
         )
         test_case = LLMTestCase(
@@ -175,7 +173,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -202,7 +199,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -229,7 +225,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -259,7 +254,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -290,7 +284,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -312,7 +305,6 @@ class MetricEngine:
         expectation: Expectation,
         telemetry: EvalTelemetrySink,
         latency_ms: float | None,
-        use_local_judge: bool,
         contexts: list[str],
         question: str,
     ) -> MetricResult:
@@ -357,3 +349,21 @@ class MetricEngine:
             },
         )
         return float(result[metric.name]) if metric.name in result else None
+
+    def _build_deepeval_model(self, model_name: str) -> GPTModel:
+        api_key = os.environ.get("OPENAI_API_KEY") or self._env_value_from_root("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for eval metrics.")
+        normalized = model_name
+        return GPTModel(model=normalized, api_key=api_key)
+
+    def _env_value_from_root(self, key: str) -> str | None:
+        env_path = Path(__file__).resolve().parents[5] / ".env.prod"
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                if not line or line.strip().startswith("#") or "=" not in line:
+                    continue
+                name, _, value = line.partition("=")
+                if name.strip() == key:
+                    return value.strip().strip('"').strip("'")
+        return None

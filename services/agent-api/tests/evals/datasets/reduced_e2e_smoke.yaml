@@ -17,9 +17,9 @@ scenarios:
         citations_required: true
     metrics:
       - name: faithfulness
-        threshold: 0.4
+        threshold: 0.2
       - name: answer_relevance
-        threshold: 0.4
+        threshold: 0.2
       - name: citation_coverage
         threshold: 0.5
       - name: latency

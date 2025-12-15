@@ -24,7 +24,7 @@ def _load_all_scenarios() -> list[EvalScenario]:
 @pytest.mark.parametrize("scenario", _load_all_scenarios(), ids=lambda s: s.name)
 def test_eval_scenario_smoke(scenario) -> None:
     runner = EvalRunner()
-    result = runner.run(scenario, use_local_judge=True)
+    result = runner.run(scenario)
     result.assert_thresholds()
     artifact_path = result.write_artifacts()
     assert artifact_path.exists(), "artifact path missing"
