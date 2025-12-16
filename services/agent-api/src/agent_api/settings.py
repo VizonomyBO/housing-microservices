@@ -32,6 +32,9 @@ class Settings:
     metrics_auth_scheme: str
     valkey_settings: ValkeySettings
     reduced_scope: ReducedScopeSettings
+    allow_in_memory_valkey: bool
+    allow_stub_language_detector: bool
+    allow_rate_limiter_bypass: bool
     openai_api_key: str | None
     voyage_api_key: str | None
     openai_chat_model: str
@@ -81,6 +84,9 @@ def load_settings() -> Settings:
         _env_str("VOYAGE_EMBEDDING_MODEL", default="voyage-3-large") or "voyage-3-large"
     )
     voyage_rerank_model = _env_str("VOYAGE_RERANK_MODEL", default="rerank-2.5") or "rerank-2.5"
+    allow_in_memory_valkey = _env_flag("ALLOW_IN_MEMORY_VALKEY", default=False)
+    allow_stub_language_detector = _env_flag("ALLOW_STUB_LANGUAGE_DETECTOR", default=False)
+    allow_rate_limiter_bypass = _env_flag("ALLOW_RATE_LIMITER_BYPASS", default=False)
 
     _validate_real_tooling_requirements(
         reduced_scope=reduced_scope,
@@ -154,6 +160,9 @@ def load_settings() -> Settings:
         metrics_auth_scheme=os.getenv("METRICS_AUTH_SCHEME", "Bearer"),
         valkey_settings=load_valkey_settings(),
         reduced_scope=reduced_scope,
+        allow_in_memory_valkey=allow_in_memory_valkey,
+        allow_stub_language_detector=allow_stub_language_detector,
+        allow_rate_limiter_bypass=allow_rate_limiter_bypass,
         openai_api_key=openai_api_key,
         voyage_api_key=voyage_api_key,
         openai_chat_model=openai_chat_model,

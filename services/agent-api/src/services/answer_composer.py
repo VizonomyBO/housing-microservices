@@ -7,7 +7,6 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agent_api.reduced_scope import ReducedScopeFlags
 from cache.response_serializer import CacheCitation
 from models.retrieval import AttachmentDocument, AttachmentScope
 from services.model_clients import (
@@ -17,6 +16,7 @@ from services.model_clients import (
 from subgraphs.informational.answer_synthesizer_node import (
     AnswerComposerProtocol,
     AnswerSynthesisContext,
+    AnswerSynthesisError,
     AnswerSynthesisResult,
 )
 
@@ -41,9 +41,9 @@ class RetrievedChunk:
 
 @dataclass(slots=True)
 class OpenAIAnswerComposer(AnswerComposerProtocol):
-    """LLM-backed composer with reduced-scope fallback."""
+    """LLM-backed composer that requires a configured OpenAI client."""
 
-    client: OpenAIChatClientProtocol | None
+    client: OpenAIChatClientProtocol
     temperature: float = 0.2
     max_output_tokens: int = 600
     max_retrieved_chunks: int = 8
@@ -51,10 +51,6 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
     rerank_top_k: int = 24
 
     async def compose(self, context: AnswerSynthesisContext) -> AnswerSynthesisResult:
-        flags: ReducedScopeFlags | None = context.reduced_scope_flags
-        if self.client is None or (flags and not flags.use_real_tools):
-            return self._fallback_response(context)
-
         hyde_rewrite = await self._hyde_rewrite(context.normalized_prompt)
         retrieved_chunks = await self._select_chunks(
             prompt=context.normalized_prompt,
@@ -62,6 +58,8 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             allowed_document_ids=context.allowed_document_ids,
             hyde_rewrite=hyde_rewrite,
         )
+        if not retrieved_chunks:
+            raise AnswerSynthesisError("No retrieval context available for answer composition")
         citations = self._citations_from_chunks(retrieved_chunks)
         chunk_ids = [citation.chunk_id for citation in citations]
 
@@ -74,15 +72,8 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             temperature=self.temperature,
             max_tokens=self.max_output_tokens,
         )
-        if not text or len(text.strip()) < 40:
-            text = await self._fallback_from_chunks(
-                prompt=context.normalized_prompt,
-                chunks=retrieved_chunks,
-                include_sql_marker=bool(getattr(context, "numerical_trace", None)),
-            )
-        if not citations:
-            citations = self._default_citations(context.attachment_scope)
-            chunk_ids = [citation.chunk_id for citation in citations]
+        if not text or not text.strip():
+            raise AnswerSynthesisError("LLM returned an empty response for answer synthesis")
         if citations:
             citation_lines = []
             for idx, citation in enumerate(citations, start=1):
@@ -93,12 +84,10 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
         metadata = {
             "model": "openai",
             "temperature": self.temperature,
-            "mode": "reduced_scope_real_tools",
+            "mode": "standard",
             "hyde_rewrite": hyde_rewrite,
         }
-        metadata["retrieved_snippets"] = [
-            (chunk.text or "")[:160] for chunk in retrieved_chunks
-        ]
+        metadata["retrieved_snippets"] = [(chunk.text or "")[:160] for chunk in retrieved_chunks]
         if cue_lines:
             metadata["context_cues"] = cue_lines
         if context.allowed_document_ids:
@@ -113,29 +102,9 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             quality_score=None,
         )
 
-    def _fallback_response(self, context: AnswerSynthesisContext) -> AnswerSynthesisResult:
-        summary = context.graph_summary.headline if context.graph_summary else None
-        answer_lines = [
-            "Text-only mode is active, so the assistant can only summarize uploaded documents.",
-            context.normalized_prompt,
-        ]
-        if summary:
-            answer_lines.append(f"Context summary: {summary}")
-        answer = "\n\n".join(answer_lines)
-        metadata = {"mode": "text_only"}
-        return AnswerSynthesisResult(
-            answer_text=answer,
-            citations=[],
-            chunk_ids=[],
-            model_metadata=metadata,
-            quality_score=0.1,
-        )
-
     async def _hyde_rewrite(self, question: str) -> str | None:
         """Generate a hypothetical answer to guide retrieval (HyDE-style)."""
 
-        if self.client is None:
-            return None
         hyde_prompt = (
             "Draft a concise hypothetical answer to guide retrieval. "
             "Include expected entities and any likely numbers/percentages from the question. "
@@ -195,8 +164,7 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
         cue_lines = self._guardrail_cues(chunks)
         if cue_lines:
             sections.append(
-                "Context cues to preserve (high priority):\n- "
-                + "\n- ".join(cue_lines[:6])
+                "Context cues to preserve (high priority):\n- " + "\n- ".join(cue_lines[:6])
             )
             sections.append(
                 "You must carry each context cue into the Facts and Answer sections with citations; do not drop or substitute them."
@@ -252,34 +220,6 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
         else:
             messages.append({"role": "user", "content": prompt})
         return messages
-
-    async def _fallback_from_chunks(
-        self,
-        *,
-        prompt: str,
-        chunks: Sequence[RetrievedChunk],
-        include_sql_marker: bool,
-    ) -> str:
-        """Build a minimal formatted answer when the model returns nothing."""
-
-        facts: list[str] = []
-        for idx, chunk in enumerate(chunks[:3], start=1):
-            snippet = (chunk.text or "").strip().splitlines()[0] if chunk.text else ""
-            snippet = snippet[:220] if snippet else ""
-            if not snippet:
-                continue
-            facts.append(f"- [c{idx}] {snippet}")
-        if not facts:
-            facts.append("- [c1] No context available; respond briefly.")
-        answer_lines = [
-            "Facts:",
-            *facts,
-            "Answer:",
-            "- Combine the policy guardrails with the ledger insights to propose two actions that use the documented funding and respect the stated limits. Add reporting cadence if mentioned. [c1][c2]",
-        ]
-        if include_sql_marker:
-            answer_lines[-1] = answer_lines[-1] + " [SQL_ROWS]"
-        return "\n".join(answer_lines)
 
     async def _select_chunks(
         self,
@@ -389,11 +329,7 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
             )
             coverage_bonus = self._coverage_bonus(set(candidate.coverage_tags))
             normalized_score = candidate.score / max_score
-            candidate.score = (
-                0.55 * normalized_score
-                + 0.25 * fused_rrf
-                + 0.2 * coverage_bonus
-            )
+            candidate.score = 0.55 * normalized_score + 0.25 * fused_rrf + 0.2 * coverage_bonus
 
         # Ensure we keep at least one chunk for policy, funding, and reporting cues when present.
         selected: list[RetrievedChunk] = []
@@ -462,11 +398,15 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
     def _coverage_tags(self, *, text: str, alias: str | None) -> set[str]:
         lower = text.lower()
         tags: set[str] = set()
-        if any(token in lower for token in ("fund", "budget", "$", "allocation", "ledger", "shift")):
+        if any(
+            token in lower for token in ("fund", "budget", "$", "allocation", "ledger", "shift")
+        ):
             tags.add("funding")
         if any(token in lower for token in ("report", "monthly", "quarter", "cadence", "update")):
             tags.add("reporting")
-        if any(token in lower for token in ("policy", "guardrail", "district", "eligibility", "cap")):
+        if any(
+            token in lower for token in ("policy", "guardrail", "district", "eligibility", "cap")
+        ):
             tags.add("policy")
         if alias:
             alias_lower = alias.lower()
@@ -502,7 +442,10 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
                 lower = line.lower()
                 if not re.search(r"\d", line):
                     continue
-                if any(token in lower for token in ("district", "cap", "voucher", "expansion", "report", "rent")):
+                if any(
+                    token in lower
+                    for token in ("district", "cap", "voucher", "expansion", "report", "rent")
+                ):
                     score = 0.0
                     if "expansion" in lower or "pilot" in lower:
                         score += 3.0
@@ -593,34 +536,6 @@ class OpenAIAnswerComposer(AnswerComposerProtocol):
     def _document_alias(self, doc: AttachmentDocument) -> str:
         metadata = doc.metadata or {}
         return metadata.get("document_alias") or doc.canonical_name or doc.document_id
-
-    def _default_citations(self, scope: AttachmentScope | None) -> list[CacheCitation]:
-        if scope is None:
-            return []
-        citations: list[CacheCitation] = []
-        for doc in scope.documents:
-            alias = self._document_alias(doc)
-            if doc.chunks:
-                chunk = doc.chunks[0]
-                chunk_id = chunk.chunk_id
-                snippet = chunk.text[:300]
-                page = chunk.page_number
-            else:
-                chunk_id = doc.document_id
-                snippet = f"See document {alias}"
-                page = None
-            citations.append(
-                CacheCitation(
-                    doc_id=doc.document_id,
-                    chunk_id=chunk_id,
-                    snippet=snippet,
-                    metadata={
-                        "document_alias": alias,
-                        "page": page,
-                    },
-                )
-            )
-        return citations
 
 
 __all__ = ["OpenAIAnswerComposer"]

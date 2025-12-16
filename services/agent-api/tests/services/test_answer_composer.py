@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import pytest
-
 from collections.abc import Sequence
+
+import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
 
 from models.retrieval import AttachmentDocument, AttachmentDocumentChunk, AttachmentScope
 from services.answer_composer import OpenAIAnswerComposer
@@ -13,14 +15,15 @@ from subgraphs.informational.answer_synthesizer_node import AnswerSynthesisConte
 
 class _StubChat(OpenAIChatClientProtocol):
     def __init__(self, responses: list[str]) -> None:
-        self.responses = list(responses)
         self.calls: list[list[dict[str, str]]] = []
+        self._model = GenericFakeChatModel(
+            messages=iter([AIMessage(content=resp) for resp in responses])
+        )
 
     async def complete(self, messages, *, temperature: float, max_tokens: int) -> str:
         self.calls.append(list(messages))
-        if self.responses:
-            return self.responses.pop(0)
-        return "stub-response"
+        message = self._model.invoke("ignored")
+        return str(message.content or "")
 
 
 class _StubReranker(VoyageRerankClientProtocol):

@@ -22,11 +22,7 @@ from agent_api.http.deps import (
     set_chat_runner,
 )
 from agent_api.http.errors import GatewayError, error_payload
-from agent_api.http.rate_limit import (
-    RateLimiterProtocol,
-    ReducedScopeRateLimiter,
-    ValkeyRateLimiterStub,
-)
+from agent_api.http.rate_limit import BypassRateLimiter, RateLimiterProtocol
 from agent_api.http.routes.attachments import router as attachments_router
 from agent_api.http.routes.chat import router as chat_router
 from agent_api.http.routes.conversations import router as conversations_router
@@ -52,11 +48,11 @@ logger = logging.getLogger(__name__)
 def create_app() -> FastAPI:
     settings = load_settings()
     if settings.reduced_scope.real_tooling_mode():
-        logger.info(
-            "Reduced scope real tooling mode enabled; Valkey + rate limiting shims are active"
-        )
+        logger.info("Reduced scope real tooling mode enabled; real dependencies are required")
     elif settings.reduced_scope.is_enabled():
-        logger.info("Reduced scope text-only mode enabled; demo shims remain in place")
+        logger.info(
+            "Reduced scope text-only mode enabled; cache/rate limit bypasses must be explicitly allowed"
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -67,6 +63,7 @@ def create_app() -> FastAPI:
             metrics=registry, namespace=settings.metrics_namespace
         )
         app.state.settings = settings
+
         app.state.reduced_scope = settings.reduced_scope
         app.state.rate_limiter = _build_rate_limiter(settings)
         app.state.aws_factory = AWSClientFactory(settings=settings)
@@ -76,15 +73,15 @@ def create_app() -> FastAPI:
             observability=app.state.cache_observability,
         )
 
-        language_detector = _build_language_detector()
-        openai_client = None
+        language_detector = _build_language_detector(settings=settings)
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required; no fallback chat model is available.")
+        openai_client = OpenAIChatClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_chat_model,
+        )
         voyage_client = None
         voyage_reranker = None
-        if settings.openai_api_key:
-            openai_client = OpenAIChatClient(
-                api_key=settings.openai_api_key,
-                model=settings.openai_chat_model,
-            )
         ingestion_pipeline = None
         if settings.reduced_scope.real_tooling_mode() and settings.voyage_api_key:
             voyage_client = VoyageEmbeddingClient(
@@ -220,6 +217,7 @@ def create_app() -> FastAPI:
     async def handle_unexpected_error(
         request: Request, exc: Exception
     ) -> JSONResponse:  # pragma: no cover - defensive
+        logger.exception("Unhandled exception in request", exc_info=exc)
         return JSONResponse(
             status_code=500,
             content=error_payload(
@@ -235,26 +233,24 @@ def create_app() -> FastAPI:
 async def _initialize_cache_client(
     *, settings: Settings, observability: CacheObservability
 ) -> ValkeyCacheClientProtocol:
-    if settings.reduced_scope.should_disable_valkey():
-        logger.info("Reduced scope enabled; using in-memory cache stub (see docs/epics/035.md)")
-        return InMemoryValkeyClient(
-            default_ttl_seconds=settings.valkey_settings.default_ttl_seconds
-        )
     valkey_settings = settings.valkey_settings
     if not valkey_settings.enabled:
-        logger.info("VALKEY_URL not set; using in-memory cache stub")
-        return InMemoryValkeyClient(default_ttl_seconds=valkey_settings.default_ttl_seconds)
-    try:
-        client = ValkeyAsyncClient.from_settings(
-            valkey_settings,
-            observability=observability,
+        if settings.allow_in_memory_valkey:
+            logger.warning(
+                "VALKEY_URL not set; using in-memory cache only because ALLOW_IN_MEMORY_VALKEY=1"
+            )
+            return InMemoryValkeyClient(default_ttl_seconds=valkey_settings.default_ttl_seconds)
+        raise RuntimeError(
+            "VALKEY_URL is required for cache operations. Set ALLOW_IN_MEMORY_VALKEY=1 only for "
+            "tests/dev when an in-memory cache is acceptable."
         )
-        sanitized = _sanitize_url(valkey_settings.url)
-        logger.info("Valkey client initialized for %s", sanitized)
-        return client
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        logger.warning("Falling back to in-memory cache because Valkey init failed: %s", exc)
-        return InMemoryValkeyClient(default_ttl_seconds=valkey_settings.default_ttl_seconds)
+    client = ValkeyAsyncClient.from_settings(
+        valkey_settings,
+        observability=observability,
+    )
+    sanitized = _sanitize_url(valkey_settings.url)
+    logger.info("Valkey client initialized for %s", sanitized)
+    return client
 
 
 def _sanitize_url(raw: str | None) -> str:
@@ -269,17 +265,26 @@ def _sanitize_url(raw: str | None) -> str:
 
 
 def _build_rate_limiter(settings: Settings) -> RateLimiterProtocol:
-    if settings.reduced_scope.should_disable_rate_limiter():
-        return ReducedScopeRateLimiter()
-    return ValkeyRateLimiterStub()
+    if settings.allow_rate_limiter_bypass:
+        logger.warning("Rate limiter bypass enabled via ALLOW_RATE_LIMITER_BYPASS=1")
+        return BypassRateLimiter()
+    raise RuntimeError(
+        "Rate limiter backend is not configured; set ALLOW_RATE_LIMITER_BYPASS=1 only for "
+        "tests/dev or provide a real limiter implementation."
+    )
 
 
-def _build_language_detector():
+def _build_language_detector(*, settings: Settings):
     try:
         return LinguaLanguageDetector()
-    except RuntimeError:
-        logger.warning("Lingua language detector unavailable; using stub")
-        return StubLanguageDetector(language_code="en", confidence=1.0)
+    except RuntimeError as exc:
+        if settings.allow_stub_language_detector:
+            logger.warning(
+                "Lingua language detector unavailable; using stub because "
+                "ALLOW_STUB_LANGUAGE_DETECTOR=1"
+            )
+            return StubLanguageDetector(language_code="en", confidence=1.0)
+        raise RuntimeError("Lingua language detector is required but unavailable") from exc
 
 
 __all__ = ["create_app"]

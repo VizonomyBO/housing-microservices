@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 class SesConfig:
     region: str
     source_email: str
-    configuration_set: Optional[str] = None
+    configuration_set: str | None = None
 
 
 class EmailClient:

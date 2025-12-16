@@ -1,8 +1,7 @@
-"""Valkey client stubs used by the retrieval service.
+"""Valkey cache protocol and the in-memory test double.
 
-Real Valkey wiring ships in Task 07/13; this module exposes interfaces +
-in-memory implementations so LangGraph nodes can be exercised in unit tests
-without opening network connections.
+The in-memory client is reserved for unit tests; production code must use
+ValkeyAsyncClient with a configured VALKEY_URL instead of silently stubbing.
 """
 
 from __future__ import annotations

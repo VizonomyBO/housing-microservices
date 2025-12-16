@@ -7,6 +7,10 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("METRICS_AUTH_TOKEN", "test-metrics-token")
+os.environ.setdefault("ALLOW_IN_MEMORY_VALKEY", "1")
+os.environ.setdefault("ALLOW_STUB_LANGUAGE_DETECTOR", "1")
+os.environ.setdefault("ALLOW_RATE_LIMITER_BYPASS", "1")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 
 pytest_plugins = ["shared_data_layer.testing.conftest"]
 

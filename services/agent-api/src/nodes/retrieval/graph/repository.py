@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import Select
 
+from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.graph.config import GraphRefreshSettings
 from nodes.retrieval.graph.models import (
     GraphEntityRecord,
@@ -87,7 +88,11 @@ class GraphDataRepository(GraphRepositoryProtocol):
         stmt = stmt.limit(settings.max_entities)
         rows = (await self.session.execute(stmt)).all()
         if not rows:
-            return await self._fallback_entities(filters, owner_uuid, doc_ids, settings)
+            raise NodeError(
+                code="GRAPH_ENTITIES_MISSING",
+                message="No hot-ranked graph entities available for the request",
+                details={"document_ids": [str(doc_id) for doc_id in doc_ids]},
+            )
         return [
             GraphEntityRecord(
                 entity_id=str(row.id),
@@ -99,44 +104,6 @@ class GraphDataRepository(GraphRepositoryProtocol):
                 country_code=row.country_code,
                 owner_user_id=str(row.owner_user_id) if row.owner_user_id else None,
                 hot_rank=row.hot_rank,
-                algo_version=row.algo_version,
-            )
-            for row in rows
-        ]
-
-    async def _fallback_entities(
-        self,
-        filters: GraphFilterContext,
-        owner_uuid: UUID | None,
-        doc_ids: list[UUID],
-        settings: GraphRefreshSettings,
-    ) -> list[GraphEntityRecord]:
-        stmt = select(
-            GraphEntity.id,
-            GraphEntity.name,
-            GraphEntity.description,
-            GraphEntity.score,
-            GraphEntity.labels,
-            GraphEntity.document_id,
-            GraphEntity.country_code,
-            GraphEntity.owner_user_id,
-            GraphEntity.algo_version,
-        )
-        stmt = self._apply_entity_filters(stmt, filters, owner_uuid, doc_ids)
-        stmt = stmt.order_by(GraphEntity.updated_at.desc())
-        stmt = stmt.limit(settings.max_entities)
-        rows = (await self.session.execute(stmt)).all()
-        return [
-            GraphEntityRecord(
-                entity_id=str(row.id),
-                label=row.name,
-                summary=row.description,
-                score=float(row.score) if row.score is not None else None,
-                document_ids=[str(row.document_id)] if row.document_id else [],
-                labels=list(row.labels or []),
-                country_code=row.country_code,
-                owner_user_id=str(row.owner_user_id) if row.owner_user_id else None,
-                hot_rank=None,
                 algo_version=row.algo_version,
             )
             for row in rows

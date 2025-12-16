@@ -41,6 +41,13 @@ async def _with_runtime(
     callback: Callable[[Settings, ReducedScopeWorkerRuntime], Awaitable[None]],
 ) -> None:
     settings = load_settings()
+    if not settings.reduced_scope.is_enabled():
+        typer.echo(
+            "Reduced scope runtime is disabled. Enable REDUCED_SCOPE_ENABLED=1 only for "
+            "demo/testing or use the production ingestion/export pipeline.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     database_url = _require_database(settings)
     DatabaseSessionManager.init(database_url)
     try:

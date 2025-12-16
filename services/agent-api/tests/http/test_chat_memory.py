@@ -6,6 +6,8 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
 
 from agent_api.http import create_app
 from agent_api.http.deps import get_chat_runner, set_chat_runner
@@ -13,6 +15,7 @@ from agent_api.http.schemas import ResponseMode
 from cache import InMemoryValkeyClient
 from nodes.retrieval.utils.language import StubLanguageDetector
 from services.langgraph_runner import LangGraphChatRunner
+from services.model_clients import OpenAIChatClientProtocol
 from telemetry import CacheObservability, MetricsRegistry
 
 
@@ -39,11 +42,20 @@ async def api_client(monkeypatch: pytest.MonkeyPatch, database_url: str):
 @pytest.fixture
 def recording_runner(monkeypatch: pytest.MonkeyPatch):
     metrics = MetricsRegistry()
+
+    class _FakeOpenAI(OpenAIChatClientProtocol):
+        def __init__(self) -> None:
+            self._model = GenericFakeChatModel(messages=iter([AIMessage(content="stub-response")]))
+
+        async def complete(self, messages, *, temperature: float, max_tokens: int) -> str:
+            message = self._model.invoke("ignored")
+            return str(message.content or "")
+
     runner = LangGraphChatRunner(
         cache_client=InMemoryValkeyClient(),
         cache_observability=CacheObservability(metrics=metrics, namespace="test"),
         language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
-        openai_client=None,
+        openai_client=_FakeOpenAI(),
         metrics=metrics,
     )
     seen_message_counts: list[int] = []

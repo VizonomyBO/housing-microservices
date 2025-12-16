@@ -1,4 +1,4 @@
-"""Rate limiter protocols + reduced-scope shims for the HTTP gateway."""
+"""Rate limiter protocols for the HTTP gateway (fail-fast by default)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class RateLimiterProtocol(Protocol):
 
 @dataclass(slots=True)
 class NullRateLimiter(RateLimiterProtocol):
-    """Default limiter that performs no enforcement."""
+    """Limiter that performs no enforcement."""
 
     policy_name: str = "disabled"
 
@@ -50,46 +50,23 @@ class NullRateLimiter(RateLimiterProtocol):
 
 
 @dataclass(slots=True)
-class ReducedScopeRateLimiter(NullRateLimiter):
-    """Limiter shim used when reduced scope disables Valkey/token buckets."""
+class BypassRateLimiter(NullRateLimiter):
+    """Limiter used only when an explicit bypass flag is provided."""
 
-    policy_name: str = "demo-mode"
-    metadata: dict[str, Any] = field(default_factory=lambda: {"rate_limit_disabled": True})
+    policy_name: str = "bypass"
+    metadata: dict[str, Any] = field(
+        default_factory=lambda: {"rate_limit_disabled": True, "configured": False}
+    )
 
     def response_headers(self) -> dict[str, str]:
-        return {"X-RateLimit-Policy": self.policy_name, "Viz-Demo-Mode": "rate-limit"}
+        return {"X-RateLimit-Policy": self.policy_name, "Viz-RateLimit-Bypass": "true"}
 
     def sse_metadata(self) -> dict[str, Any]:
         return dict(self.metadata)
 
 
-@dataclass(slots=True)
-class ValkeyRateLimiterStub(NullRateLimiter):
-    """Placeholder for the production Valkey-backed limiter."""
-
-    policy_name: str = "valkey"
-
-    async def acquire(
-        self,
-        *,
-        bucket: str,
-        tokens: int,
-        route: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        # TODO(epic-04): integrate Valkey-backed limiter once reduced scope lifts.
-        return None
-
-    def response_headers(self) -> dict[str, str]:
-        return {
-            "X-RateLimit-Policy": self.policy_name,
-            "Viz-Demo-Mode": "standard",
-        }
-
-
 __all__ = [
+    "BypassRateLimiter",
     "NullRateLimiter",
     "RateLimiterProtocol",
-    "ReducedScopeRateLimiter",
-    "ValkeyRateLimiterStub",
 ]

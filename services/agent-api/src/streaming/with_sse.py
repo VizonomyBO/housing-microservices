@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
 from streaming.events import (
     CacheEventPayload,
@@ -21,10 +21,10 @@ from streaming.events import (
 from streaming.sse_emitter import SSEEmitter
 from telemetry import get_metrics_registry
 
-if TYPE_CHECKING:  # pragma: no cover - import-time guard
+try:
     from guardrails import RouterRoute
-else:  # pragma: no cover - runtime fallback when guardrails not loaded
-    RouterRoute = Any  # type: ignore[misc, assignment]
+except Exception as exc:  # pragma: no cover - import-time failure should halt startup
+    raise RuntimeError("guardrails dependency is required for streaming instrumentation") from exc
 
 F = TypeVar("F", bound=Callable[..., Any])
 _METRICS = get_metrics_registry()
@@ -40,7 +40,7 @@ class LifecycleContext:
     sequence: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def set_route(self, route: str | RouterRoute | None) -> None:  # type: ignore[name-defined]
+    def set_route(self, route: str | RouterRoute | None) -> None:
         if route is None:
             return
         if hasattr(route, "value"):
@@ -87,7 +87,7 @@ def add_metadata(**entries: Any) -> None:
     span.add_metadata(**entries)
 
 
-def set_route(route: str | RouterRoute | None) -> None:  # type: ignore[name-defined]
+def set_route(route: str | RouterRoute | None) -> None:
     """Attach a router route string to the active span."""
 
     span = current_span()

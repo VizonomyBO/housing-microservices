@@ -13,10 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_api.auth import AuthTokenValidator, AuthValidationError
 from agent_api.aws.factory import AWSClientFactory
 from agent_api.http.context import AuthContext, RequestContext
-from agent_api.http.rate_limit import NullRateLimiter, RateLimiterProtocol
+from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
 from agent_api.settings import Settings, load_settings
-from cache import InMemoryValkeyClient, ValkeyCacheClientProtocol
+from cache import ValkeyCacheClientProtocol
 from services import (
     PillarService,
     ReducedScopeIngestionJobService,
@@ -93,9 +93,13 @@ def get_cache_client(request: Request) -> ValkeyCacheClientProtocol:
         client = getattr(request.app.state, "valkey_client", None)
         if client is not None:
             return client
-    if _CACHE_CLIENT_STATE["client"] is None:
-        _CACHE_CLIENT_STATE["client"] = InMemoryValkeyClient()
-    return _CACHE_CLIENT_STATE["client"]
+    if _CACHE_CLIENT_STATE["client"] is not None:
+        return _CACHE_CLIENT_STATE["client"]
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Cache client is not configured; set VALKEY_URL or explicitly enable "
+        "ALLOW_IN_MEMORY_VALKEY=1 for tests/dev.",
+    )
 
 
 def set_cache_client(client: ValkeyCacheClientProtocol) -> None:
@@ -107,9 +111,13 @@ def get_rate_limiter(request: Request) -> RateLimiterProtocol:
         limiter = getattr(request.app.state, "rate_limiter", None)
         if limiter is not None:
             return limiter
-    if _RATE_LIMITER_STATE["limiter"] is None:
-        _RATE_LIMITER_STATE["limiter"] = NullRateLimiter()
-    return _RATE_LIMITER_STATE["limiter"]
+    if _RATE_LIMITER_STATE["limiter"] is not None:
+        return _RATE_LIMITER_STATE["limiter"]
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Rate limiter is not configured; set ALLOW_RATE_LIMITER_BYPASS=1 for tests/dev "
+        "or configure a real limiter backend.",
+    )
 
 
 def set_rate_limiter(limiter: RateLimiterProtocol) -> None:
@@ -166,6 +174,12 @@ async def get_reduced_scope_runtime(
     settings: Annotated[Settings, Depends(get_settings)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ReducedScopeWorkerRuntime:
+    if not settings.reduced_scope.is_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reduced scope runtime is disabled; enable REDUCED_SCOPE_ENABLED=1 only for "
+            "demo/testing or use the production ingestion/export pipeline.",
+        )
     ingestion_service = ReducedScopeIngestionJobService(
         db_session,
         allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,

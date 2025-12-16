@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from langchain_core.messages import HumanMessage
 
+from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.graph.config import GraphSummarySettings
 from nodes.retrieval.graph_summarizer_node import GraphSummarizerNode
 from state.agent_state import (
@@ -103,11 +104,8 @@ async def test_summarizer_fallback_when_empty_context():
     state = _make_state(graph_context)
     node = GraphSummarizerNode()
 
-    result = await node(state)
-
-    summary: GraphSummary = result["graph_summary"]
-    assert summary.fallback_used is True
-    assert summary.headline == node.settings.fallback_headline
+    with pytest.raises(NodeError):
+        await node(state)
 
 
 def _make_state(graph_context: GraphContext) -> AgentState:

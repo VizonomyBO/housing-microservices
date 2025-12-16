@@ -39,9 +39,9 @@ class NumericFact:
 
 @dataclass(slots=True)
 class NumericFactExtractor:
-    """Extracts numeric facts from unstructured text using an LLM fallback."""
+    """Extracts numeric facts from unstructured text using an LLM."""
 
-    client: OpenAIChatClientProtocol | None
+    client: OpenAIChatClientProtocol
     temperature: float = 0.0
     max_tokens: int = 300
     max_chunks: int = 4
@@ -50,11 +50,12 @@ class NumericFactExtractor:
     async def extract(self, document: AttachmentDocument) -> list[NumericFact]:
         """Return numeric facts for the provided document.
 
-        Preference order: LLM JSON extraction per chunk when an OpenAI client is
-        available, falling back to regex-based parsing when the model is
-        unavailable or returns no structured rows.
+        Requires an OpenAI client; no regex fallback is performed when the LLM is
+        unavailable or returns an empty result.
         """
 
+        if self.client is None:
+            raise RuntimeError("OpenAI client is required for numeric fact extraction")
         facts: list[NumericFact] = []
         chunks = (document.chunks or [])[: self.max_chunks]
         for chunk in chunks:
@@ -63,23 +64,15 @@ class NumericFactExtractor:
                 continue
             if not self._has_numeric_signal(text):
                 continue
-            llm_facts: list[NumericFact] = []
-            if self.client is not None:
-                llm_facts = await self._extract_with_llm(document, chunk, text)
-            if not llm_facts:
-                llm_facts = self._extract_with_regex(document, chunk, text)
+            llm_facts: list[NumericFact] = await self._extract_with_llm(document, chunk, text)
             facts.extend(llm_facts)
             if len(facts) >= self.max_facts:
                 return facts[: self.max_facts]
 
-        if facts:
-            return facts[: self.max_facts]
+        if not facts:
+            raise RuntimeError("LLM returned no numeric facts for the provided document")
 
-        # Final fallback across combined text to avoid empty tables entirely.
-        combined_text = "\n".join(
-            chunk.text for chunk in chunks if getattr(chunk, "text", "").strip()
-        )
-        return self._extract_with_regex(document, None, combined_text)
+        return facts[: self.max_facts]
 
     async def _extract_with_llm(
         self,
@@ -108,12 +101,9 @@ class NumericFactExtractor:
                 ),
             },
         ]
-        try:
-            content = await self.client.complete(  # type: ignore[union-attr]
-                messages, temperature=self.temperature, max_tokens=self.max_tokens
-            )
-        except Exception:
-            return []
+        content = await self.client.complete(
+            messages, temperature=self.temperature, max_tokens=self.max_tokens
+        )
         return self._parse_llm_response(content, document, chunk)
 
     def _parse_llm_response(
@@ -128,10 +118,7 @@ class NumericFactExtractor:
             match = re.search(r"(\[.*\]|\{.*\})", cleaned, re.DOTALL)
             if match:
                 cleaned = match.group(1)
-        try:
-            parsed = json.loads(cleaned)
-        except json.JSONDecodeError:
-            return []
+        parsed = json.loads(cleaned)
 
         items: list[Any]
         if isinstance(parsed, dict) and isinstance(parsed.get("facts"), list):
@@ -139,7 +126,7 @@ class NumericFactExtractor:
         elif isinstance(parsed, list):
             items = parsed
         else:
-            return []
+            raise ValueError("Unexpected LLM numeric fact payload structure")
 
         facts: list[NumericFact] = []
         for item in items:
@@ -165,48 +152,6 @@ class NumericFactExtractor:
                     raw=raw[:240],
                 )
             )
-        return facts
-
-    def _extract_with_regex(
-        self,
-        document: AttachmentDocument,
-        chunk: AttachmentDocumentChunk | None,
-        text: str,
-    ) -> list[NumericFact]:
-        facts: list[NumericFact] = []
-        pattern = re.compile(
-            r"(?P<label>[^0-9]{0,120}?)(?P<number>[-+]?[0-9][0-9,]*(?:\.[0-9]+)?)(?P<suffix>[kKmMbB%]?)"
-        )
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            for match in pattern.finditer(line):
-                number = match.group("number")
-                suffix = match.group("suffix")
-                label = match.group("label").strip() or "value"
-                value = self._coerce_number(number)
-                if value is None:
-                    continue
-                if suffix.lower() == "k":
-                    value *= 1_000
-                elif suffix.lower() == "m":
-                    value *= 1_000_000
-                elif suffix.lower() == "b":
-                    value *= 1_000_000_000
-                unit = "%" if suffix == "%" else ""
-                facts.append(
-                    NumericFact(
-                        label=label[:120],
-                        value=value if value % 1 else int(value),
-                        unit=unit,
-                        source_doc=document.document_id,
-                        source_chunk=chunk.chunk_id if chunk else "",
-                        raw=raw_line.strip()[:240],
-                    )
-                )
-                if len(facts) >= self.max_facts:
-                    return facts
         return facts
 
     def _has_numeric_signal(self, text: str) -> bool:

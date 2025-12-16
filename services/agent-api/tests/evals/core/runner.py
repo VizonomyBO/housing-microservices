@@ -9,9 +9,9 @@ from typing import Any
 
 import httpx
 from authlib.jose import jwt
+from fastapi.testclient import TestClient
 
 from agent_api.http import create_app
-from fastapi.testclient import TestClient
 
 from .judges import JudgeSelector
 from .metrics import MetricEngine, MetricResult

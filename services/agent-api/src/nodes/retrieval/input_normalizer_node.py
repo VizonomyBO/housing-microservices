@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from models.retrieval import (
     AttachmentReference,
@@ -27,7 +28,6 @@ from repositories.conversation_scope_repository import (
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, lifecycle_span
-from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class InputNormalizerNode:
     language_detector: LanguageDetectorProtocol
     max_prompt_chars: int = 20000
 
-    async def __call__(
+    async def __call__(  # noqa: PLR0912
         self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
     ) -> dict[str, Any]:  # pragma: no cover - exercised via tests
         conversation_id = state.conversation_id
@@ -105,7 +105,7 @@ class InputNormalizerNode:
                         raise InputNormalizationError(
                             code="CONVERSATION_ID_INVALID",
                             message="Conversation id must be a UUID unless stateless mode is enabled",
-                        )
+                        ) from None
             if stateless_mode:
                 doc_map = self._stateless_doc_map()
                 warnings = []

@@ -152,8 +152,13 @@ class WorkflowPlannerNode:
     def _select_workflow(self, scope: AttachmentScope):
         if not scope.workflows:
             return None
-        # Prefer explicitly provided workflows first (sorted upstream), fallback to first entry.
-        return scope.workflows[0]
+        if len(scope.workflows) == 1:
+            return scope.workflows[0]
+        raise WorkflowPlanningError(
+            code="WORKFLOW_AMBIGUOUS",
+            message="Multiple workflows available but none selected; request must specify a workflow",
+            details={"workflow_ids": [wf.workflow_id for wf in scope.workflows]},
+        )
 
 
 __all__ = ["WorkflowPlannerNode"]

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.graph.config import GraphSummarySettings
 from state.agent_state import AgentState, GraphSummary, GraphSummarySection
 from streaming.sse_emitter import SSEEmitter
@@ -35,9 +36,11 @@ class GraphSummarizerNode:
             metadata={"scope_hash": getattr(graph_context, "scope_hash", None)},
         ):
             if not graph_context or (not graph_context.clusters and not graph_context.relations):
-                summary = self._fallback_summary(graph_context)
-                add_metadata(fallback=True)
-                return {"graph_summary": summary}
+                raise NodeError(
+                    code="GRAPH_CONTEXT_MISSING",
+                    message="Graph context is empty; cannot build summary",
+                    details={"scope_hash": getattr(graph_context, "scope_hash", None)},
+                )
 
             entity_section = self._build_entity_section(graph_context)
             relation_section = self._build_relation_section(graph_context)
@@ -49,9 +52,11 @@ class GraphSummarizerNode:
             total_tokens = sum(section.tokens for section in sections)
             sections, total_tokens = self._enforce_budget(sections, total_tokens)
             if not sections:
-                summary = self._fallback_summary(graph_context)
-                add_metadata(fallback=True)
-                return {"graph_summary": summary}
+                raise NodeError(
+                    code="GRAPH_SUMMARY_EMPTY",
+                    message="Graph context could not be summarized within the token budget",
+                    details={"scope_hash": getattr(graph_context, "scope_hash", None)},
+                )
 
             headline = self._build_headline(graph_context)
             summary = GraphSummary(
@@ -138,16 +143,6 @@ class GraphSummarizerNode:
             removed = trimmed.pop()
             tokens -= removed.tokens
         return trimmed, tokens
-
-    def _fallback_summary(self, graph_context) -> GraphSummary:
-        return GraphSummary(
-            headline=self.settings.fallback_headline,
-            sections=[],
-            total_tokens=0,
-            budget_tokens=self.settings.max_total_tokens,
-            fallback_used=True,
-            scope_hash=getattr(graph_context, "scope_hash", None),
-        )
 
     def _build_headline(self, graph_context) -> str:
         entity_count = len(graph_context.clusters)

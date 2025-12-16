@@ -3,6 +3,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
 
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.errors import GatewayError
@@ -24,6 +26,7 @@ from nodes.retrieval.exceptions import NodeError
 from nodes.retrieval.utils.language import StubLanguageDetector
 from nodes.router.router_node import RouterRoute
 from services.langgraph_runner import LangGraphChatRunner, RunnerContext
+from services.model_clients import OpenAIChatClientProtocol
 from services.numerical_fact_extractor import NumericFact
 from telemetry import CacheObservability, get_metrics_registry
 
@@ -34,6 +37,17 @@ class StubFactExtractor:
 
     async def extract(self, document):
         return self._facts
+
+
+class _StubOpenAI(OpenAIChatClientProtocol):
+    def __init__(self, responses: list[str]) -> None:
+        self._model = GenericFakeChatModel(
+            messages=iter([AIMessage(content=resp) for resp in responses])
+        )
+
+    async def complete(self, messages, *, temperature: float, max_tokens: int) -> str:
+        message = self._model.invoke("ignored")
+        return str(message.content or "")
 
 
 def _chat_request() -> ChatRequestContext:
@@ -57,7 +71,7 @@ async def test_runner_returns_answer(db_session):
         cache_client=InMemoryValkeyClient(),
         cache_observability=CacheObservability(metrics=metrics),
         language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
-        openai_client=None,
+        openai_client=_StubOpenAI(["stub-openai"]),
         metrics=metrics,
     )
     request = _chat_request()
@@ -97,7 +111,7 @@ async def test_runner_maps_node_errors(db_session):
         cache_client=InMemoryValkeyClient(),
         cache_observability=CacheObservability(metrics=metrics),
         language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
-        openai_client=None,
+        openai_client=_StubOpenAI(["stub-openai"]),
         metrics=metrics,
     )
     with (
@@ -156,12 +170,22 @@ def _normalized_prompt(text: str) -> NormalizedInput:
     )
 
 
-def _runner(metrics, *, fact_extractor=None):
+DEFAULT_TABLE_RESPONSE = (
+    '{"tables":[{"name":"kpi_table","columns":[{"name":"city","type":"text"},{"name":"score",'
+    '"type":"number"},{"name":"value","type":"number"}],"rows":[{"city":"Austin","score":90,'
+    '"value":90},{"city":"Houston","score":82,"value":82},{"city":"Dallas","score":81,'
+    '"value":81},{"city":"San Antonio","score":65,"value":65}]}]}'
+)
+DEFAULT_SQL_RESPONSE = "SELECT city, score, value FROM kpi_table_1"
+
+
+def _runner(metrics, *, fact_extractor=None, openai_responses: list[str] | None = None):
+    responses = openai_responses or [DEFAULT_TABLE_RESPONSE, DEFAULT_SQL_RESPONSE]
     return LangGraphChatRunner(
         cache_client=InMemoryValkeyClient(),
         cache_observability=CacheObservability(metrics=metrics),
         language_detector=StubLanguageDetector(language_code="en", confidence=1.0),
-        openai_client=None,
+        openai_client=_StubOpenAI(responses),
         metrics=metrics,
         fact_extractor=fact_extractor,
     )
@@ -207,19 +231,13 @@ async def test_builds_numerical_table_from_markdown(db_session):
 
 
 @pytest.mark.asyncio
-async def test_builds_table_from_fact_extractor(db_session):
+async def test_builds_table_from_single_row_response(db_session):
     metrics = get_metrics_registry()
-    facts = [
-        NumericFact(
-            label="evictions",
-            value=12,
-            unit="",
-            source_doc="doc-raw",
-            source_chunk="chunk-raw",
-            raw="evictions reached 12",
-        )
-    ]
-    runner = _runner(metrics, fact_extractor=StubFactExtractor(facts))
+    single_table_response = (
+        '{"tables":[{"name":"fact_table","columns":[{"name":"label","type":"text"},'
+        '{"name":"value","type":"number"}],"rows":[{"label":"evictions","value":12}]}]}'
+    )
+    runner = _runner(metrics, openai_responses=[single_table_response, DEFAULT_SQL_RESPONSE])
     document = AttachmentDocument(
         document_id="doc-raw",
         canonical_name="Ledger summary",
@@ -233,14 +251,17 @@ async def test_builds_table_from_fact_extractor(db_session):
     assert tables
     table = tables[0]
     assert table.row_count == 1
-    assert table.metadata.get("chunk_ids") == ["chunk-raw"]
     assert any(column.name == "value" for column in table.columns)
 
 
 @pytest.mark.asyncio
 async def test_numerical_pipeline_falls_back_when_no_tables(db_session):
     metrics = get_metrics_registry()
-    runner = _runner(metrics, fact_extractor=StubFactExtractor([]))
+    runner = _runner(
+        metrics,
+        fact_extractor=StubFactExtractor([]),
+        openai_responses=['{"tables": []}', "SELECT 1"],
+    )
     request = _chat_request()
     base_state = runner._build_initial_state(request)
     document = AttachmentDocument(
@@ -267,10 +288,8 @@ async def test_numerical_pipeline_falls_back_when_no_tables(db_session):
         reduced_scope=ReducedScopeFlags(),
     )
 
-    new_state = await runner._run_numerical_pipeline(state, context)
-
-    assert new_state.requires_sql is False
-    assert new_state.guardrail_findings
+    with pytest.raises(GatewayError):
+        await runner._run_numerical_pipeline(state, context)
 
 
 @pytest.mark.asyncio

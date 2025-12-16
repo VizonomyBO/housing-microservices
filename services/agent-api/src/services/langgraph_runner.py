@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
-import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,7 +23,6 @@ from agent_api.reduced_scope import ReducedScopeFlags
 from cache import ValkeyCacheClientProtocol
 from cache.response_serializer import CacheCitation
 from guardrails.engine import GuardrailEngine
-from guardrails.models import GuardrailCode, GuardrailSeverity, GuardrailViolation
 from models.retrieval import AttachmentDocument, ChatRequestContext
 from nodes.retrieval import AttachmentScopeLoaderNode, InputNormalizerNode
 from nodes.retrieval.exceptions import NodeError
@@ -54,7 +53,6 @@ from state.agent_state import (
 from streaming.sse_emitter import SSEEmitter
 from subgraphs.informational.answer_synthesizer_node import AnswerSynthesizerNode
 from subgraphs.numerical import (
-    PolarsExecutionError,
     PolarsExecutorNode,
     ResultValidatorNode,
     TextToSQLError,
@@ -107,7 +105,9 @@ class LangGraphChatRunner:
         self._router = RouterNode(guardrail_engine=GuardrailEngine())
         self._metrics = metrics
         if openai_client is None:
-            raise RuntimeError("OpenAI client is required for numerical planning; no fallback is allowed.")
+            raise RuntimeError(
+                "OpenAI client is required for numerical planning; no fallback is allowed."
+            )
         self._sql_generator = LlmSqlGenerator(client=openai_client)
         self._fact_extractor = fact_extractor or NumericFactExtractor(client=openai_client)
         self._summary_cache = summary_cache or ConversationSummaryCache(cache_client)
@@ -282,25 +282,6 @@ class LangGraphChatRunner:
         updates = await answer_node(state, sse_emitter=context.sse_emitter)
         return state.model_copy(update=updates)
 
-    def _numerical_fallback(self, state: AgentState, message: str) -> AgentState:
-        findings = list(state.guardrail_findings)
-        findings.append(
-            GuardrailViolation(
-                code=GuardrailCode.NUMERICAL_SQL,
-                severity=GuardrailSeverity.WARNING,
-                message=message,
-                details={"reason": "missing_tables"},
-            )
-        )
-        error_log = list(state.error_log)
-        error_log.append(message)
-        updates = {
-            "requires_sql": False,
-            "guardrail_findings": findings,
-            "error_log": error_log,
-        }
-        return state.model_copy(update=updates)
-
     async def _build_numerical_tables(self, state: AgentState) -> list[NumericalTable]:
         scope = state.attachment_scope
         if scope is None or not scope.documents:
@@ -317,7 +298,9 @@ class LangGraphChatRunner:
             tables.extend(llm_tables)
         return tables
 
-    async def _llm_tables_from_document(self, document: AttachmentDocument) -> list[NumericalTable]:
+    async def _llm_tables_from_document(  # noqa: PLR0912
+        self, document: AttachmentDocument
+    ) -> list[NumericalTable]:
         text_chunks = [chunk.text for chunk in (document.chunks or []) if chunk.text]
         if not text_chunks:
             return []
@@ -331,14 +314,20 @@ class LangGraphChatRunner:
             f"\nDocument excerpt:\n{prompt_text}"
         )
         messages = [
-            {"role": "system", "content": "You are a data engineer that emits only JSON for tables."},
+            {
+                "role": "system",
+                "content": "You are a data engineer that emits only JSON for tables.",
+            },
             {"role": "user", "content": user_prompt},
         ]
         raw = await self._openai_client.complete(messages, temperature=0.0, max_tokens=800)
         try:
             payload = json.loads(raw)
         except Exception:
-            logger.error("llm_table_parse_failed", extra={"document_id": document.document_id, "raw": raw[:500]})
+            logger.error(
+                "llm_table_parse_failed",
+                extra={"document_id": document.document_id, "raw": raw[:500]},
+            )
             return []
         tables_payload = payload.get("tables") if isinstance(payload, dict) else None
         if not tables_payload or not isinstance(tables_payload, list):
@@ -349,8 +338,8 @@ class LangGraphChatRunner:
         for idx, table_spec in enumerate(tables_payload):
             if not isinstance(table_spec, dict):
                 continue
-            name = table_spec.get("name") or document.canonical_name or f"table_{idx+1}"
-            alias = self._slugify(f"{name}_{idx+1}")
+            name = table_spec.get("name") or document.canonical_name or f"table_{idx + 1}"
+            alias = self._slugify(f"{name}_{idx + 1}")
             columns_spec = table_spec.get("columns") or []
             rows_spec = table_spec.get("rows") or []
             if not columns_spec or not isinstance(columns_spec, list):
@@ -364,7 +353,9 @@ class LangGraphChatRunner:
                 if not col_name:
                     continue
                 col_type_raw = (col.get("type") or "").lower()
-                col_type = "float" if col_type_raw in {"number", "numeric", "float", "integer"} else "text"
+                col_type = (
+                    "float" if col_type_raw in {"number", "numeric", "float", "integer"} else "text"
+                )
                 columns.append(NumericalTableColumn(name=col_name, data_type=col_type))
                 name_map[col_name] = col_name
             cleaned_rows: list[dict[str, Any]] = []
@@ -377,11 +368,9 @@ class LangGraphChatRunner:
                             target = name_map.get(slug, slug)
                             normalized_row[target] = value
                         cleaned_rows.append(normalized_row)
-            chunk_ids = [
-                chunk.chunk_id for chunk in (document.chunks or []) if chunk.chunk_id
-            ][:1]
+            chunk_ids = [chunk.chunk_id for chunk in (document.chunks or []) if chunk.chunk_id][:1]
             table = NumericalTable(
-                table_id=f"tbl-{document.document_id}-{idx+1}",
+                table_id=f"tbl-{document.document_id}-{idx + 1}",
                 table_name=name,
                 alias=alias,
                 columns=columns,
@@ -395,7 +384,11 @@ class LangGraphChatRunner:
             )
             logger.info(
                 "numerical.table.built",
-                extra={"alias": alias, "columns": [col.name for col in columns], "row_count": len(cleaned_rows)},
+                extra={
+                    "alias": alias,
+                    "columns": [col.name for col in columns],
+                    "row_count": len(cleaned_rows),
+                },
             )
             built.append(table)
         return built
@@ -668,11 +661,11 @@ class HeuristicSqlGenerator(SqlGeneratorProtocol):
             value_column = "value"
         else:
             numeric_columns = [
-                column.name
-                for column in request.table.columns
-                if column.data_type == "float"
+                column.name for column in request.table.columns if column.data_type == "float"
             ]
-            value_column = numeric_columns[0] if numeric_columns else (columns[0] if columns else "value")
+            value_column = (
+                numeric_columns[0] if numeric_columns else (columns[0] if columns else "value")
+            )
         select_clause = ", ".join(columns)
         query = f"SELECT {select_clause} FROM {alias}"
         threshold = self._extract_threshold(prompt)
@@ -752,9 +745,7 @@ class LlmSqlGenerator(SqlGeneratorProtocol):
                 continue
             sql = self._normalize_columns(sql, columns)
             if "value" in sql.lower():
-                error_note = (
-                    f"query referenced non-existent column 'value'; allowed columns: {', '.join(columns)}"
-                )
+                error_note = f"query referenced non-existent column 'value'; allowed columns: {', '.join(columns)}"
                 continue
             ok, invalid_cols = self._validate_columns(sql, columns, extras=[alias, table.table_id])
             if not ok:
@@ -766,9 +757,7 @@ class LlmSqlGenerator(SqlGeneratorProtocol):
                     )
                     if ok:
                         break
-                error_note = (
-                    f"query referenced invalid columns: {', '.join(invalid_cols)}; allowed: {', '.join(columns)}; last SQL: {sql}"
-                )
+                error_note = f"query referenced invalid columns: {', '.join(invalid_cols)}; allowed: {', '.join(columns)}; last SQL: {sql}"
                 sql = ""
                 continue
             break
@@ -782,7 +771,12 @@ class LlmSqlGenerator(SqlGeneratorProtocol):
             tables=[alias],
             columns={alias: columns},
             reasoning="llm_sql_planner",
-            table_specs=[{"table_id": table.table_id, "chunk_ids": table.metadata.get("chunk_ids", []) if table.metadata else []}],
+            table_specs=[
+                {
+                    "table_id": table.table_id,
+                    "chunk_ids": table.metadata.get("chunk_ids", []) if table.metadata else [],
+                }
+            ],
             sql_queries=[sql],
         )
 
@@ -835,7 +829,7 @@ class LlmSqlGenerator(SqlGeneratorProtocol):
             "having",
             "as",
         }
-        allowed_set = set(name.lower() for name in allowed)
+        allowed_set = {name.lower() for name in allowed}
         if extras:
             allowed_set.update(name.lower() for name in extras)
         invalid: list[str] = []

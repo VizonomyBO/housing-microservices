@@ -337,10 +337,10 @@ class AnswerSynthesizerNode:
             for key in _citation_keys(citation):
                 key_to_entry.setdefault(key, entry)
 
-        fallback_cursor = 0
+        if not doc_entries:
+            raise AnswerSynthesisError("No citations available to resolve inline document markers")
 
         def _replacement(match: re.Match[str]) -> str:
-            nonlocal fallback_cursor
             placeholder_token = match.group(0)
             placeholder = placeholder_token.strip("[]")
             if placeholder in placeholder_map:
@@ -350,8 +350,9 @@ class AnswerSynthesizerNode:
             normalized_placeholder = _normalized(placeholder)
             entry = key_to_entry.get(normalized_placeholder)
             if entry is None:
-                entry = doc_entries[fallback_cursor % len(doc_entries)]
-                fallback_cursor += 1
+                raise AnswerSynthesisError(
+                    f"Inline document placeholder {placeholder_token} does not match any citation"
+                )
 
             citation = entry["citation"]
             footnote = entry["footnote"]

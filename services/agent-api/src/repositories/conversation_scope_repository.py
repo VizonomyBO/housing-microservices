@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(slots=True)
 class ConversationDocumentRecord:
     """Lightweight projection of conversation_documents joined with documents."""
@@ -231,7 +232,7 @@ class ConversationScopeRepository:
             chunk_counts[doc_id] = chunk_counts.get(doc_id, 0) + 1
         return previews
 
-    async def hybrid_chunk_search(
+    async def hybrid_chunk_search(  # noqa: PLR0912
         self,
         *,
         query: str,
@@ -281,9 +282,9 @@ class ConversationScopeRepository:
                 "embedding_vec", pgvector_embedding, type_=Chunk.embedding.type
             )
             distance_expr = Chunk.embedding.cosine_distance(embedding_param)
-            vector_stmt = chunk_select.add_columns(
-                distance_expr.label("vector_score")
-            ).order_by(distance_expr)
+            vector_stmt = chunk_select.add_columns(distance_expr.label("vector_score")).order_by(
+                distance_expr
+            )
             try:
                 vector_rows = (
                     await self._session.execute(vector_stmt.limit(max(top_k * 3, 10)))
@@ -294,7 +295,7 @@ class ConversationScopeRepository:
                     exc.params,
                 )
                 raise
-            except Exception as exc:
+            except Exception:
                 logger.error(
                     "hybrid_chunk_search.vector_failed len=%s type=%s first_type=%s dims=%s",
                     len(normalized_embedding),

@@ -154,43 +154,54 @@ class PolarsExecutorNode:
         ctx = pl.SQLContext()
         prepared: dict[str, pl.LazyFrame] = {}
         for alias, frame in tables.items():
+            resolved_frame = frame
             try:
-                if isinstance(frame, pl.LazyFrame):
-                    frame = frame.collect()
-                cols = list(frame.columns) if hasattr(frame, "columns") else []
+                if isinstance(resolved_frame, pl.LazyFrame):
+                    resolved_frame = resolved_frame.collect()
             except Exception:
                 # best-effort; continue with original frame
-                pass
+                resolved_frame = frame
+            columns = list(resolved_frame.columns) if hasattr(resolved_frame, "columns") else []
             logger.info(
                 "numerical.polars.register",
-                extra={"alias": alias, "columns": list(frame.columns) if hasattr(frame, "columns") else []},
+                extra={
+                    "alias": alias,
+                    "columns": columns,
+                },
             )
-            prepared[alias] = frame
-            ctx.register(alias, frame)
+            prepared[alias] = resolved_frame
+            ctx.register(alias, resolved_frame)
         try:
             df = ctx.execute(query)
-        except pl.exceptions.ColumnNotFoundError as exc:
+        except pl.exceptions.ColumnNotFoundError:
             logger.error(
                 "numerical.polars.missing_value_column",
                 extra={
                     "query": query,
-                    "tables": {alias: list(frame.columns) if hasattr(frame, "columns") else [] for alias, frame in prepared.items()},
+                    "tables": {
+                        alias: list(frame.columns) if hasattr(frame, "columns") else []
+                        for alias, frame in prepared.items()
+                    },
                 },
             )
             # Retry once with an explicit value alias for the first numeric column or any column.
             ctx = pl.SQLContext()
             for alias, frame in prepared.items():
+                resolved_frame = frame
                 try:
-                    if isinstance(frame, pl.LazyFrame):
-                        frame = frame.collect()
-                    cols = list(frame.columns) if hasattr(frame, "columns") else []
+                    if isinstance(resolved_frame, pl.LazyFrame):
+                        resolved_frame = resolved_frame.collect()
                 except Exception:
-                    pass
+                    resolved_frame = frame
+                columns = list(resolved_frame.columns) if hasattr(resolved_frame, "columns") else []
                 logger.info(
                     "numerical.polars.register.retry",
-                    extra={"alias": alias, "columns": list(frame.columns) if hasattr(frame, "columns") else []},
+                    extra={
+                        "alias": alias,
+                        "columns": columns,
+                    },
                 )
-                ctx.register(alias, frame)
+                ctx.register(alias, resolved_frame)
             df = ctx.execute(query)
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
