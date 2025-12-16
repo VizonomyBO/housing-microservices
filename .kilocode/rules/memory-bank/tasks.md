@@ -35,3 +35,10 @@
   uv run pytest --end-to-end packages/shared_data_layer/tests/test_end_to_end_ingestion.py -n 0
   ```
 - **Coverage**: MarkItDown → chunk → embed → index → activation + KG rollups.
+
+## Fail-Fast Dependencies (Agent API)
+- OpenAI is required for chat/numerical flows; no text-only fallbacks. Set `OPENAI_API_KEY`.
+- Valkey is required unless `ALLOW_IN_MEMORY_VALKEY=1` (tests/dev only); guardrails must import at runtime.
+- Rate limiter must be real or explicitly bypassed via `ALLOW_RATE_LIMITER_BYPASS=1` (tests/dev only).
+- Lingua stub is allowed only with `ALLOW_STUB_LANGUAGE_DETECTOR=1` for tests; otherwise Lingua must load.
+- Reduced-scope runtime/CLI now refuse to run unless `REDUCED_SCOPE_ENABLED=1`; production paths should use real ingestion/exports.
