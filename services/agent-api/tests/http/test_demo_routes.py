@@ -9,6 +9,7 @@ from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent_api.http import create_app
+from tests.utils.auth import make_auth_header
 
 
 @asynccontextmanager
@@ -17,8 +18,11 @@ async def _lifespan(app):
         yield
 
 
+LONG_TEXT = " ".join(["Demo policy content"] * 80)
+
+
 def _auth_headers(user_id: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user_id}"}
+    return make_auth_header(user_id)
 
 
 @pytest.fixture
@@ -52,7 +56,7 @@ async def test_reset_conversation_removes_messages_and_attachments(
 
     doc_payload = {
         "document_name": "Policy Memo",
-        "content": "# Policy\ncontent",
+        "content": LONG_TEXT,
         "country_code": "USA",
         "language": "en",
         "metadata": {"document_alias": "DOC_POLICY"},
@@ -104,7 +108,7 @@ async def test_purge_documents_by_alias(api_client: AsyncClient) -> None:
     for alias in aliases:
         payload = {
             "document_name": alias,
-            "content": f"# {alias}\ntext",
+            "content": f"{alias} {LONG_TEXT}",
             "country_code": "USA",
             "language": "en",
             "metadata": {"document_alias": alias},
@@ -124,7 +128,7 @@ async def test_purge_documents_by_alias(api_client: AsyncClient) -> None:
 
     reupload_payload = {
         "document_name": aliases[0],
-        "content": f"# {aliases[0]}\ntext",
+        "content": f"{aliases[0]} {LONG_TEXT}",
         "country_code": "USA",
         "language": "en",
         "metadata": {"document_alias": aliases[0]},
@@ -141,7 +145,7 @@ async def test_purge_documents_by_alias(api_client: AsyncClient) -> None:
         "/v1/documents/upload",
         json={
             "document_name": aliases[1],
-            "content": f"# {aliases[1]}\ntext",
+            "content": f"{aliases[1]} {LONG_TEXT}",
             "country_code": "USA",
             "language": "en",
             "metadata": {"document_alias": aliases[1]},

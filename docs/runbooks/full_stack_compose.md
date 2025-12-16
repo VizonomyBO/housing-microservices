@@ -1,6 +1,6 @@
 # Full Stack Compose Runbook
 
-Use this guide when you need the entire microservices platform (auth, user, swagger, agent-api, LocalStack, Valkey, telemetry) running locally through the root `docker-compose.yml`.
+Use this guide when you need the entire microservices platform (auth, user, agent-api, LocalStack, Valkey, telemetry) running locally through the root `docker-compose.yml`.
 
 - Legacy note: `marker-service` has been removed. The full profile no longer includes it.
 
@@ -28,7 +28,7 @@ STACK_PROFILE=full \
 COMPOSE_PROFILES=full,ops \
   docker compose --profile full up --build
 ```
-- Services without profile entries (`postgres`, auth-service, user-service, swagger-service, localstack) start automatically.
+- Services without profile entries (`postgres`, auth-service, user-service, localstack) start automatically.
 - `db-init` runs once Postgres is healthy, ensuring both the reduced agent schema and auth DB migrations are applied.
 - `valkey` and `otel-collector` join because the `full` profile is active.
 - First builds can take several minutes; subsequent `up` commands reuse cached layers.

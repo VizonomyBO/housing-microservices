@@ -26,6 +26,9 @@ class Settings:
     aws_endpoint_url: str | None
     aws_access_key_id: str | None
     aws_secret_access_key: str | None
+    ingestion_base_url: str
+    ingestion_api_key: str | None
+    ingestion_request_timeout_seconds: float
     metrics_namespace: str
     metrics_auth_token: str | None
     metrics_auth_header: str
@@ -71,7 +74,6 @@ def load_settings() -> Settings:
         text_only_chunks=_env_flag("REDUCED_SCOPE_TEXT_ONLY_CHUNKS", default=True),
         disable_valkey=_env_flag("REDUCED_SCOPE_DISABLE_VALKEY", default=True),
         disable_rate_limiting=_env_flag("REDUCED_SCOPE_DISABLE_RATE_LIMITING", default=True),
-        emit_demo_events=_env_flag("REDUCED_SCOPE_EMIT_DEMO_EVENTS", default=True),
         allowed_chunk_types=coerce_allowed_chunk_types(
             os.getenv("REDUCED_SCOPE_ALLOWED_CHUNK_TYPES")
         ),
@@ -88,6 +90,13 @@ def load_settings() -> Settings:
     allow_stub_language_detector = _env_flag("ALLOW_STUB_LANGUAGE_DETECTOR", default=False)
     allow_rate_limiter_bypass = _env_flag("ALLOW_RATE_LIMITER_BYPASS", default=False)
 
+    _validate_required_secrets(
+        required_secrets={
+            "OPENAI_API_KEY": openai_api_key,
+            "VOYAGE_API_KEY": voyage_api_key,
+        },
+        allow_missing=False,
+    )
     _validate_real_tooling_requirements(
         reduced_scope=reduced_scope,
         required_secrets={
@@ -96,12 +105,16 @@ def load_settings() -> Settings:
         },
     )
 
-    stack_profile = (_env_str("STACK_PROFILE", default="reduced") or "reduced").lower()
+    stack_profile = (_env_str("STACK_PROFILE", default="prod") or "prod").lower()
     service_mode = (_env_str("SERVICE_MODE", default=stack_profile) or stack_profile).lower()
 
     localstack_host = _env_str("LOCALSTACK_HOST", default="localstack") or "localstack"
     localstack_edge_port = _env_int("LOCALSTACK_EDGE_PORT", default=4566)
-    use_localstack = _env_flag("USE_LOCALSTACK", default=True)
+    use_localstack = _env_flag("USE_LOCALSTACK", default=False)
+
+    ingestion_base_url = _env_str("INGEST_BASE_URL")
+    if not ingestion_base_url:
+        raise RuntimeError("INGEST_BASE_URL is required for ingestion; set it to the EC2 service URL.")
 
     auth_settings = AuthSettings(
         jwks_url=_env_str("AUTH_JWKS_URL"),
@@ -154,6 +167,9 @@ def load_settings() -> Settings:
         aws_secret_access_key=_coalesce_localstack_default(
             _env_str("AWS_SECRET_ACCESS_KEY"), use_localstack=use_localstack
         ),
+        ingestion_base_url=ingestion_base_url,
+        ingestion_api_key=_env_str("INGEST_UPLOAD_API_KEY"),
+        ingestion_request_timeout_seconds=_env_float("INGEST_REQUEST_TIMEOUT_SECONDS", default=30.0),
         metrics_namespace=os.getenv("METRICS_NAMESPACE", "agent-api"),
         metrics_auth_token=os.getenv("METRICS_AUTH_TOKEN"),
         metrics_auth_header=os.getenv("METRICS_AUTH_HEADER", "Authorization"),
@@ -264,6 +280,17 @@ def _validate_real_tooling_requirements(
             "Real tooling mode requested (REDUCED_SCOPE_USE_REAL_TOOLS=1) but missing secrets: "
             f"{joined}. Update your environment (.env/.env.local) before rerunning."
         )
+
+
+def _validate_required_secrets(
+    *, required_secrets: dict[str, str | None], allow_missing: bool = False
+) -> None:
+    if allow_missing:
+        return
+    missing = [name for name, value in required_secrets.items() if not value]
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise RuntimeError(f"Missing required secrets: {joined}. Provide them via environment.")
 
 
 __all__ = ["AuthSettings", "Settings", "load_settings"]

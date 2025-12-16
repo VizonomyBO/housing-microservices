@@ -166,40 +166,6 @@ services:
     networks:
       - microservices-net
 
-  swagger-service:
-    <<: *service-defaults
-    build:
-      <<: *monorepo-build
-      context: ./services/swagger-service
-      dockerfile: Dockerfile
-    profiles:
-      - ops
-      - full
-    container_name: swagger-service
-    ports:
-      - "${SWAGGER_SERVICE_PORT:-3000}:3000"
-    depends_on:
-      auth-service:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3000
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      ACCOUNT_SERVICE_URL: ${ACCOUNT_SERVICE_URL:-http://auth-service:5000}
-      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:5001}
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-    networks:
-      - microservices-net
-      - public-edge
-
   localstack:
     <<: *service-defaults
     image: localstack/localstack:latest

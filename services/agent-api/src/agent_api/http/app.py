@@ -16,11 +16,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from agent_api.auth import AuthTokenValidator
 from agent_api.aws.factory import AWSClientFactory
-from agent_api.http.deps import (
-    UnconfiguredChatRunner,
-    get_chat_runner,
-    set_chat_runner,
-)
+from agent_api.http.deps import UnconfiguredChatRunner, get_chat_runner, set_chat_runner
 from agent_api.http.errors import GatewayError, error_payload
 from agent_api.http.rate_limit import BypassRateLimiter, RateLimiterProtocol
 from agent_api.http.routes.attachments import router as attachments_router
@@ -33,7 +29,6 @@ from agent_api.http.routes.pillars import router as pillars_router
 from agent_api.settings import Settings, load_settings
 from cache import InMemoryValkeyClient, ValkeyAsyncClient, ValkeyCacheClientProtocol
 from nodes.retrieval.utils.language import LinguaLanguageDetector, StubLanguageDetector
-from services.ingestion_pipeline import MarkdownChunker, VoyageIngestionPipeline
 from services.langgraph_runner import LangGraphChatRunner
 from services.model_clients import (
     OpenAIChatClient,
@@ -76,27 +71,20 @@ def create_app() -> FastAPI:
         language_detector = _build_language_detector(settings=settings)
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is required; no fallback chat model is available.")
+        if not settings.voyage_api_key:
+            raise RuntimeError("VOYAGE_API_KEY is required; embedding and rerank clients have no fallback.")
         openai_client = OpenAIChatClient(
             api_key=settings.openai_api_key,
             model=settings.openai_chat_model,
         )
-        voyage_client = None
-        voyage_reranker = None
-        ingestion_pipeline = None
-        if settings.reduced_scope.real_tooling_mode() and settings.voyage_api_key:
-            voyage_client = VoyageEmbeddingClient(
-                api_key=settings.voyage_api_key,
-                model=settings.voyage_embedding_model,
-            )
-            voyage_reranker = VoyageRerankClient(
-                api_key=settings.voyage_api_key,
-                model=settings.voyage_rerank_model,
-            )
-            ingestion_pipeline = VoyageIngestionPipeline(
-                voyage_client=voyage_client,
-                chunker=MarkdownChunker(),
-            )
-        app.state.ingestion_pipeline = ingestion_pipeline
+        voyage_client = VoyageEmbeddingClient(
+            api_key=settings.voyage_api_key,
+            model=settings.voyage_embedding_model,
+        )
+        voyage_reranker = VoyageRerankClient(
+            api_key=settings.voyage_api_key,
+            model=settings.voyage_rerank_model,
+        )
 
         runner = LangGraphChatRunner(
             cache_client=app.state.valkey_client,

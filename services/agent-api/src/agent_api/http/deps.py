@@ -11,7 +11,6 @@ from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.auth import AuthTokenValidator, AuthValidationError
-from agent_api.aws.factory import AWSClientFactory
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
@@ -22,7 +21,6 @@ from services import (
     ReducedScopeIngestionJobService,
     ReducedScopeWorkerRuntime,
 )
-from services.ingestion_pipeline import VoyageIngestionPipeline
 from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
 
 _RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
@@ -30,7 +28,6 @@ _STREAM_SETTINGS = StreamSettings()
 _CACHE_CLIENT_STATE: dict[str, ValkeyCacheClientProtocol | None] = {"client": None}
 _RATE_LIMITER_STATE: dict[str, RateLimiterProtocol | None] = {"limiter": None}
 _AUTH_VALIDATOR_STATE: dict[str, AuthTokenValidator | None] = {"validator": None}
-_AWS_FACTORY_STATE: dict[str, AWSClientFactory | None] = {"factory": None}
 
 
 async def get_request_context(request: Request) -> RequestContext:
@@ -196,33 +193,12 @@ async def get_reduced_scope_runtime(
     )
 
 
-def get_document_ingestion_pipeline(request: Request) -> VoyageIngestionPipeline | None:
-    if not hasattr(request, "app"):
-        return None
-    return getattr(request.app.state, "ingestion_pipeline", None)
-
-
-def get_aws_client_factory(request: Request) -> AWSClientFactory:
-    if hasattr(request, "app"):
-        factory = getattr(request.app.state, "aws_factory", None)
-        if factory is None:
-            settings = get_settings(request)
-            factory = AWSClientFactory(settings=settings)
-            request.app.state.aws_factory = factory
-        return factory
-    if _AWS_FACTORY_STATE["factory"] is None:
-        _AWS_FACTORY_STATE["factory"] = AWSClientFactory(settings=load_settings())
-    return _AWS_FACTORY_STATE["factory"]
-
-
 __all__ = [
     "get_auth_context",
-    "get_aws_client_factory",
     "get_cache_client",
     "get_cache_observability",
     "get_chat_runner",
     "get_db_session",
-    "get_document_ingestion_pipeline",
     "get_metrics_registry_dep",
     "get_rate_limiter",
     "get_reduced_scope_runtime",

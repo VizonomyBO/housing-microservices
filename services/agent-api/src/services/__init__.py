@@ -15,12 +15,6 @@ from .conversation_service import (
 )
 from .conversation_summary_cache import ConversationSummaryCache
 from .demo_reset_service import ConversationResetResult, DemoResetService, DocumentPurgeResult
-from .document_upload_service import (
-    DocumentUploadData,
-    DocumentUploadResult,
-    DocumentUploadService,
-    DocumentUploadStatus,
-)
 from .ingestion_job_service import (
     IngestionJobSummary,
     ReducedScopeCapabilityError,
@@ -68,10 +62,6 @@ __all__ = [
     "DocumentListingService",
     "DocumentNotReadyError",
     "DocumentPurgeResult",
-    "DocumentUploadData",
-    "DocumentUploadResult",
-    "DocumentUploadService",
-    "DocumentUploadStatus",
     "IngestionCompletionPayload",
     "IngestionJobSummary",
     "PaginatedResult",

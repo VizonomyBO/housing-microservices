@@ -10,6 +10,7 @@ from shared_data_layer.db.models.documents import Document
 from shared_data_layer.testing.factories.documents import DocumentFactory
 
 from agent_api.http import create_app
+from tests.utils.auth import make_auth_header
 
 
 @asynccontextmanager
@@ -22,7 +23,7 @@ TEST_USER_ID = "22222222-2222-2222-2222-222222222222"
 
 
 def _auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TEST_USER_ID}"}
+    return make_auth_header(TEST_USER_ID)
 
 
 @pytest.fixture

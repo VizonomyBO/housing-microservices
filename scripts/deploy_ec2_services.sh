@@ -22,7 +22,6 @@ SSH_KEY=${SSH_KEY:-}
 ENV_FILE=${ENV_FILE:-}
 ACTION=deploy
 OPEN_PORTS=0
-INCLUDE_SWAGGER=0
 NO_SYNC=0
 NO_BUILD=0
 
@@ -44,8 +43,7 @@ Options:
   --ssh-key PATH           SSH key (default: ArchaaS terraform output if present).
   --ssh-port PORT          SSH port (default: 22).
   --action ACTION          deploy (default), stop, or restart.
-  --open-ports             Use AWS CLI to open required ports (8000,5001,5002,8085,3000) on the EC2 security group.
-  --include-swagger        Include swagger-service (port 3000).
+  --open-ports             Use AWS CLI to open required ports (8000,5001,5002,8085) on the EC2 security group.
   --no-sync                Skip rsync/tar upload (assumes code already on the host).
   --no-build               Skip docker compose build/pull (use existing images).
   -h, --help               Show this help text.
@@ -166,10 +164,6 @@ parse_args() {
         OPEN_PORTS=1
         shift
         ;;
-      --include-swagger)
-        INCLUDE_SWAGGER=1
-        shift
-        ;;
       --no-sync)
         NO_SYNC=1
         shift
@@ -223,7 +217,6 @@ open_security_group_ports() {
   [[ -n "$sg_id" && "$sg_id" != "None" ]] || die "Unable to resolve security group for instance $instance_id."
 
   local ports=("$AGENT_API_PORT" "$AUTH_SERVICE_PORT" "$USER_SERVICE_PORT" "$INGESTION_SERVICE_PORT")
-  [[ "$INCLUDE_SWAGGER" -eq 0 ]] || ports+=("$SWAGGER_SERVICE_PORT")
 
   # Add port 80 for nginx gateway
   ports+=("80")
@@ -383,7 +376,6 @@ DEPLOY_HOST="$REMOTE_HOST" \
 AGENT_PORT="$AGENT_API_PORT" \
 AUTH_PORT="$AUTH_SERVICE_PORT" \
 USER_PORT="$USER_SERVICE_PORT" \
-SWAGGER_PORT="$SWAGGER_SERVICE_PORT" \
 PG_PORT="$POSTGRES_PORT" \
 INGEST_PORT="$INGESTION_SERVICE_PORT" \
 python3 - <<'PY'
@@ -398,7 +390,6 @@ host = os.environ["DEPLOY_HOST"]
 agent_port = os.environ["AGENT_PORT"]
 auth_port = os.environ["AUTH_PORT"]
 user_port = os.environ["USER_PORT"]
-swagger_port = os.environ["SWAGGER_PORT"]
 pg_port = os.environ["PG_PORT"]
 ingest_port = os.environ["INGEST_PORT"]
 
@@ -426,7 +417,6 @@ overrides = {
     "AUTH_SERVICE_URL": f"http://{host}:{auth_port}",
     "USER_SERVICE_URL": f"http://{host}:{user_port}",
     "ACCOUNT_SERVICE_URL": f"http://{host}:{auth_port}",
-    "SWAGGER_BASE_URL": f"http://{host}:{swagger_port}",
     "INGEST_BASE_URL": f"http://{host}:{ingest_port}",
     "INGESTION_SERVICE_PORT": ingest_port,
     "INGESTION_SIGNING_SECRET": env.get("INGESTION_SIGNING_SECRET", env.get("JWT_SECRET_KEY", "")),
@@ -483,13 +473,11 @@ EOF
 
 compose_services() {
   local services="agent-api auth-service user-service ingestion-service nginx-gateway"
-  [[ "$INCLUDE_SWAGGER" -eq 0 ]] || services="$services swagger-service"
   echo "$services"
 }
 
 stop_conflicting_containers() {
   local ports=("$AGENT_API_PORT" "$AUTH_SERVICE_PORT" "$USER_SERVICE_PORT" "$INGESTION_SERVICE_PORT" "80")
-  [[ "$INCLUDE_SWAGGER" -eq 0 ]] || ports+=("$SWAGGER_SERVICE_PORT")
   log "Stopping containers already bound to: ${ports[*]}"
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$REMOTE_HOST" bash -s <<EOF
 set -euo pipefail
@@ -508,7 +496,6 @@ run_compose() {
   local services
   services=$(compose_services)
   local compose_cmd="sudo docker compose --env-file $REMOTE_ENV_FILE -f $REMOTE_COMPOSE_FILE"
-  [[ "$INCLUDE_SWAGGER" -eq 0 ]] || compose_cmd="$compose_cmd --profile swagger"
 
   case "$ACTION" in
     deploy)
@@ -542,7 +529,6 @@ main() {
   AUTH_SERVICE_PORT=$(read_env_value "$ENV_FILE" AUTH_SERVICE_PORT "5001")
   USER_SERVICE_PORT=$(read_env_value "$ENV_FILE" USER_SERVICE_PORT "5002")
   INGESTION_SERVICE_PORT=$(read_env_value "$ENV_FILE" INGESTION_SERVICE_PORT "8085")
-  SWAGGER_SERVICE_PORT=$(read_env_value "$ENV_FILE" SWAGGER_SERVICE_PORT "3000")
   POSTGRES_PORT=$(read_env_value "$ENV_FILE" POSTGRES_PORT "5432")
 
   SSH_OPTS=(-o "StrictHostKeyChecking=no" -p "$SSH_PORT")
@@ -552,7 +538,7 @@ main() {
   log "Using env file: $ENV_FILE"
   log "Resolved host: $REMOTE_HOST"
   log "SSH user/key: $SSH_USER ${SSH_KEY:-<default>}"
-  log "Ports → agent-api:$AGENT_API_PORT auth:$AUTH_SERVICE_PORT user:$USER_SERVICE_PORT ingestion:$INGESTION_SERVICE_PORT swagger:$SWAGGER_SERVICE_PORT"
+  log "Ports → agent-api:$AGENT_API_PORT auth:$AUTH_SERVICE_PORT user:$USER_SERVICE_PORT ingestion:$INGESTION_SERVICE_PORT"
 
   open_security_group_ports
   ensure_remote_prereqs
@@ -569,7 +555,6 @@ main() {
   log "  curl -fsS http://$REMOTE_HOST:$USER_SERVICE_PORT/v1/health"
   log "  curl -fsS http://$REMOTE_HOST:$AGENT_API_PORT/health"
   log "  curl -fsS http://$REMOTE_HOST:$INGESTION_SERVICE_PORT/health"
-  [[ "$INCLUDE_SWAGGER" -eq 0 ]] || log "  curl -fsS http://$REMOTE_HOST:$SWAGGER_SERVICE_PORT/health"
   log "Frontend: http://$REMOTE_HOST/"
 }
 

@@ -23,9 +23,6 @@ logs: ## View logs from all services
 logs-account: ## View logs from account service
 	docker-compose logs -f auth-service
 
-logs-swagger: ## View logs from swagger service
-	docker-compose logs -f swagger-service
-
 logs-user: ## View logs from user service
 	docker-compose logs -f user-service
 
@@ -41,10 +38,7 @@ restart: ## Restart all services
 ps: ## Show running containers
 	docker-compose ps
 
-health: ## Check health of all services
-	@echo "Checking Swagger Aggregator..."
-	@curl -s http://localhost:3000/health | python -m json.tool || echo "Swagger service not responding"
-	@echo ""
+health: ## Check health of key services
 	@echo "Checking Account Service..."
 	@curl -s http://localhost:5000/health | python -m json.tool || echo "Account service not responding"
 
@@ -54,23 +48,14 @@ reduced-e2e-smoke: ## Launch reduced stack and run the E2E smoke CLI
 status: ## Show detailed system status
 	@curl -s http://localhost:3000/api/status | python -m json.tool
 
-refresh: ## Force refresh all service specs
-	@curl -s -X POST http://localhost:3000/api/refresh | python -m json.tool
-
 dev-account: ## Run account service in development mode (local)
 	cd services/auth-service && python run.py
-
-dev-swagger: ## Run swagger service in development mode (local)
-	cd services/swagger-service && npm run dev
 
 dev-user: ## Run user service in development mode (local)
 	cd services/user-service && python run.py
 
 install-account: ## Install account service dependencies (local)
 	cd services/auth-service && pip install -r requirements.txt
-
-install-swagger: ## Install swagger service dependencies (local)
-	cd services/swagger-service && npm install
 
 install-user: ## Install user service dependencies (local)
 	cd services/user-service && pip install -r requirements.txt
@@ -87,9 +72,6 @@ test-login: ## Test user login
 		-d '{"login":"test@example.com","password":"TestPass123!"}' \
 		| python -m json.tool
 
-open-docs: ## Open API documentation in browser
-	@open http://localhost:3000/docs || xdg-open http://localhost:3000/docs || echo "Open http://localhost:3000/docs in your browser"
-
 open-app: ## Open application landing page in browser
 	@open http://localhost:3000 || xdg-open http://localhost:3000 || echo "Open http://localhost:3000 in your browser"
 
@@ -97,7 +79,7 @@ open-app: ## Open application landing page in browser
 # Testing and Quality Commands
 # ============================================
 
-test: test-account test-swagger test-user ## Run all tests locally
+test: test-account test-user ## Run all tests locally
 
 test-account: ## Run account service tests locally
 	@if [ ! -d "services/auth-service/.venv" ]; then \
@@ -112,9 +94,6 @@ test-account: ## Run account service tests locally
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi
-
-test-swagger: ## Run swagger service tests locally
-	cd services/swagger-service && npm test
 
 test-user: ## Run user service tests locally
 	@if [ ! -d "services/user-service/.venv" ]; then \
@@ -199,7 +178,6 @@ test-coverage: ## Run tests with coverage reports
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi
-	cd services/swagger-service && npm run test:coverage || true
 	@if [ -d "services/user-service/.venv" ]; then \
 		cd services/user-service && \
 		if [ -f ".venv/bin/python" ]; then \
@@ -211,7 +189,6 @@ test-coverage: ## Run tests with coverage reports
 	@echo "\n==> Coverage reports generated:"
 	@echo "    Account Service: services/auth-service/htmlcov/index.html"
 	@echo "    User Service: services/user-service/htmlcov/index.html"
-	@echo "    Swagger Service: services/swagger-service/coverage/lcov-report/index.html"
 
 test-docker: ## Run tests in Docker containers
 	docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from auth-service-test
@@ -219,11 +196,7 @@ test-docker: ## Run tests in Docker containers
 test-docker-account: ## Run account service tests in Docker
 	docker-compose -f docker-compose.test.yml up --build auth-service-test test-postgres --abort-on-container-exit
 
-test-docker-swagger: ## Run swagger service tests in Docker
-	docker-compose -f docker-compose.test.yml up --build swagger-service-test --abort-on-container-exit
-
-# Linting commands
-lint: lint-account lint-swagger lint-user ## Run all linting
+lint: lint-account lint-user ## Run all linting
 
 lint-account: ## Lint account service
 	@echo "==> Linting Account Service..."
@@ -243,11 +216,6 @@ lint-account: ## Lint account service
 		$$PYTHON_CMD -m ruff check . && \
 		$$PYTHON_CMD -m mypy app/
 
-lint-swagger: ## Lint swagger service
-	@echo "==> Linting Swagger Service..."
-	cd services/swagger-service && npm run lint
-	cd services/swagger-service && npm run format:check
-
 lint-user: ## Lint user service
 	@echo "==> Linting User Service..."
 	@if [ ! -d "services/user-service/.venv" ]; then \
@@ -266,7 +234,7 @@ lint-user: ## Lint user service
 		$$PYTHON_CMD -m ruff check . && \
 		$$PYTHON_CMD -m mypy app/
 
-lint-fix: lint-fix-account lint-fix-swagger lint-fix-user ## Fix linting issues
+lint-fix: lint-fix-account lint-fix-user ## Fix linting issues
 
 lint-fix-account: ## Fix account service linting issues
 	@if [ ! -d "services/auth-service/.venv" ]; then \
@@ -283,10 +251,6 @@ lint-fix-account: ## Fix account service linting issues
 		fi && \
 		$$PYTHON_CMD -m ruff format . && \
 		$$PYTHON_CMD -m ruff check --fix .
-
-lint-fix-swagger: ## Fix swagger service linting issues
-	cd services/swagger-service && npm run lint:fix
-	cd services/swagger-service && npm run format
 
 lint-fix-user: ## Fix user service linting issues
 	@if [ ! -d "services/user-service/.venv" ]; then \
@@ -321,8 +285,6 @@ format: ## Auto-format all code
 		fi && \
 		$$PYTHON_CMD -m ruff format . && \
 		$$PYTHON_CMD -m ruff check --fix .
-	@echo "==> Formatting Swagger Service..."
-	cd services/swagger-service && npm run format
 	@echo "==> Formatting User Service..."
 	@if [ -d "services/user-service/.venv" ]; then \
 		cd services/user-service && \
@@ -352,8 +314,6 @@ type-check: ## Run type checking
 		else \
 			echo "Error: Could not find Python in virtual environment"; exit 1; \
 		fi
-	@echo "==> Type checking Swagger Service..."
-	cd services/swagger-service && npm run type-check
 	@echo "==> Type checking User Service..."
 	@if [ -d "services/user-service/.venv" ]; then \
 		cd services/user-service && \
@@ -366,9 +326,6 @@ type-check: ## Run type checking
 
 # Quality gates
 quality: lint type-check test-coverage ## Run all quality checks
-
-# Install dependencies
-install-deps: install-account install-swagger ## Install all dependencies
 
 install-account-dev: ## Install account service development dependencies
 	@echo "==> Setting up Account Service virtual environment..."
@@ -420,9 +377,6 @@ install-account-dev: ## Install account service development dependencies
 			.venv/Scripts/python.exe -m pip install -r requirements/test.txt || true; \
 		fi
 	@echo "==> Account Service dependencies installed!"
-
-install-swagger-dev: ## Install swagger service development dependencies
-	cd services/swagger-service && npm install
 
 install-user-dev: ## Install user service development dependencies
 	@echo "==> Setting up User Service virtual environment..."
@@ -483,8 +437,6 @@ clean-test: ## Clean test artifacts and coverage reports
 	rm -rf services/user-service/htmlcov
 	rm -rf services/user-service/.coverage
 	rm -rf services/user-service/.pytest_cache
-	rm -rf services/swagger-service/coverage
-	rm -rf services/swagger-service/.jest_cache
 	@echo "==> Test artifacts cleaned"
 
 clean-all: clean clean-test ## Clean everything including test artifacts

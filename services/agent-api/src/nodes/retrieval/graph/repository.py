@@ -197,7 +197,7 @@ class GraphDataRepository(GraphRepositoryProtocol):
             stmt = stmt.where(GraphEntity.country_code.in_(filters.country_codes))
         if doc_ids:
             stmt = stmt.where(GraphEntity.document_id.in_(doc_ids))
-        if filters.intent_tags:
+        if filters.intent_tags and not doc_ids:
             stmt = stmt.where(GraphEntity.labels.op("&&")(list(filters.intent_tags)))
         stmt = stmt.where(_owner_clause(GraphEntity, owner_uuid))
         return stmt
@@ -223,7 +223,7 @@ class GraphDataRepository(GraphRepositoryProtocol):
             )
         stmt = stmt.where(_owner_clause(source_alias, owner_uuid))
         stmt = stmt.where(_owner_clause(target_alias, owner_uuid))
-        if filters.intent_tags:
+        if filters.intent_tags and not doc_ids:
             stmt = stmt.where(
                 or_(
                     source_alias.labels.op("&&")(list(filters.intent_tags)),

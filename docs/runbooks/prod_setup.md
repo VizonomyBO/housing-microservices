@@ -46,7 +46,7 @@ Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && 
     }
     ```
     Expect `requires_sql: true` for KPI/ledger prompts and nodes `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`.
-- **Ingestion FastAPI service (INGEST_BASE_URL, port 8085)**
+- **Ingestion FastAPI service (INGEST_BASE_URL, port 8085)** — only upload path; Agent API no longer ingests directly.
   - Presign: `POST /v1/documents/upload` with JSON:
     ```json
     {
@@ -72,7 +72,7 @@ What it does:
 - Runs `scripts/provision_remote_stack.sh` (Terraform `-chdir=ArchaaS apply -var-file=terraform.v2.tfvars` in workspace `prod`, optional `--destroy-first` if passed).
 - Updates `POSTGRES_HOST` in the env with the latest EC2 IP, reruns `scripts/setup_remote_databases.sh`.
 - Calls `scripts/deploy_ec2_services.sh` to rsync code, use `.env.prod` on the host, open ports (if `--open-ports`), and start `agent-api`, `auth-service`, `user-service` via `docker-compose.ec2.yml`.
-Flags: `--skip-terraform`, `--skip-deploy`, `--include-swagger`, `--no-build`, `--no-sync`, `--tfvars <file>`, `--workspace <name>`.
+Flags: `--skip-terraform`, `--skip-deploy`, `--no-build`, `--no-sync`, `--tfvars <file>`, `--workspace <name>`.
 
 ## 5) AWS curl walkthrough (manual)
 The commands below run entirely against the live AWS endpoints and the new ingestion FastAPI service on EC2. Use fresh copies of the sample PDFs to bypass content-hash dedupe.

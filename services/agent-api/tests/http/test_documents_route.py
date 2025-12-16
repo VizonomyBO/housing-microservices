@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from agent_api.http import create_app
+from tests.utils.auth import make_auth_header
 
 
 @asynccontextmanager
@@ -16,10 +17,11 @@ async def _lifespan(app):
 
 
 TEST_USER_ID = "33333333-3333-3333-3333-333333333333"
+LONG_TEXT = " ".join(["Housing policy detail"] * 80)
 
 
 def _auth_headers(user_id: str = TEST_USER_ID) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user_id}"}
+    return make_auth_header(user_id)
 
 
 @pytest.fixture
@@ -37,13 +39,13 @@ async def test_upload_document_creates_rows(api_client: AsyncClient) -> None:
     suffix = uuid4().hex
     payload = {
         "document_name": f"FY24 Fiscal Report {suffix}",
-        "content": "# Heading\nSome demo content",
+        "content": LONG_TEXT,
         "country_code": "LBR",
         "language": "en",
         "tags": ["finance"],
     }
     response = await api_client.post("/v1/documents/upload", json=payload, headers=_auth_headers())
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
     data = response.json()
     assert data["status"] == "COMPLETED"
     assert data["document_id"]
@@ -55,15 +57,15 @@ async def test_upload_document_dedupes_existing(api_client: AsyncClient) -> None
     suffix = uuid4().hex
     payload = {
         "document_name": f"FY24 Dedup Report {suffix}",
-        "content": "## Intro\nContent",
+        "content": LONG_TEXT,
         "country_code": "LBR",
         "language": "en",
     }
     headers = _auth_headers()
     first = await api_client.post("/v1/documents/upload", json=payload, headers=headers)
-    assert first.status_code == 201
+    assert first.status_code == 201, first.text
     second = await api_client.post("/v1/documents/upload", json=payload, headers=headers)
-    assert second.status_code == 200
+    assert second.status_code == 200, second.text
     body = second.json()
     assert body["status"] == "DEDUPED"
     assert body["ingestion_id"] is None
@@ -79,7 +81,7 @@ async def test_upload_document_rejects_image_chunks(api_client: AsyncClient) -> 
         "language": "en",
     }
     response = await api_client.post("/v1/documents/upload", json=payload, headers=_auth_headers())
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     data = response.json()
     assert data["status"] == "FEATURE_DISABLED"
     assert data["document_id"] is None
@@ -91,13 +93,13 @@ async def test_list_documents_filters_by_hash(api_client: AsyncClient) -> None:
     headers = _auth_headers(user_id)
     payload = {
         "document_name": "Ledger Snapshot",
-        "content": "# Ledger\ncontent",
+        "content": LONG_TEXT,
         "country_code": "USA",
         "language": "en",
         "tags": ["reduced_e2e"],
     }
     upload_resp = await api_client.post("/v1/documents/upload", json=payload, headers=headers)
-    assert upload_resp.status_code == 201
+    assert upload_resp.status_code == 201, upload_resp.text
     content_hash = upload_resp.json()["content_hash"]
 
     list_resp = await api_client.get(
@@ -123,18 +125,18 @@ async def test_list_documents_filters_by_country(api_client: AsyncClient) -> Non
     headers = _auth_headers(user_id)
     usa_payload = {
         "document_name": "USA Memo",
-        "content": "# Memo\ncontent",
+        "content": LONG_TEXT,
         "country_code": "USA",
     }
     arg_payload = {
         "document_name": "ARG Memo",
-        "content": "# Memo\ncontenido",
+        "content": LONG_TEXT,
         "country_code": "ARG",
     }
     resp_usa = await api_client.post("/v1/documents/upload", json=usa_payload, headers=headers)
     resp_arg = await api_client.post("/v1/documents/upload", json=arg_payload, headers=headers)
-    assert resp_usa.status_code == 201
-    assert resp_arg.status_code == 201
+    assert resp_usa.status_code == 201, resp_usa.text
+    assert resp_arg.status_code == 201, resp_arg.text
 
     filtered = await api_client.get(
         "/v1/documents", params=[("country_code", "ARG")], headers=headers

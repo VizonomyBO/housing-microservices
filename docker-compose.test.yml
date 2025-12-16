@@ -45,30 +45,5 @@ services:
         mypy app/
       "
   
-  # Swagger service test stage
-  swagger-service-test:
-    build:
-      context: ./services/swagger-service
-      target: test
-    environment:
-      - NODE_ENV=test
-      - PORT=3001
-      - LOG_LEVEL=error
-    volumes:
-      - ./services/swagger-service:/app
-      - /app/node_modules
-      - swagger-coverage:/app/coverage
-    command: >
-      sh -c "
-        echo 'Running Swagger Service tests...' &&
-        npm run test:coverage &&
-        echo 'Running linting...' &&
-        npm run lint &&
-        echo 'Running type check...' &&
-        npm run type-check
-      "
-
 volumes:
   account-coverage:
-  swagger-coverage:
-

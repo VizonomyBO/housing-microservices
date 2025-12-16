@@ -200,7 +200,7 @@ ia-project/
 │   │   ├── requirements.txt
 │   │   └── run.py
 │   │
-│   └── swagger-service/          # TypeScript aggregator
+│   └── swagger-service/          # (removed from compose/deploy)
 │       ├── src/
 │       │   ├── app.ts            # Main app
 │       │   ├── config/           # Configuration
@@ -397,4 +397,3 @@ MIT License - See LICENSE file for details
 - [x] Extensible for future services
 
 **All phases completed successfully! The microservices platform is ready for use.** 🚀
-

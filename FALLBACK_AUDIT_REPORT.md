@@ -3,8 +3,8 @@
 Scope: runtime code only for `services/agent-api`, `services/ingestion-service`, and `packages/shared_data_layer` (tests noted only when they indicate stubs used at runtime). Auth/user/etc. intentionally excluded.
 
 ## Agent API
-- `src/agent_api/http/app.py`: `_initialize_cache_client` falls back to `InMemoryValkeyClient` when reduced_scope toggles, `VALKEY_URL` missing, or Valkey init errors; `_build_language_detector` swaps to `StubLanguageDetector` on Lingua failure; rate limiter uses reduced-scope stub paths. These mask missing Valkey/Lingua instead of failing fast.
-- `src/cache/valkey_client.py`: in-memory Valkey stub is the only implementation shipped; used whenever real Valkey wiring is unavailable.
+- `src/agent_api/http/app.py`: `_initialize_cache_client` now fails unless `VALKEY_URL` is configured (in-memory is only allowed when `ALLOW_IN_MEMORY_VALKEY=1`); `_build_language_detector` swaps to `StubLanguageDetector` only when `ALLOW_STUB_LANGUAGE_DETECTOR=1`; rate limiter fails unless `ALLOW_RATE_LIMITER_BYPASS=1` is explicitly set.
+- `src/cache/valkey_client.py`: in-memory Valkey stub is still available but only used when explicitly enabled (`ALLOW_IN_MEMORY_VALKEY=1`).
 - `src/services/answer_composer.py`: returns reduced-scope fallback responses when OpenAI client absent or `use_real_tools` is false; also builds heuristic answers from chunks when the LLM returns an empty/short response, and injects default citations when none were retrieved.
 - `src/services/numerical_fact_extractor.py`: falls back to regex parsing when the LLM is missing/fails and runs a “final fallback” regex sweep over combined text to avoid empty tables.
 - `src/services/langgraph_runner.py`: `_numerical_fallback` disables `requires_sql` and downgrades to a guardrail warning when numerical tables aren’t built, instead of failing the request. (Earlier guardrail raises for missing OpenAI client.)

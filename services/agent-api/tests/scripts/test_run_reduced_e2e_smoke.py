@@ -9,46 +9,23 @@ import pytest
 import respx
 
 from scripts.reduced_e2e_smoke.fixtures import ScenarioFixtures
-from scripts.reduced_e2e_smoke.judge import JudgeRequest, JudgeVerdict, PromptJudge
+from scripts.reduced_e2e_smoke.judge import PromptJudge, build_prompt_judge_from_env
 from scripts.reduced_e2e_smoke.runner import SmokeRunConfig, run_smoke
-
-
-class StubPromptJudge(PromptJudge):
-    """Deterministic prompt judge used for unit tests."""
-
-    def __init__(self, *, failure_overrides: set[str] | None = None) -> None:
-        self.name = "stub_judge"
-        self._failure_overrides = failure_overrides or set()
-        self._keywords = {
-            "Q_SIMPLE_QA": ("five", "32%"),
-            "Q_REASON": ("district 9", "ledger"),
-            "Q_AGGREGATE": ("7.35", "district 9"),
-            "Q_SQL": ("harbor city",),
-        }
-
-    async def evaluate(self, request: JudgeRequest) -> JudgeVerdict:
-        if request.prompt_id in self._failure_overrides:
-            return JudgeVerdict(
-                passed=False,
-                score=0.05,
-                reasons=[f"{request.prompt_id} forced failure"],
-            )
-        text = request.answer.lower()
-        required = self._keywords.get(request.prompt_id, ())
-        missing = [word for word in required if word.lower() not in text]
-        if missing:
-            return JudgeVerdict(
-                passed=False,
-                score=0.2,
-                reasons=[f"missing keywords: {', '.join(missing)}"],
-            )
-        return JudgeVerdict(passed=True, score=0.95, reasons=["answer grounded"])
 
 
 @pytest.fixture
 def respx_mock():
-    with respx.mock(assert_all_called=False) as mock:
+    with respx.mock(assert_all_called=False, assert_all_mocked=False) as mock:
         yield mock
+
+
+@pytest.fixture(scope="session")
+def prompt_judge() -> PromptJudge:
+    judge = build_prompt_judge_from_env()
+    if judge is None:
+        pytest.skip("OPENAI_API_KEY is required for smoke prompt judging")
+    assert judge is not None
+    return judge
 
 
 def _assert_endpoint_subsequence(respx_mock: respx.Router, expected: list[tuple[str, str]]) -> None:
@@ -380,7 +357,9 @@ def _prompt_answers(failing: bool = False) -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> None:
+async def test_run_smoke_success(
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
+) -> None:
     fixtures = ScenarioFixtures.load()
     doc_ids = {
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
@@ -409,7 +388,7 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
         language="en",
         stream_capabilities={"cross_doc_reasoning"},
         skip_pillars=False,
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
         localstack_url="http://localstack.test",
     )
     summary = await run_smoke(config)
@@ -442,7 +421,9 @@ async def test_run_smoke_success(tmp_path: Path, respx_mock: respx.Router) -> No
 
 
 @pytest.mark.asyncio
-async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: respx.Router) -> None:
+async def test_run_smoke_reports_prompt_failures(
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
+) -> None:
     fixtures = ScenarioFixtures.load()
     doc_ids = {
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
@@ -468,7 +449,7 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
         language="en",
         stream_capabilities={"cross_doc_reasoning"},
         skip_pillars=True,
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
     )
     summary = await run_smoke(config)
 
@@ -478,7 +459,9 @@ async def test_run_smoke_reports_prompt_failures(tmp_path: Path, respx_mock: res
 
 
 @pytest.mark.asyncio
-async def test_run_smoke_real_tools_verification(tmp_path: Path, respx_mock: respx.Router) -> None:
+async def test_run_smoke_real_tools_verification(
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
+) -> None:
     fixtures = ScenarioFixtures.load()
     doc_ids = {
         fixture.spec.alias: f"doc-{fixture.spec.alias.lower()}" for fixture in fixtures.documents()
@@ -507,7 +490,7 @@ async def test_run_smoke_real_tools_verification(tmp_path: Path, respx_mock: res
         skip_pillars=True,
         use_real_tools=True,
         verify_real_tools=True,
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
     )
     summary = await run_smoke(config)
 
@@ -521,7 +504,7 @@ async def test_run_smoke_real_tools_verification(tmp_path: Path, respx_mock: res
 
 @pytest.mark.asyncio
 async def test_run_smoke_real_tools_verification_failure(
-    tmp_path: Path, respx_mock: respx.Router
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
 ) -> None:
     fixtures = ScenarioFixtures.load()
     doc_ids = {
@@ -550,7 +533,7 @@ async def test_run_smoke_real_tools_verification_failure(
         skip_pillars=True,
         use_real_tools=True,
         verify_real_tools=True,
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
     )
     summary = await run_smoke(config)
 
@@ -617,7 +600,7 @@ async def test_run_smoke_http_conversation_bootstrap(
 
 @pytest.mark.asyncio
 async def test_run_smoke_reseed_triggers_demo_endpoints(
-    tmp_path: Path, respx_mock: respx.Router
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
 ) -> None:
     fixtures = ScenarioFixtures.load()
     doc_ids = {
@@ -648,7 +631,7 @@ async def test_run_smoke_reseed_triggers_demo_endpoints(
         reseed_docs=True,
         stream_capabilities={"cross_doc_reasoning"},
         localstack_url="http://localstack.test",
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
     )
     summary = await run_smoke(config)
 
@@ -670,7 +653,7 @@ async def test_run_smoke_reseed_triggers_demo_endpoints(
 
 @pytest.mark.asyncio
 async def test_run_smoke_cleanup_only_skips_uploads(
-    tmp_path: Path, respx_mock: respx.Router
+    tmp_path: Path, respx_mock: respx.Router, prompt_judge: PromptJudge
 ) -> None:
     fixtures = ScenarioFixtures.load()
     conversation_id = "conv-clean"
@@ -701,7 +684,7 @@ async def test_run_smoke_cleanup_only_skips_uploads(
         stream_capabilities={"cross_doc_reasoning"},
         reseed_docs=True,
         cleanup_only=True,
-        prompt_judge=StubPromptJudge(),
+        prompt_judge=prompt_judge,
     )
     summary = await run_smoke(config)
 

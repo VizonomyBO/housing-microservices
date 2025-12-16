@@ -17,6 +17,7 @@ from nodes.retrieval.utils.language import StubLanguageDetector
 from services.langgraph_runner import LangGraphChatRunner
 from services.model_clients import OpenAIChatClientProtocol
 from telemetry import CacheObservability, MetricsRegistry
+from tests.utils.auth import make_auth_header
 
 
 @asynccontextmanager
@@ -25,7 +26,7 @@ async def _lifespan(app):
         yield
 
 
-TEST_HEADERS = lambda user_id: {"Authorization": f"Bearer {user_id}"}  # noqa: E731
+TEST_HEADERS = lambda user_id: make_auth_header(user_id)  # noqa: E731
 
 
 @pytest.fixture

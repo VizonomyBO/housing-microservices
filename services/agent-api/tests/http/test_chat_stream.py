@@ -12,8 +12,9 @@ from agent_api.http.schemas import ResponseMode
 from agent_api.http.streaming import ChatRunnerProtocol, ChatRunResult
 from streaming.events import SSEEventType, TaskLifecyclePayload
 from streaming.sse_emitter import SSEEmitter
+from tests.utils.auth import make_auth_header
 
-_AUTH_HEADERS = {"Authorization": "Bearer 00000000-0000-0000-0000-000000000001"}
+_AUTH_HEADERS = make_auth_header("00000000-0000-0000-0000-000000000001")
 
 
 class _SuccessfulRunner(ChatRunnerProtocol):
@@ -91,9 +92,9 @@ def _reset_runner() -> Iterator[None]:
 
 def test_streaming_endpoint_emits_sse_frames() -> None:
     app = create_app()
-    client = TestClient(app)
-
-    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
+    with TestClient(app) as client, client.stream(
+        "POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS
+    ) as response:
         chunks = list(response.iter_lines())
 
     assert response.status_code == 200
@@ -108,11 +109,10 @@ def test_streaming_endpoint_emits_sse_frames() -> None:
 
 def test_blocking_mode_returns_json_payload() -> None:
     app = create_app()
-    client = TestClient(app)
-
-    payload = _payload(response_mode="blocking")
-    response = client.post("/v1/chat", json=payload, headers=_AUTH_HEADERS)
-    data = response.json()
+    with TestClient(app) as client:
+        payload = _payload(response_mode="blocking")
+        response = client.post("/v1/chat", json=payload, headers=_AUTH_HEADERS)
+        data = response.json()
     assert response.status_code == 200
     assert data["done"]["status"] == "COMPLETED"
     assert response.headers["Cache-Control"] == "no-store"
@@ -123,9 +123,9 @@ def test_blocking_mode_returns_json_payload() -> None:
 def test_streaming_error_emits_task_error_event() -> None:
     set_chat_runner(_FailingRunner())
     app = create_app()
-    client = TestClient(app)
-
-    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
+    with TestClient(app) as client, client.stream(
+        "POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS
+    ) as response:
         chunks = list(response.iter_lines())
 
     assert any("event: task_error" in chunk for chunk in chunks)
@@ -135,10 +135,11 @@ def test_streaming_error_emits_task_error_event() -> None:
 def test_reduced_scope_emits_demo_event(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
     monkeypatch.setenv("REDUCED_SCOPE_DISABLE_VALKEY", "1")
+    monkeypatch.setenv("REDUCED_SCOPE_USE_REAL_TOOLS", "0")
     app = create_app()
-    client = TestClient(app)
-
-    with client.stream("POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS) as response:
+    with TestClient(app) as client, client.stream(
+        "POST", "/v1/chat", json=_payload(), headers=_AUTH_HEADERS
+    ) as response:
         chunks = list(response.iter_lines())
 
     assert response.headers["X-Cache-Mode"] == "text-only"

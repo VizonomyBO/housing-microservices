@@ -84,7 +84,7 @@ Task 3.5.3 introduces a workerless runtime so FastAPI can finish ingestion/pilla
 - **Profiles & commands**:
   - Reduced demo: `STACK_PROFILE=reduced COMPOSE_PROFILES=reduced docker compose --profile reduced up --build agent-api` (starts Postgres, db-init, agent-api, db-shell, LocalStack).
 - Full platform: `STACK_PROFILE=full COMPOSE_PROFILES=full docker compose --profile full up --build` (starts every service plus LocalStack, Valkey, otel-collector; marker removed).
-  - Default legacy stack: `docker compose up --build` (auth-service, user-service, swagger-service, postgres, LocalStack).
+  - Default legacy stack: `docker compose up --build` (auth-service, user-service, postgres, LocalStack).
 - **Seeding & LocalStack**: `db-init` migrates + seeds against Postgres; rerun it manually via `docker compose run --rm db-init` if needed. LocalStack is enabled by default; set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env` to hit AWS directly.
 - **Reverting to full AWS mode**: flip `STACK_PROFILE=full`, `USE_LOCALSTACK=0`, restart AWS-aware containers (`docker compose restart agent-api`), and follow the AWS deployment sections in this doc for ECS/Fargate rollouts.
 

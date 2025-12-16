@@ -19,8 +19,8 @@ Edit `.env` to set secure passwords, JWT secrets, and AWS credentials (if you pl
 | Profile | Command | Starts |
 | --- | --- | --- |
 | Reduced Agent API demo | `docker compose --profile reduced up --build agent-api` | Postgres + db-init + agent-api + db-shell + LocalStack for AWS mocks. |
-| Full platform | `docker compose --profile full up --build` | All services (auth, user, swagger, agent, marker), LocalStack, Valkey, otel-collector. |
-| Default (auth + user + swagger) | `docker compose up --build` | Legacy stack without agent-api (marker removed). |
+| Full platform | `docker compose --profile full up --build` | All services (auth, user, agent, marker), LocalStack, Valkey, otel-collector. |
+| Default (auth + user) | `docker compose up --build` | Legacy stack without agent-api (marker removed). |
 
 Set `STACK_PROFILE=reduced` or `STACK_PROFILE=full` in your shell (or `.env`) so services know which runtime to activate. Override `COMPOSE_PROFILES` if you need extra helpers (e.g., `COMPOSE_PROFILES=full,ops`).
 
@@ -37,7 +37,7 @@ COMPOSE_PROFILES=full \
   docker compose --profile full up --build
 ```
 Once healthy, visit:
-- Swagger UI: `http://localhost:${SWAGGER_SERVICE_PORT:-3000}`
+- (Swagger removed)
 - Agent API: `http://localhost:${AGENT_API_PORT:-8000}/docs`
 - Auth health: `curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health`
 - LocalStack status: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`

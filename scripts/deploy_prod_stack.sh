@@ -17,7 +17,6 @@ TF_WORKSPACE=${TF_WORKSPACE:-prod}
 RUN_TERRAFORM=1
 RUN_DEPLOY=1
 DESTROY_FIRST=0
-INCLUDE_SWAGGER=0
 OPEN_PORTS=0
 NO_BUILD=0
 NO_SYNC=0
@@ -39,7 +38,6 @@ Options:
   --skip-deploy         Skip EC2 compose deploy (only terraform).
   --destroy-first       Run terraform destroy before apply (use sparingly).
   --open-ports          Open EC2 SG ports for agent/auth/user (uses AWS CLI).
-  --include-swagger     Include swagger-service in the EC2 compose run.
   --no-build            Skip compose build/pull on EC2 (re-use existing images).
   --no-sync             Skip rsync/tar upload to EC2 (code already present).
   -h, --help            Show this help text.
@@ -75,10 +73,6 @@ parse_args() {
         ;;
       --open-ports)
         OPEN_PORTS=1
-        shift
-        ;;
-      --include-swagger)
-        INCLUDE_SWAGGER=1
         shift
         ;;
       --no-build)
@@ -131,7 +125,7 @@ main() {
 
   log "Using env file: $ENV_FILE"
   log "Terraform: workspace=$TF_WORKSPACE tfvars=$TF_VARS_FILE (destroy_first=$DESTROY_FIRST run=$RUN_TERRAFORM)"
-  log "Deploy: run=$RUN_DEPLOY include_swagger=$INCLUDE_SWAGGER open_ports=$OPEN_PORTS no_build=$NO_BUILD no_sync=$NO_SYNC"
+  log "Deploy: run=$RUN_DEPLOY open_ports=$OPEN_PORTS no_build=$NO_BUILD no_sync=$NO_SYNC"
 
   if [[ "$RUN_TERRAFORM" -eq 1 ]]; then
     tf_args=(--tfvars "$TF_VARS_FILE" --workspace "$TF_WORKSPACE")
@@ -143,7 +137,6 @@ main() {
 
   if [[ "$RUN_DEPLOY" -eq 1 ]]; then
     deploy_args=(--env-file "$ENV_FILE")
-    [[ "$INCLUDE_SWAGGER" -eq 1 ]] && deploy_args+=(--include-swagger)
     [[ "$OPEN_PORTS" -eq 1 ]] && deploy_args+=(--open-ports)
     [[ "$NO_BUILD" -eq 1 ]] && deploy_args+=(--no-build)
     [[ "$NO_SYNC" -eq 1 ]] && deploy_args+=(--no-sync)

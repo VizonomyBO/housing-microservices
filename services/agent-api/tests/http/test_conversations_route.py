@@ -13,6 +13,7 @@ from agent_api.http import create_app
 from repositories.agent_checkpoint_repository import AgentCheckpointRepository
 from services import AttachmentService, DocumentNotReadyError
 from state.agent_state import MessageSnapshot
+from tests.utils.auth import make_auth_header
 
 
 @asynccontextmanager
@@ -25,7 +26,7 @@ TEST_USER_ID = "33333333-3333-3333-3333-333333333333"
 
 
 def _auth_headers(user_id: str = TEST_USER_ID) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user_id}"}
+    return make_auth_header(user_id)
 
 
 @pytest.fixture

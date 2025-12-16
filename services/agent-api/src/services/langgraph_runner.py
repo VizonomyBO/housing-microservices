@@ -87,7 +87,7 @@ class LangGraphChatRunner:
         cache_client: ValkeyCacheClientProtocol,
         cache_observability: CacheObservability,
         language_detector: LanguageDetectorProtocol,
-        openai_client: OpenAIChatClientProtocol | None,
+        openai_client: OpenAIChatClientProtocol,
         metrics: MetricsRegistry,
         retrieval_embedding_client: VoyageEmbeddingClientProtocol | None = None,
         retrieval_reranker: VoyageRerankClientProtocol | None = None,

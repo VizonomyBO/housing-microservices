@@ -14,11 +14,10 @@ Setup guides: `docs/setup/local.md`, `docs/setup/dev.md`, `docs/setup/prod.md` (
 ## Service inventory
 | Service | Language | Host Port | Notes |
 | --- | --- | --- | --- |
-| agent-api | FastAPI + LangGraph | `${AGENT_API_PORT:-8000}` | Chat/SSE, documents, attachments. |
-| ingestion-service | FastAPI | `${INGESTION_SERVICE_PORT:-8085}` | MarkItDown → chunk → embed → index; replaces Lambda/S3 path. |
+| agent-api | FastAPI + LangGraph | `${AGENT_API_PORT:-8000}` | Chat/SSE, attachments; upload via ingestion service (Agent API no longer ingests). |
+| ingestion-service | FastAPI | `${INGESTION_SERVICE_PORT:-8085}` | MarkItDown → chunk → embed → index; required upload path (no inline ingestion). |
 | auth-service | Flask | `${AUTH_SERVICE_PORT:-5001}` | Issues JWTs. |
 | user-service | Flask | `${USER_SERVICE_PORT:-5002}` | User management. |
-| swagger-service | Node/Express | `${SWAGGER_SERVICE_PORT:-3000}` | Optional aggregated docs. |
 | postgres | pgvector 16 | `${POSTGRES_PORT:-5432}` | Shared DB (housing/auth_db). |
 | localstack/valkey/otel | optional | various | Only in local profiles. |
 

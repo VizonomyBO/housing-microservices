@@ -24,6 +24,7 @@ async def test_cli_run_ingestion(
 ) -> None:
     async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     monkeypatch.setenv("DATABASE_URL", async_url)
+    monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
     document = await DocumentFactory.create_async(session=db_session, chunk_count=1)
     document.status = "ingesting"
     document.ingestion_stage = "chunk"
@@ -58,6 +59,7 @@ async def test_cli_generate_pillars(
 ) -> None:
     async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     monkeypatch.setenv("DATABASE_URL", async_url)
+    monkeypatch.setenv("REDUCED_SCOPE_ENABLED", "1")
     document = await DocumentFactory.create_async(session=db_session, chunk_count=1)
     conversation = Conversation(
         owner_user_id=document.owner_user_id,

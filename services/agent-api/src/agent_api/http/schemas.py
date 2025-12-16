@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from agent_api.reduced_scope import ReducedScopeFlags
 from models.retrieval import (
@@ -144,68 +144,12 @@ __all__ = [
     "DemoResetConversationResponse",
     "DocumentListItem",
     "DocumentListResponse",
-    "DocumentUploadRequest",
-    "DocumentUploadResponse",
     "PaginationMetadata",
     "PillarAnswerPayload",
     "PillarResponse",
     "PillarSourcePayload",
     "ResponseMode",
 ]
-
-
-class DocumentUploadRequest(BaseModel):
-    """Payload for POST /v1/documents/upload in reduced-scope mode."""
-
-    document_name: str = Field(..., min_length=1, max_length=255)
-    content: str = Field(..., min_length=1)
-    content_type: Literal["text/markdown"] = Field(default="text/markdown")
-    chunk_type: Literal["text", "image", "table"] = Field(default="text")
-    access_scope: Literal["user_private", "user_shared", "base"] = Field(default="user_private")
-    country_code: str | None = Field(
-        default=None,
-        description="ISO-3 country code required for base documents.",
-    )
-    language: str | None = Field(default=None, description="ISO 639-1 language code")
-    tags: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    owner_user_id: str | None = Field(
-        default=None,
-        description="Optional UUID override; defaults to auth context.",
-    )
-
-    @model_validator(mode="after")
-    def _validate_country_code(self) -> DocumentUploadRequest:
-        if not self.document_name.strip():
-            raise ValueError("document_name must contain visible characters")
-        self.document_name = self.document_name.strip()
-        if self.country_code:
-            code = self.country_code.strip().upper()
-            if len(code) != 3:
-                raise ValueError("country_code must be a 3-letter ISO code")
-            self.country_code = code
-        if self.owner_user_id:
-            try:
-                UUID(str(self.owner_user_id))
-            except ValueError as exc:  # pragma: no cover - defensive guard
-                raise ValueError("owner_user_id must be a UUID string") from exc
-        if self.chunk_type not in {"text", "image", "table"}:
-            raise ValueError("chunk_type is invalid")
-        return self
-
-
-class DocumentUploadResponse(BaseModel):
-    """Response payload for POST /v1/documents/upload."""
-
-    document_id: str | None = None
-    ingestion_id: str | None = None
-    content_hash: str
-    status: Literal["COMPLETED", "DEDUPED", "FEATURE_DISABLED"]
-    message: str | None = None
-    request_id: str
-    upload: dict[str, Any] | None = None
-    ingestion: dict[str, Any] | None = None
-    reduced_scope: dict[str, Any] | None = None
 
 
 class DocumentListItem(BaseModel):

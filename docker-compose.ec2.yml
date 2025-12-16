@@ -115,32 +115,6 @@ services:
       retries: 5
       start_period: 30s
 
-  swagger-service:
-    <<: *ec2-defaults
-    profiles:
-      - swagger
-    build:
-      context: ./services/swagger-service
-      dockerfile: Dockerfile
-    ports:
-      - "${SWAGGER_SERVICE_PORT:-3000}:3000"
-    depends_on:
-      - auth-service
-      - user-service
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3000
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      ACCOUNT_SERVICE_URL: ${ACCOUNT_SERVICE_URL}
-      USER_SERVICE_URL: ${USER_SERVICE_URL}
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   nginx-gateway:
     <<: *ec2-defaults
     image: nginx:alpine

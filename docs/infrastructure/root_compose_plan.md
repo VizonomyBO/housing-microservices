@@ -3,7 +3,7 @@
 ## 1. Objectives & Deployment Modes
 - Unify every microservice under the root `docker-compose.yml` so `docker compose up` becomes the single entrypoint.
 - Support two runtime profiles:
-  - `full`: boots Postgres + auth-service + user-service + swagger-service + agent-api + marker-service + shared dependencies (Valkey, LocalStack, telemetry exporters).
+  - `full`: boots Postgres + auth-service + user-service + agent-api + marker-service + shared dependencies (Valkey, LocalStack, telemetry exporters).
   - `reduced`: limits startup to agent-api, its `db-init` helper, and Postgres with the Epic 3.5 feature flags to keep text-only, no-Valkey mode.
 - Keep parity with the legacy reduced-scope experience (seed scripts, `uv` runtime, pgvector) while paving the path to retire the old service-scoped reduced Compose file.
 - Marker-service is legacy—keep it off by default unless a task explicitly calls for that legacy flow.
@@ -16,7 +16,7 @@
 | `agent-api` | Python 3.13 + FastAPI + LangGraph (`uv`-managed) | 8000 | repo root → `services/agent-api` | async Postgres (`postgresql+asyncpg`), shared data layer package | Needs REDUCED vs FULL flags to control Valkey, workers, and AWS usage.
 | `auth-service` | Python 3.11 Flask | 5000 (host 5001) | `services/auth-service` | Postgres `auth_db`, Argon2/libpq packages | Already exposes health endpoint for Compose healthcheck; reuse.
 | `user-service` | Python 3.11 Flask | 5001 (host 5002) | `services/user-service` | Depends on auth-service API + Postgres `auth_db` | Share JWT + CORS envs with auth-service.
-| `swagger-service` | Node 20 | 3000 | `services/swagger-service` | Depends on auth-service + user-service HTTP endpoints | Provide optional dev profile for hot reload stack.
+| `swagger-service` | (removed) | — | — | — | Removed from active stack.
 | `localstack` | `localstack/localstack` | 4566 edge | root (new) | AWS emulation for S3, EventBridge, SES, SQS | Toggle through `USE_LOCALSTACK` and route SDKs via `localhost.localstack.cloud`/shared network.¹
 | `valkey` (future) | `valkey/valkey` or AWS serverless proxy | 6379 | root (new) | Agent API caching, rate limiting | Keep container gated behind `full` profile until queues/worker tasks return.
 | `otel-collector` (optional) | OpenTelemetry collector | 4317 | root (new) | Receives traces/metrics from services | Helps keep architecture parity with production monitoring.
@@ -30,7 +30,7 @@
 ### 3.2 Profiles
 | Profile | Purpose | Services |
 | --- | --- | --- |
-| `default` | Postgres + auth + user + swagger (maintains todays behavior). | `postgres`, `auth-service`, `user-service`, `swagger-service`.
+| `default` | Postgres + auth + user (legacy behavior). | `postgres`, `auth-service`, `user-service`. |
 | `agent-api` | Reduced Epic 3.5 demo stack. | `postgres`, `db-init`, `agent-api` (+ optional `db-shell`).
 | `full` | All services plus LocalStack, Valkey, observability. | `default` services + `agent-api`, `valkey`, `localstack`, `otel-collector`. (Marker removed.) |
 | `aws-mock` | Enables LocalStack without the rest of `full`. | `localstack` (reusable for CI smoke tests).
@@ -41,7 +41,7 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
 ### 3.3 Networking & Volumes
 - Networks
   - `microservices-net`: bridge network for service-to-service RPC (default for all containers).
-  - `public-edge`: optional network for exposing swagger-service via reverse proxy in future tasks.
+  - `public-edge`: optional network (currently unused after removing swagger).
   - `localstack-net`: attach `localstack` + any AWS clients that need DNS-based hostname mapping.
 - Volumes
   - `postgres_data`: shared Postgres storage.
@@ -51,7 +51,6 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
 
 ### 3.4 Dependency Graph Highlights
 - `auth-service` and `user-service` depend on `postgres` + each other (JWT + `/auth` endpoints).
-- `swagger-service` depends on `auth-service` + `user-service` HTTP health.
 - `marker-service` depends on `auth-service` (for tokens) and `localstack`/AWS for document storage.
 - `agent-api` depends on `postgres`, optionally `valkey`, and AWS services (S3/EventBridge) once the full pipeline is restored.
 - `db-init` depends on `postgres` and `packages/shared_data_layer` migrations.
@@ -76,11 +75,11 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
 - `env.example` at the repo root is now the single source of truth. Copy it to `.env`, then override sensitive values either directly or via a gitignored `.env.local` before running Compose.
 - **Compose & profiles**: `COMPOSE_PROJECT_NAME`, `COMPOSE_PROFILES`, `STACK_PROFILE`, `SERVICE_MODE`, and `REDUCED_SCOPE_ENABLED` describe which runtime (reduced/full) is active so helper scripts can map them to Docker profiles.
 - **Database & credentials**: `POSTGRES_*`, `AUTH_DB`, `AGENT_API_DB*`, and `DATABASE_URL` match the variables consumed by `docker-compose.yml` and `scripts/init-databases.sh`, keeping auth + agent schemas consistent.
-- **Auth/JWT + service ports**: `JWT_*`, `SECRET_KEY`, `CORS_ORIGINS`, and the host port overrides (`POSTGRES_PORT`, `AGENT_API_PORT`, `AUTH_SERVICE_PORT`, `USER_SERVICE_PORT`, `SWAGGER_SERVICE_PORT`, `MARKER_SERVICE_PORT`) now live in one place instead of service-specific templates.
+- **Auth/JWT + service ports**: `JWT_*`, `SECRET_KEY`, `CORS_ORIGINS`, and the host port overrides (`POSTGRES_PORT`, `AGENT_API_PORT`, `AUTH_SERVICE_PORT`, `USER_SERVICE_PORT`, `MARKER_SERVICE_PORT`) now live in one place instead of service-specific templates.
 - **Agent API flags & metrics**: `SERVICE_NAME`, `METRICS_*`, and every `REDUCED_SCOPE_*` flag bind directly to `src/agent_api/settings.py`, preventing drift between env parsing and the Compose defaults.
 - **AWS/LocalStack**: `USE_LOCALSTACK`, `LOCALSTACK_HOST`, `LOCALSTACK_EDGE_PORT`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, plus `RAW_DOCUMENTS_BUCKET`/`PROCESSED_BUCKET` capture both reduced-mode LocalStack usage and the eventual real AWS endpoints.
 - **Cache/observability**: `VALKEY_*` and `OTEL_COLLECTOR_*` are grouped with descriptive defaults so re-enabling Valkey/OTel in the full profile only requires flipping envs, not editing Compose.
-- **Shared service URLs**: `AUTH_SERVICE_URL`, `USER_SERVICE_URL`, and `ACCOUNT_SERVICE_URL` are interpolated via `${VAR:-default}` inside Compose instead of being hard-coded, keeping swagger-service and user-service aligned with whichever ports the developer picked.
+- **Shared service URLs**: `AUTH_SERVICE_URL`, `USER_SERVICE_URL`, and `ACCOUNT_SERVICE_URL` are interpolated via `${VAR:-default}` inside Compose instead of being hard-coded, keeping auth/user aligned with whichever ports the developer picked.
 
 ## 5. LocalStack Integration
 - Add a `localstack` service (image `localstack/localstack:latest`) with exposed `4566` edge port, environment variables `SERVICES=s3,sqs,sns,events,secretsmanager`, and mount for persistence (`localstack_data`).
@@ -112,7 +111,7 @@ Compose consumers can activate combinations via `COMPOSE_PROFILES=full,ops docke
 - `agent-api` lacks a non-reduced Dockerfile; need confirmation whether reduced Dockerfile should be reused for full mode or if a production Dockerfile lives elsewhere.
 - Marker-service currently depends on AWS S3 + OpenAI but isnt wired into any Compose stack; confirm runtime secrets (OpenAI API key) and whether LocalStack should also mock EventBridge for ingestion.
 - Multi-DB Postgres: root compose currently runs a single instance for both `housing` and `auth_db`. Need to validate whether `pgvector` extensions required by agent-api conflict with existing 15/16 images.
-- Resource usage: running `full` profile locally will require >6 GB RAM (Node + multiple Python services + LocalStack). Document fallbacks for lower-end machines (start `reduced` + `swagger` only).
+- Resource usage: running `full` profile locally will require >6 GB RAM (multiple Python services + LocalStack). Document fallbacks for lower-end machines (start `reduced` only).
 - Secrets governance: once LocalStack toggles land, need a plan for storing AWS credentials for prod vs dev to avoid leaking real keys into `.env`.
 
 ## 8. Testing & Validation Approach

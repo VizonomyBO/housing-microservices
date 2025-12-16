@@ -4,8 +4,8 @@
 A LangGraph-powered Agent API with a FastAPI ingestion service on EC2, Flask-based auth/user microservices, and an optional Swagger aggregator. Docker Compose drives local and hybrid workflows, with AWS EC2 + Postgres as the primary production target. The shared data layer lives in `packages/shared_data_layer`, and Python tooling is managed with `uv` on Python 3.13.
 
 ## Key Components
-- **Agent API (FastAPI + LangGraph)**: Chat/SSE, document upload/attachments, hybrid retrieval, and citation-rich responses.
-- **Ingestion Service (FastAPI on EC2)**: MarkItDown → chunk → embed (Voyage) → index (pgvector) and activate documents; replaces the old Lambda/S3 flow.
+- **Agent API (FastAPI + LangGraph)**: Chat/SSE, attachments, hybrid retrieval, and citation-rich responses. `/v1/documents/upload` now proxies to the ingestion service (no inline ingestion).
+- **Ingestion Service (FastAPI on EC2)**: MarkItDown → chunk → embed (Voyage) → index (pgvector) and activate documents; replaces the old Lambda/S3 flow and is the only upload path.
 - **Auth Service (Flask)**: Issues and validates JWTs; backed by `auth_db`.
 - **User Service (Flask)**: User management; depends on auth-service.
 - **Swagger Service (Node/Express)**: Optional aggregated API docs; currently not deployed.
@@ -19,13 +19,14 @@ A LangGraph-powered Agent API with a FastAPI ingestion service on EC2, Flask-bas
 - **PostgreSQL 16 + pgvector**, asyncpg/psycopg drivers.
 
 ## Features
-- **Retrieval & QA**: Hybrid BM25 + vector search with Voyage embeddings + reranker, HyDE-style rewrites, numeric-aware citation scoring, and per-fact `[c#]` footnotes.
+- **Retrieval & QA**: Hybrid BM25 + vector search with Voyage embeddings + reranker (required), HyDE-style rewrites, numeric-aware citation scoring, and per-fact `[c#]` footnotes.
 - **Security**: Argon2id hashing, JWT rotation, rate limiting, CORS/configurable origins, attachment safety (documents gated until ingestion active).
+- **Fail-fast dependencies**: Voyage, Valkey, and rate limiting are required by default; bypass flags are test-only.
 - **Observability**: Health endpoints, structured logging, and smoke run artifacts via `scripts/prod_smoke_check.sh`.
 - **Patch Deploys**: Hot-patch Python services on EC2 via `scp` + `docker cp` + compose restart (see AGENTS.md §7).
 
 ## Deployment & Environments
-- **Local (LocalStack)**: Reduced profile for Agent API + Postgres; LocalStack is currently deferred/broken and will be revisited later.
+- **Local (LocalStack)**: Reduced profile for Agent API + Postgres; LocalStack is currently deferred/broken and will be revisited later. Defaults are AWS-first.
 - **Hybrid Dev**: Local services pointing at cloud Postgres/S3 via `.env.dev` and `docker-compose.ec2.yml`.
 - **Production**: EC2-hosted services with `ENV_FILE=.env.prod ./scripts/deploy_prod_stack.sh` and `./scripts/prod_smoke_check.sh`.
 

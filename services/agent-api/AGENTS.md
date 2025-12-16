@@ -4,14 +4,17 @@ This is the canonical playbook for all agents working inside `services/agent-api
 
 ## Golden Rules
 
+- **Ingestion service**: FastAPI on EC2 (`INGEST_BASE_URL`) is the only upload path; Agent API does not ingest files directly—clients must call ingestion for upload/complete.
+
 1. **No runtime stubs in smoke/e2e flows.** All automation (manual or via compose) must call the real services/endpoints unless explicitly carved out below. Flip `REDUCED_SCOPE_USE_REAL_TOOLS=1` (or `REAL_REDUCED_E2E_TOOLS=1`/`--use-real-tools`) whenever you need to validate OpenAI/Voyage integrations; the service hard-fails on startup if those secrets are missing. The only sanctioned temporary exceptions are Valkey/cache wiring (until Task 16 in Epic 03 finishes) and the image/table ingestion features that remain disabled in reduced scope. Everything else—LangGraph chat, ingestion, auth, AWS clients—must talk to the real implementation.
 2. **Unit tests can patch/mocks as needed, but production code cannot.** If you have to isolate an external API for testing, patch the client in the test fixture; never introduce “temporary” stubs in the runtime path.
 3. **Document stub removals.** Whenever you delete a stub or shortcut, update the relevant docs/runbooks so future agents know the real dependency is required.
 4. **Default to the real system—never add stubs, fixtures, or mocks unless the task explicitly demands it.** In code, docs, and automation, start from real services/data/LLMs and avoid shortcuts by default; if a stub is explicitly requested, scope it to tests/fixtures and document the exception.
+5. **Ingestion is external.** `/v1/documents/upload` only proxies to the ingestion service (`INGEST_BASE_URL`); no inline ingestion remains in Agent API.
 
 Violations of these rules cause the exact regressions we’re trying to eliminate (smoke tests that silently short-circuit). Treat them as hard blockers during review.
 
-- ✅ **Service status**: Reduced Scope MVP (Epic 3.5) for the LangGraph gateway. `/v1/chat`, document uploads, pillar endpoints, and auth fallbacks must run in text-only, no-Valkey mode while preserving the full architecture behind flags.
+- ✅ **Service status**: Reduced Scope MVP (Epic 3.5) for the LangGraph gateway. `/v1/chat`, document uploads, pillar endpoints, and auth fallbacks must run in text-only, no-Valkey mode while preserving the full architecture behind flags. Defaults are AWS-first; use LocalStack only when explicitly requested.
 - 🐍 **Runtime**: Python 3.13 managed by `uv` (virtual env lives at `services/agent-api/.venv`).
 - 📚 **Source of truth**: Epic task directories inside `services/agent-api` (currently `epic-035`, `epic-root-compose`, `epic-reduced-e2e`). Always work from the task doc + checklist for the epic you were assigned.
 - 🧱 **Language & frameworks**: Python service using FastAPI, LangGraph nodes, Pydantic v2 models, and shared data layer repositories in `packages/shared_data_layer`.
@@ -113,6 +116,8 @@ Ask the user before:
 - Running destructive commands (`rm -rf`, database resets outside Testcontainers, etc.).
 
 When stuck, follow the “stuck protocol” from the shared data layer playbook: pause, capture the issue in the plan, reproduce with a minimal test, research externally, then proceed.
+
+- OPENAI + Voyage are required: set `OPENAI_API_KEY` and `VOYAGE_API_KEY` (no fallback models); `INGEST_BASE_URL` must point at the ingestion FastAPI service. Valkey is required unless `ALLOW_IN_MEMORY_VALKEY=1` for tests; rate limiter bypass is only allowed with `ALLOW_RATE_LIMITER_BYPASS=1`.
 
 ---
 
