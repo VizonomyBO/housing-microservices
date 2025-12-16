@@ -127,7 +127,7 @@ def _build_request_context(
 
 
 def _generate_thread_id() -> str:
-    return f"thr_{uuid4().hex}"
+    return str(uuid4())
 
 
 async def _resolve_conversation_id(

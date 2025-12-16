@@ -17,11 +17,11 @@ scenarios:
         citations_required: true
     metrics:
       - name: faithfulness
-        threshold: 0.1
-      - name: answer_relevance
-        threshold: 0.0
-      - name: citation_coverage
         threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.8
       - name: latency
         threshold: null
 
@@ -46,11 +46,11 @@ scenarios:
         citations_required: true
     metrics:
       - name: faithfulness
-        threshold: 0.1
-      - name: answer_relevance
-        threshold: 0.2
-      - name: citation_coverage
         threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.8
       - name: latency
         threshold: null
 
@@ -72,11 +72,11 @@ scenarios:
         citations_required: true
     metrics:
       - name: faithfulness
-        threshold: 0.2
-      - name: answer_relevance
-        threshold: 0.2
-      - name: citation_coverage
         threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.8
       - name: latency
         threshold: null
 
@@ -98,10 +98,10 @@ scenarios:
         citations_required: true
     metrics:
       - name: faithfulness
-        threshold: 0.2
-      - name: answer_relevance
-        threshold: 0.2
-      - name: citation_coverage
         threshold: 0.5
+      - name: answer_relevance
+        threshold: 0.5
+      - name: citation_coverage
+        threshold: 0.8
       - name: latency
         threshold: null

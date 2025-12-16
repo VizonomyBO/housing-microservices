@@ -36,6 +36,7 @@ class Settings:
     voyage_api_key: str | None
     openai_chat_model: str
     voyage_embedding_model: str
+    voyage_rerank_model: str
     auth: AuthSettings
     cors_allowed_origins: tuple[str, ...]
     cors_allow_credentials: bool
@@ -75,10 +76,11 @@ def load_settings() -> Settings:
 
     openai_api_key = _env_str("OPENAI_API_KEY")
     voyage_api_key = _env_str("VOYAGE_API_KEY")
-    openai_chat_model = _env_str("OPENAI_CHAT_MODEL", default="gpt-4o-mini") or "gpt-4o-mini"
+    openai_chat_model = _env_str("OPENAI_CHAT_MODEL", default="gpt-5.1") or "gpt-5.1"
     voyage_embedding_model = (
-        _env_str("VOYAGE_EMBEDDING_MODEL", default="voyage-3-lite") or "voyage-3-lite"
+        _env_str("VOYAGE_EMBEDDING_MODEL", default="voyage-3-large") or "voyage-3-large"
     )
+    voyage_rerank_model = _env_str("VOYAGE_RERANK_MODEL", default="rerank-2.5") or "rerank-2.5"
 
     _validate_real_tooling_requirements(
         reduced_scope=reduced_scope,
@@ -156,6 +158,7 @@ def load_settings() -> Settings:
         voyage_api_key=voyage_api_key,
         openai_chat_model=openai_chat_model,
         voyage_embedding_model=voyage_embedding_model,
+        voyage_rerank_model=voyage_rerank_model,
         auth=auth_settings,
         cors_allowed_origins=cors_allowed_origins,
         cors_allow_credentials=cors_allow_credentials,

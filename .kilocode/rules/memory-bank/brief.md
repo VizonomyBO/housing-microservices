@@ -1,46 +1,46 @@
 # Project Brief: Housing Microservices Platform
 
 ## Overview
-The Housing Microservices Platform is a production-ready ecosystem designed for secure authentication, user management, and API documentation aggregation. It features a FastAPI Agent API, Flask-based authentication and user services, a FastAPI ingestion service, and a Node.js/Express Swagger aggregator. The platform is built with Docker for multi-container orchestration and uses PostgreSQL for robust data persistence.
+A LangGraph-powered Agent API with a FastAPI ingestion service on EC2, Flask-based auth/user microservices, and an optional Swagger aggregator. Docker Compose drives local and hybrid workflows, with AWS EC2 + Postgres as the primary production target. The shared data layer lives in `packages/shared_data_layer`, and Python tooling is managed with `uv` on Python 3.13.
 
 ## Key Components
-- **Agent API (FastAPI + LangGraph)**: Handles chat, SSE, documents, and attachments.
-- **Ingestion Service (FastAPI)**: Processes MarkItDown, chunks, embeds, and indexes data.
-- **Auth Service (Flask)**: Manages user authentication and issues JWTs.
-- **User Service (Flask)**: Handles user management.
-- **Swagger Service (Node.js/Express)**: Provides an optional aggregated API documentation portal with interactive Swagger UI. **Note: The Swagger service is currently not deployed.**
-- **PostgreSQL (pgvector 16)**: The primary database for both housing and authentication data.
-- **Docker & Docker Compose**: For local development, testing, and production deployments.
+- **Agent API (FastAPI + LangGraph)**: Chat/SSE, document upload/attachments, hybrid retrieval, and citation-rich responses.
+- **Ingestion Service (FastAPI on EC2)**: MarkItDown → chunk → embed (Voyage) → index (pgvector) and activate documents; replaces the old Lambda/S3 flow.
+- **Auth Service (Flask)**: Issues and validates JWTs; backed by `auth_db`.
+- **User Service (Flask)**: User management; depends on auth-service.
+- **Swagger Service (Node/Express)**: Optional aggregated API docs; currently not deployed.
+- **PostgreSQL 16 + pgvector**: Two logical databases—`housing` (Agent API/shared data layer) and `auth_db` (auth/user).
+- **Docker Compose**: Profiles for reduced local demo, hybrid dev, and prod/EC2 workflows.
 
 ## Technology Stack
-- **Backend**: Python 3.11 (Flask, FastAPI, SQLAlchemy, Argon2-cffi, PyJWT, Flask-Limiter), PostgreSQL 15.
-- **Frontend/Aggregator**: TypeScript 5.3, Node.js 20, Express.js, Swagger UI Express, Axios, Winston.
-- **Infrastructure**: Docker, Docker Compose, Kubernetes (GKE, EKS, AKS), AWS (ECS/Fargate), Google Cloud, Azure.
+- **Python 3.13 + uv** for Agent API and ingestion; FastAPI, LangGraph, Pydantic v2, SQLAlchemy 2.x, Voyage embeddings/rerankers.
+- **Flask 3.x** for auth/user with Argon2 hashing, PyJWT, Flask-Limiter.
+- **Node.js 20/TypeScript 5** for the optional Swagger aggregator.
+- **PostgreSQL 16 + pgvector**, asyncpg/psycopg drivers.
 
 ## Features
-- **Security**: Argon2id password hashing, JWT with HS256 signing (15-minute access tokens, 30-day refresh tokens with rotation), rate limiting, input validation, SQL injection prevention, XSS protection, CORS configuration, network isolation, non-root containers, health monitoring, secrets management.
-- **Scalability**: Stateless authentication, horizontal scaling readiness, connection pooling, database indexing, async health monitoring, spec caching.
-- **Observability**: Health check endpoints, service status dashboard, health metrics tracking, Winston logging, response time tracking, success rate monitoring.
+- **Retrieval & QA**: Hybrid BM25 + vector search with Voyage embeddings + reranker, HyDE-style rewrites, numeric-aware citation scoring, and per-fact `[c#]` footnotes.
+- **Security**: Argon2id hashing, JWT rotation, rate limiting, CORS/configurable origins, attachment safety (documents gated until ingestion active).
+- **Observability**: Health endpoints, structured logging, and smoke run artifacts via `scripts/prod_smoke_check.sh`.
+- **Patch Deploys**: Hot-patch Python services on EC2 via `scp` + `docker cp` + compose restart (see AGENTS.md §7).
 
 ## Deployment & Environments
-The platform supports various deployment environments:
-- **Local Development**: Using Docker Compose with LocalStack for AWS mocks. **Note: LocalStack setup is currently broken.**
-- **Dev Hybrid**: Local services (auth, agent) connected to a cloud data plane (e.g., AWS RDS, S3).
-- **Production**: Docker Compose, Kubernetes (with detailed YAML configurations for PostgreSQL, Auth Service, and Swagger Service), and major cloud providers (AWS, Google Cloud, Azure).
-- **Patch Deploys**: A streamlined process for hot-patching running Python services on EC2 without full redeploys.
+- **Local (LocalStack)**: Reduced profile for Agent API + Postgres; LocalStack is currently deferred/broken and will be revisited later.
+- **Hybrid Dev**: Local services pointing at cloud Postgres/S3 via `.env.dev` and `docker-compose.ec2.yml`.
+- **Production**: EC2-hosted services with `ENV_FILE=.env.prod ./scripts/deploy_prod_stack.sh` and `./scripts/prod_smoke_check.sh`.
 
 ## Quick Start
-1. Clone the repository and copy `env.example` to `.env`.
-2. Choose a Docker Compose profile (`reduced` for Agent API demo, `full` for all services, or `default` for legacy auth/user/swagger).
-3. Launch services using `docker compose up --build` with the chosen profile.
-4. Verify health checks and access API docs. **Note: Swagger UI is not currently available.**
+1. `env_file=$(scripts/use_env.sh local|dev|prod); set -a && source \"$env_file\" && set +a`
+2. Local reduced profile: `COMPOSE_PROFILES=reduced,ops docker compose --env-file \"$env_file\" up -d --build`
+3. Hybrid dev: `docker compose --env-file \"$env_file\" -f docker-compose.ec2.yml up -d --build agent-api auth-service user-service ingestion-service`
+4. Prod smoke: `ENV_FILE=\"$env_file\" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`
 
 ## Testing
-- An API testing script (`test-api.sh`) is provided for manual testing of all major endpoints.
-- Quality gates for `agent-api` include `ruff format`, `ruff check --fix`, `ty check`, and `pytest -n auto`.
+- Preferred quality gates (Agent API): `uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto`.
+- `test-api.sh` provides manual endpoint coverage; AWS smoke runs documented under `notes/aws_step9_status.md`.
 
 ## Documentation
-Comprehensive documentation is available in the `docs` directory, covering system architecture, agent architecture, schema and persistence, and API contracts.
+Key references under `docs/`: system/agent architecture, schema & persistence, testing/evals (LLM quality hardening), and reduced-scope demos.
 
 ## Project Status
-The project is considered production-ready, with all core phases completed successfully. Future plans include adding email services, user email verification, unit/integration tests, CI/CD, more microservices, API gateway, Redis caching, and a full monitoring stack.
+Actively validating the FastAPI ingestion + Agent API path on AWS (Step 9); LocalStack verification is deferred. Swagger UI remains disabled. Continue using real retrieval/ingestion (no stubs) and keep plan/tracker files in place for the ongoing ingestion verification work.

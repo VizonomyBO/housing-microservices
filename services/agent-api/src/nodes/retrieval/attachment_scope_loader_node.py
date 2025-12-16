@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
@@ -14,12 +15,13 @@ from models.retrieval import (
     AttachmentType,
     AttachmentWorkflow,
 )
-from nodes.retrieval.exceptions import InputNormalizationError
+from nodes.retrieval.exceptions import InputNormalizationError, NodeError
 from repositories.conversation_scope_repository import (
     ConversationScopePort,
     DocumentChunkPreview,
     DocumentSummary,
 )
+from services.model_clients import VoyageEmbeddingClientProtocol
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, lifecycle_span
@@ -36,8 +38,11 @@ class AttachmentScopeLoaderNode:
     scope_repository: ConversationScopePort
     workflow_repository: WorkflowRepositoryProtocol | None = None
     preview_chunk_types: tuple[str, ...] = ("text",)
-    max_preview_chars: int = 1600
-    max_preview_chunks: int = 5
+    max_preview_chars: int = 4000
+    max_preview_chunks: int = 10
+    hybrid_weight: float = 0.5
+    embedding_client: VoyageEmbeddingClientProtocol | None = None
+    enable_hybrid_search: bool = True
 
     async def __call__(
         self, state: AgentState, *, sse_emitter: SSEEmitter | None = None
@@ -71,11 +76,9 @@ class AttachmentScopeLoaderNode:
         ):
             document_ids = [ref.document_id for ref in document_refs if ref.document_id]
             documents_lookup = await self.scope_repository.hydrate_documents(document_ids)
-            chunk_previews = await self.scope_repository.load_document_chunk_previews(
-                document_ids,
-                chunk_types=self.preview_chunk_types,
-                max_chars_per_doc=self.max_preview_chars,
-                max_chunks_per_doc=self.max_preview_chunks,
+            hydrated_ids = [doc_id for doc_id in document_ids if doc_id in documents_lookup]
+            chunk_previews = await self._load_previews(
+                document_ids=hydrated_ids, query=normalized_input.normalized_prompt
             )
 
             warnings = list(normalized_input.warnings)
@@ -102,6 +105,79 @@ class AttachmentScopeLoaderNode:
             )
             return {"attachment_scope": scope}
 
+    async def _load_previews(
+        self, *, document_ids: list[str], query: str
+    ) -> dict[str, list[DocumentChunkPreview]]:
+        """Prefer hybrid retrieval over plain previews when available."""
+
+        if not document_ids:
+            return {}
+        if not self.enable_hybrid_search:
+            raise NodeError(
+                code="HYBRID_DISABLED",
+                message="Hybrid retrieval is required but was disabled.",
+                details={},
+            )
+        if not self.embedding_client:
+            raise NodeError(
+                code="HYBRID_EMBEDDING_MISSING",
+                message="Voyage embedding client is required for hybrid retrieval.",
+                details={},
+            )
+
+        try:
+            vectors = await self.embedding_client.embed([query])
+        except Exception as exc:  # pragma: no cover - explicit surface of failures
+            raise NodeError(
+                code="HYBRID_EMBEDDING_FAILED",
+                message="Hybrid retrieval failed to generate embeddings.",
+                details={"error": str(exc)},
+            ) from exc
+        if not vectors or not vectors[0]:
+            raise NodeError(
+                code="HYBRID_EMBEDDING_EMPTY",
+                message="Hybrid retrieval produced no embeddings for the query.",
+                details={},
+            )
+        embedding = vectors[0]
+        if not isinstance(embedding, Sequence) or isinstance(embedding, (str, bytes, dict)):
+            raise NodeError(
+                code="HYBRID_EMBEDDING_INVALID",
+                message="Hybrid retrieval returned an invalid embedding vector.",
+                details={"type": str(type(embedding))},
+            )
+        try:
+            embedding = [float(value) for value in embedding]
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise NodeError(
+                code="HYBRID_EMBEDDING_INVALID",
+                message="Hybrid retrieval returned a non-numeric embedding vector.",
+                details={"error": str(exc)},
+            ) from exc
+
+        try:
+            hybrid = await self.scope_repository.hybrid_chunk_search(
+                query=query or "",
+                document_ids=document_ids,
+                embedding=embedding,
+                top_k=self.max_preview_chunks,
+                hybrid_weight=self.hybrid_weight,
+                chunk_types=self.preview_chunk_types,
+            )
+        except ValueError as exc:
+            raise NodeError(
+                code="HYBRID_EMBEDDING_INVALID",
+                message="Hybrid retrieval rejected the embedding vector.",
+                details={"error": str(exc)},
+            ) from exc
+        if not hybrid:
+            raise NodeError(
+                code="HYBRID_NO_RESULTS",
+                message="Hybrid retrieval returned no chunks; fix ingestion or query.",
+                details={"document_ids": document_ids},
+            )
+        return hybrid
+
     def _build_document_scope(
         self,
         references: list[AttachmentReference],
@@ -125,6 +201,7 @@ class AttachmentScopeLoaderNode:
                     text=preview.text,
                     page_number=preview.page_number,
                     position=preview.position,
+                    score=preview.score,
                 )
                 for preview in chunk_previews.get(ref.document_id, [])
             ]

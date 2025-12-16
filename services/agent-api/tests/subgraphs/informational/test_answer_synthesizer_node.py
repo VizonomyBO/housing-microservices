@@ -10,7 +10,7 @@ from cache import (
     InMemoryValkeyClient,
 )
 from cache.response_serializer import CacheWorkflowPlanExcerpt
-from models.retrieval import NormalizedInput, TenantScope
+from models.retrieval import AttachmentReference, AttachmentType, NormalizedInput, TenantScope
 from nodes.retrieval.exceptions import NodeError
 from state.agent_state import AgentState, CacheMetadata, MessageSnapshot
 from subgraphs.informational.answer_synthesizer_node import (
@@ -32,9 +32,11 @@ class StubComposer:
         self.citations = citations or [
             CacheCitation(doc_id="doc-1", chunk_id="chunk-1", snippet="evidence")
         ]
+        self.last_context: AnswerSynthesisContext | None = None
 
     async def compose(self, context: AnswerSynthesisContext) -> AnswerSynthesisResult:  # type: ignore[override]
         self.calls += 1
+        self.last_context = context
         return AnswerSynthesisResult(
             answer_text=self.answer_text,
             citations=self.citations,
@@ -104,6 +106,50 @@ async def test_generates_answer_on_cache_miss() -> None:
     assert updates["answer"] == "fresh answer"
     assert updates["quality_score"] == pytest.approx(0.92)
     assert updates["cache_metadata"].hit is False
+
+
+@pytest.mark.asyncio
+async def test_prefers_requested_docs_over_auto_attached() -> None:
+    client = InMemoryValkeyClient()
+    metadata = CacheMetadata(cache_key="agent-api:retrieval:conv-explicit-docs")
+    normalized = NormalizedInput(
+        normalized_prompt="Explain guardrails",
+        raw_prompt="Explain guardrails",
+        tenant_scope=TenantScope(conversation_id="conv-req", thread_id="thr-req"),
+        attachment_refs=[
+            AttachmentReference(
+                asset_type=AttachmentType.DOCUMENT,
+                asset_id="doc-explicit",
+                document_id="doc-explicit",
+                provided_in_request=True,
+                auto_attached=False,
+                attach_source="request",
+            ),
+            AttachmentReference(
+                asset_type=AttachmentType.DOCUMENT,
+                asset_id="doc-auto",
+                document_id="doc-auto",
+                provided_in_request=False,
+                auto_attached=True,
+                attach_source="base_auto",
+            ),
+        ],
+        scope_hash="scope-explicit",
+    )
+    state = AgentState(
+        messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
+        conversation_id="conv-req",
+        normalized_input=normalized,
+        cache_metadata=metadata,
+    )
+    composer = StubComposer()
+    node = AnswerSynthesizerNode(composer=composer, cache_client=client)
+
+    updates = await node(state)
+
+    assert updates["cache_metadata"].hit is False
+    assert composer.last_context is not None
+    assert composer.last_context.allowed_document_ids == {"doc-explicit"}
 
 
 @pytest.mark.asyncio

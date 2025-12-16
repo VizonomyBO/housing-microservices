@@ -113,9 +113,10 @@ class EvalRunConfig(BaseModel):
         description="HS256 secret for minting access tokens.",
     )
     user_id: str = Field(
-        default_factory=lambda: os.environ.get("EVAL_USER_ID") or "11111111-2222-3333-4444-555555555555"
+        default_factory=lambda: os.environ.get("EVAL_USER_ID")
+        or "11111111-2222-3333-4444-555555555555"
     )
-    allow_stateless: bool = False
+    allow_stateless: bool = True
     response_mode: Literal["blocking", "stream"] = "blocking"
     tenant_id: str | None = None
     workspace_id: str | None = None

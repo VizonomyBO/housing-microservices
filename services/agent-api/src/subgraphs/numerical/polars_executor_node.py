@@ -60,7 +60,11 @@ class PolarsExecutorNode:
             try:
                 rows = await asyncio.to_thread(self._execute_query, query, tables)
             except Exception as exc:  # pragma: no cover - polars internal errors
-                message = f"Polars SQL execution failed: {exc}"
+                table_cols = {
+                    alias: list(frame.columns) if hasattr(frame, "columns") else []
+                    for alias, frame in tables.items()
+                }
+                message = f"Polars SQL execution failed: {exc} query={query} tables={table_cols}"
                 raise PolarsExecutionError(message) from exc
             duration_ms = (perf_counter() - start) * 1000
             row_count = len(rows)
@@ -137,10 +141,57 @@ class PolarsExecutorNode:
         return cast(LazyFrameMap, mapping)
 
     def _execute_query(self, query: str, tables: LazyFrameMap) -> list[dict[str, Any]]:
+        logger.info(
+            "numerical.polars.query.start",
+            extra={
+                "query": query,
+                "tables": {
+                    alias: list(frame.columns) if hasattr(frame, "columns") else []
+                    for alias, frame in tables.items()
+                },
+            },
+        )
         ctx = pl.SQLContext()
+        prepared: dict[str, pl.LazyFrame] = {}
         for alias, frame in tables.items():
+            try:
+                if isinstance(frame, pl.LazyFrame):
+                    frame = frame.collect()
+                cols = list(frame.columns) if hasattr(frame, "columns") else []
+            except Exception:
+                # best-effort; continue with original frame
+                pass
+            logger.info(
+                "numerical.polars.register",
+                extra={"alias": alias, "columns": list(frame.columns) if hasattr(frame, "columns") else []},
+            )
+            prepared[alias] = frame
             ctx.register(alias, frame)
-        df = ctx.execute(query)
+        try:
+            df = ctx.execute(query)
+        except pl.exceptions.ColumnNotFoundError as exc:
+            logger.error(
+                "numerical.polars.missing_value_column",
+                extra={
+                    "query": query,
+                    "tables": {alias: list(frame.columns) if hasattr(frame, "columns") else [] for alias, frame in prepared.items()},
+                },
+            )
+            # Retry once with an explicit value alias for the first numeric column or any column.
+            ctx = pl.SQLContext()
+            for alias, frame in prepared.items():
+                try:
+                    if isinstance(frame, pl.LazyFrame):
+                        frame = frame.collect()
+                    cols = list(frame.columns) if hasattr(frame, "columns") else []
+                except Exception:
+                    pass
+                logger.info(
+                    "numerical.polars.register.retry",
+                    extra={"alias": alias, "columns": list(frame.columns) if hasattr(frame, "columns") else []},
+                )
+                ctx.register(alias, frame)
+            df = ctx.execute(query)
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
         return df.to_dicts()

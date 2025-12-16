@@ -90,15 +90,15 @@ async def test_normalizes_prompt_and_tags_intent():
         ),
     )
     request = ChatRequestContext(
-        conversation_id="conv-1",
-        thread_id="thr-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
+        thread_id="11111111-0000-0000-0000-000000000000",
         message=ChatMessagePayload(content="  hello   world  ", attachments=[]),
         hints={"route": "informational"},
         constraints=ChatConstraints(country_code="USA"),
     )
     state = AgentState(
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
-        conversation_id="conv-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
     )
 
     node = InputNormalizerNode(
@@ -120,8 +120,8 @@ async def test_normalizes_prompt_and_tags_intent():
 async def test_missing_attachment_raises_error():
     repo = cast(ConversationScopePort, FakeScopeRepository([]))
     request = ChatRequestContext(
-        conversation_id="conv-1",
-        thread_id="thr-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
+        thread_id="11111111-0000-0000-0000-000000000000",
         message=ChatMessagePayload(
             content="hello",
             attachments=[IncomingAttachment(type="document_reference", document_id=MISSING_DOC_ID)],
@@ -130,7 +130,7 @@ async def test_missing_attachment_raises_error():
     )
     state = AgentState(
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
-        conversation_id="conv-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
     )
     node = InputNormalizerNode(
         request=request,
@@ -147,14 +147,14 @@ async def test_auto_attaches_base_documents():
     fake_repo = FakeScopeRepository([])
     repo = cast(ConversationScopePort, fake_repo)
     request = ChatRequestContext(
-        conversation_id="conv-1",
-        thread_id="thr-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
+        thread_id="11111111-0000-0000-0000-000000000000",
         message=ChatMessagePayload(content="hello", attachments=[]),
         constraints=ChatConstraints(country_code="USA", auto_attach_base_docs=True),
     )
     state = AgentState(
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
-        conversation_id="conv-1",
+        conversation_id="11111111-0000-0000-0000-000000000000",
     )
     node = InputNormalizerNode(
         request=request,
@@ -172,3 +172,36 @@ async def test_auto_attaches_base_documents():
     assert BASE_DOC_ID in fake_repo.auto_attached
     assert BASE_DOC_ID in doc_ids
     assert any("Auto-attached" in warning for warning in normalized.warnings)
+
+
+@pytest.mark.asyncio
+async def test_stateless_allows_request_scoped_docs_without_db():
+    repo = cast(ConversationScopePort, FakeScopeRepository([]))
+    request = ChatRequestContext(
+        conversation_id="thr-stateless",
+        thread_id="thr-stateless",
+        allow_stateless=True,
+        message=ChatMessagePayload(
+            content="hello",
+            attachments=[
+                IncomingAttachment(type="document_reference", document_id=DOC_ID),
+                IncomingAttachment(type="document_reference", document_id=BASE_DOC_ID),
+            ],
+        ),
+        constraints=ChatConstraints(country_code="USA", auto_attach_base_docs=False),
+    )
+    state = AgentState(
+        messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
+        conversation_id="thr-stateless",
+    )
+    node = InputNormalizerNode(
+        request=request,
+        scope_repository=repo,
+        language_detector=StubLanguageDetector(language_code="en"),
+    )
+
+    result = await node(state)
+    normalized = result["normalized_input"]
+    doc_ids = {ref.document_id for ref in normalized.attachment_refs}
+    assert doc_ids == {DOC_ID, BASE_DOC_ID}
+    assert normalized.warnings == []

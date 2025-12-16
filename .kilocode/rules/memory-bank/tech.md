@@ -3,64 +3,31 @@
 ## Backend
 
 ### Python Services (Agent API, Ingestion, Auth, User)
--   **Language**: Python 3.11+
--   **Frameworks**:
-    -   **FastAPI**: Agent API, Ingestion Service (High performance, async).
-    -   **Flask**: Auth Service, User Service (Mature, stable).
--   **ORM**: SQLAlchemy 2.0 (Async support).
--   **Data Validation**: Pydantic V2.
--   **Authentication**:
-    -   **Argon2-cffi**: Password hashing.
-    -   **PyJWT**: Token management.
--   **AI/LLM**: LangGraph (Agent orchestration).
--   **Document Processing**: MarkItDown.
+- **Language/runtime**: Python 3.13 managed with `uv`.
+- **Frameworks**: FastAPI (Agent API, ingestion), Flask (auth, user).
+- **ORM**: SQLAlchemy 2.x (async support for Agent API/ingestion).
+- **Validation**: Pydantic v2.
+- **Auth**: Argon2-cffi for hashing, PyJWT for tokens, Flask-Limiter for rate limits.
+- **LLM/Retrieval**: LangGraph orchestration; Voyage embeddings (`voyage-3-large`) + `rerank-2.5`; MarkItDown for extraction.
 
 ### Shared Data Layer
--   **Path**: `packages/shared_data_layer`
--   **Role**: Centralized models, repositories, and schemas.
--   **Dependencies**: SQLAlchemy, Pydantic, Alembic.
+- **Path**: `packages/shared_data_layer`
+- **Role**: Centralized SQLAlchemy models, repositories, schemas, and fixtures.
+- **Tests**: Uses Testcontainers; Agent API integration tests import its fixtures.
 
-## Frontend / Aggregator
-
-### Swagger Service
--   **Language**: TypeScript 5.3+
--   **Runtime**: Node.js 20+
--   **Framework**: Express.js
--   **Documentation**: Swagger UI Express.
--   **Logging**: Winston.
+## Optional Frontend / Aggregator
+- **Swagger Service**: TypeScript 5+ on Node.js 20 with Express + Swagger UI Express + Winston (not deployed by default).
 
 ## Database
-
-### PostgreSQL
--   **Version**: 16
--   **Extensions**: `pgvector` (Vector embeddings for semantic search).
--   **Drivers**: `asyncpg` (Async Python driver), `psycopg2` (Sync Python driver).
+- **PostgreSQL 16 + pgvector** for semantic search; drivers: `asyncpg` and `psycopg`.
+- **Logical DBs**: `housing` (Agent/shared data layer) and `auth_db` (auth/user).
 
 ## Infrastructure & DevOps
+- **Docker Compose** for local, hybrid dev (`docker-compose.ec2.yml`), and prod profiles.
+- **AWS**: EC2-hosted services; S3 used in prod (LocalStack mocked locally when available).
+- **Patch deploys**: Hot-patch via `scp` + `docker cp` + compose restart (see AGENTS.md §7).
 
-### Containerization
--   **Docker**: Service containerization.
--   **Docker Compose**: Orchestration for local, dev, and prod environments.
-
-### Cloud (AWS)
--   **Compute**: EC2 (Production deployment).
--   **Storage**: S3 (Document storage - mocked by LocalStack locally).
--   **Mocking**: LocalStack (AWS services mock for local dev).
-
-### Tooling
--   **Dependency Management**: `uv` (Fast Python package installer and resolver).
--   **Linting/Formatting**: `ruff`.
--   **Type Checking**: `mypy` / `ty`.
--   **Testing**: `pytest` (with `pytest-xdist` for parallel execution).
-
-## Development Environment
-
-### Setup
--   **Env Files**: `.env.local`, `.env.dev`, `.env.prod`.
--   **Scripts**: `scripts/` directory contains helpers for env setup, deployment, and smoke testing.
-
-### Quality Gates
--   `ruff format .`
--   `ruff check --fix .`
--   `ty check .`
--   `pytest -n auto`
+## Tooling
+- **Dependency management**: `uv sync`, `uv add`, `uv lock`, `uv run`.
+- **Lint/format/type/test**: `uv run ruff format .`, `uv run ruff check --fix .`, `uv run ty check .`, `uv run pytest -n auto`.
+- **Env selection**: `.env.local`, `.env.dev`, `.env.prod` via `scripts/use_env.sh`.

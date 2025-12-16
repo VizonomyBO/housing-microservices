@@ -13,7 +13,7 @@
 
 ### Verify
 1. **Run the full test suite** every time you reach a review-ready state.
-3. After successful verification, remove both the tracker file and the plan file, then document the commands/output in your final response along with links to affected files.
+3. After successful verification, remove both the tracker file and the plan file, then document the commands/output in your final response along with links to affected files (unless current-session instructions require retaining `TASK_PLAN.md` / `TASK_PLAN_PROGRESS.md` for handoff).
 
 ---
 
@@ -66,8 +66,9 @@ uv run pytest -n auto
 ## 5. Runtime Safety, Permissions & Tooling
 
 - **Golden rule:** Do not introduce stubs, fixtures, or mocking unless explicitly requested. Default to using real services, LLMs, and data paths with production-like configs.
+- **No fallbacks or silent degradation:** Never add backup/simplified code paths that bypass real dependencies. When a dependency or precondition fails, raise and propagate the error, log it, and surface the failure through the API (appropriate 4xx/5xx) instead of forcing “simpler” behavior that masks issues.
 - **Never bake eval scenarios into prompts or code paths.** Do not hardcode eval questions, expected answers, or rubric-specific outputs inside agent prompts, templates, or control flow. Evaluation content must remain external (datasets/test harness), and the agent should rely on retrieval and generic instructions only.
-- **No retrieval/citation shortcuts for evals or prod:** Exercise the real retrieval stack (vector + BM25/FTS when available) instead of “preview-only” or heuristic-only rerankers. Citation checks must validate against the actual retrieved chunks—not just bracket markers.
+- **No retrieval/citation shortcuts for evals or prod:** Exercise the real retrieval stack (vector + BM25/FTS when available) instead of “preview-only” or heuristic-only rerankers. Citation checks must validate against the actual retrieved chunks—not just bracket markers. Do not bypass APIs with eval-side “retrieval lite”; use the same retrieval path production uses.
 
 Ask the user before:
 - Modifying other packages (unless the task explicitly requires cross-package changes).
@@ -82,6 +83,7 @@ When stuck, follow the “stuck protocol” from the shared data layer playbook:
 
 - **Pick env first**: `env_file=$(scripts/use_env.sh local|dev|prod); set -a && source "$env_file" && set +a`. `.env.local` → LocalStack, `.env.dev` → hybrid (local services, cloud data plane), `.env.prod` → AWS/EC2.
 - **Local reduced scope (LocalStack)**: `COMPOSE_PROFILES=reduced,ops docker compose --env-file "$env_file" up -d --build`; health: `http://localhost:${AGENT_API_PORT:-8000}/health`, `...5001/health`, `...4566/_localstack/health`; stop with `docker compose --env-file "$env_file" down [-v]`.
+- LocalStack runs are currently deferred/broken per session guidance; prioritize AWS verification unless explicitly resuming LocalStack work.
 - **Dev hybrid (local services, cloud DB/S3/ingest)**: `docker compose --env-file "$env_file" -f docker-compose.ec2.yml up -d --build agent-api auth-service user-service ingestion-service`; verify via URLs in `.env.dev` (remote ports).
 - **Prod deploy + smoke (AWS/EC2)**: `ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports` then `ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`; full runbook at `docs/runbooks/prod_setup.md`.
 - **Ingestion service**: FastAPI on EC2 (`INGEST_BASE_URL` default `http://52.207.140.87:8085`) replaces the old Lambda/S3 flow; presign + upload handled via the ingestion service endpoints.
@@ -120,13 +122,13 @@ Notes:
 
 ---
 
-## 7. Task-Specific Requirements (Ingestion Reactivation)
+## 8. Task-Specific Requirements (Ingestion Reactivation)
 
 - Maintain the per-task plan + tracker files (`TASK_PLAN.md`, `TASK_PLAN_PROGRESS.md`) and keep them in sync with the outstanding steps (enforce attachment safety, LocalStack verification, AWS verification, cleanup/tests).
 - For the in-progress AWS smoke work (Step 9), review `notes/aws_step9_status.md` before making changes; it captures the latest commands, evidence paths (`/tmp/aws_smoke_step9/`), and outstanding actions.
 - Always run Python tooling via `services/agent-api/.venv` and prefer `uv run …` for formatting, linting, typing, and pytest.
-- Compose workflows must support pointing the locally running services at the AWS deployment by sourcing `.env.prod`; LocalStack remains required for verification as well (use `.env.local` when testing LocalStack).
-- Perform the end-to-end curl walkthrough plus `scripts/prod_smoke_check.sh` in both LocalStack and AWS modes before completion; document commands and evidence in the tracker.
+- Compose workflows must support pointing the locally running services at the AWS deployment by sourcing `.env.prod`; keep LocalStack compatibility (`.env.local`) for when that verification resumes, even though it is currently deferred.
+- Perform the end-to-end curl walkthrough plus `scripts/prod_smoke_check.sh` in AWS mode now; rerun the LocalStack variant when that work resumes. Document commands and evidence in the tracker.
 - When AWS resources conflict, re-run Terraform with the provided `ArchaaS/terraform.v2.tfvars` (uses the `vizonomy-v2/dev2` suffix) instead of deleting user-managed infrastructure.
 - The remote Postgres host must expose **two** logical databases (`housing` for shared_data_layer/agent-api, `auth_db` for auth-service). Never co-mingle schemas by reusing `auth_db` for agent tables—create/fix the `housing` database instead.
 - **Current session constraints (Dec 2024):** user requested we focus on AWS verification (Plan Step 7) while deferring the LocalStack run to a later session, and to leave `TASK_PLAN.md` / `TASK_PLAN_PROGRESS.md` in place after finishing so the next session can resume quickly.

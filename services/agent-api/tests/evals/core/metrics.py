@@ -304,7 +304,9 @@ class MetricEngine:
     ) -> float | None:
         if not contexts:
             return 0.0
-        llm = LangchainLLMWrapper(ChatOpenAI(model=self.judge_selector.default_model))
+        llm = LangchainLLMWrapper(
+            ChatOpenAI(model=self.judge_selector.default_model)  # type: ignore[arg-type]
+        )
         dataset = Dataset.from_dict(
             {
                 "question": [question],
@@ -359,7 +361,7 @@ class MetricEngine:
             ],
             "reasoning": {"effort": reasoning_effort},
         }
-        response = client.responses.create(**body)
+        response = client.responses.create(**body)  # type: ignore[call-arg]
         output_text = getattr(response, "output_text", None) or ""
         try:
             data = json.loads(output_text)

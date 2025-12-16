@@ -13,6 +13,8 @@ Raise answer correctness/faithfulness for the reduced E2E scenarios by tightenin
   - Detect required entities/metrics (district names, percentages, dollar amounts, KPI values).
   - Score chunks with a numeric bonus (e.g., `score = sim + 0.1 * has_numeric + 0.05 * entity_overlap`) so number-bearing chunks outrank prose. Use a cross-encoder or lightweight LLM reranker; reference [Pinecone two-stage retrieval](https://www.pinecone.io/learn/series/rag/rerankers/) for the pattern.
   - If no numeric chunks survive, re-retrieve with a smaller chunk window or expanded filters instead of proceeding with empty facts.
+- **Model upgrades (no shortcuts)** — Default embeddings use `voyage-3-large` and hybrid candidates are reranked with Voyage `rerank-2.5` before prompt assembly. When the embedding model changes, re-embed existing chunks in-place (no re-upload) via `uv run python -m agent_api.cli reembed-chunks --batch-size 64 [--document-id ...]`, then refresh views.
+- **Diversified fusion (coverage-aware RRF/MMR)** — Blend hybrid candidates with reciprocal-rank fusion and per-document caps; add funding/reporting cue boosts so policy + ledger/reporting evidence surface together without doc-name hardcoding. Prefer diversity over single-doc dominance; keep a mix of policy, funding, and reporting spans when available.
 - **Table extraction for ledger/KPI docs** — After reranking, run a table-aware pass on kept chunks (MarkItDown/`pandas.read_fwf`/`read_csv` on TSV) to extract rows keyed by entity/date. Feed extracted cells (entity, metric, value, unit, line number) into the prompt context.
 - **Context constraints**
   - Restrict retrieval to provided doc IDs and cap chunk tokens to fit the prompt; trim to the smallest set that covers required entities/metrics.
@@ -45,10 +47,10 @@ Raise answer correctness/faithfulness for the reduced E2E scenarios by tightenin
 ## Validation & thresholds
 - Raise reduced E2E thresholds toward the earlier gates (faithfulness/answer_relevance ≈ 0.5 per scenario) in `tests/evals/datasets/reduced_e2e_smoke.yaml`; keep scenario-specific notes inline.
 - Keep deterministic checks (citation coverage, empty-context guard) enabled. If a metric regresses, adjust retrieval/prompting before lowering thresholds.
-- **Do not hardcode eval prompts or answers into the agent.** Retrieval/prompt shaping must stay generic; scenario specifics live only in the eval datasets and harness, not in production prompts or control flow.
-- **Use the real retrieval path.** Avoid “preview-only” or heuristic reranking; invoke the production retrieval stack (vector + BM25/FTS where available) so evals measure true retrieval quality.
-- **Citation validation must be deep.** Cite actual retrieved chunks and validate that citation markers align to chunk IDs/text, not just presence of brackets.
-- **Planned hybrid retrieval upgrade:** add BM25/FTS alongside pgvector, retrieve top-N from both, then rerank (e.g., weighted sum or LLM reranker) before prompting. This should replace the current heuristic-only preview selection.
+- **Never hardcode eval prompts/answers into the agent.** Retrieval/prompt shaping must stay generic; scenario specifics belong only in eval datasets/harness—production prompts cannot contain baked eval cases.
+- **Use the real retrieval path.** Avoid “preview-only” or heuristic-only reranking; invoke the production retrieval stack (vector + BM25/FTS where available) so evals measure true retrieval quality. Do not perform retrieval inside the eval handler that bypasses APIs; send requests through the same endpoints used in production. If retrieval fails, surface the error instead of falling back to mocked/preview content.
+- **Citation validation must be deep.** Cite actual retrieved chunks and validate that citation markers align to chunk IDs/text, not just presence of brackets; preserve `[id]` and `[SQL_ROWS]` markers for frontend rendering.
+- **Planned hybrid retrieval upgrade:** add BM25/FTS alongside pgvector, retrieve top-N from both, then rerank (e.g., weighted sum or LLM reranker) before prompting. This replaces any heuristic-only preview selection.
 
 ## Runbook (pytest)
 1) From repo root: `cd services/agent-api`

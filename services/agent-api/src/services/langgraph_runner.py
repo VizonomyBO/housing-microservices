@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,7 +39,11 @@ from repositories.agent_checkpoint_repository import (
 from repositories.conversation_scope_repository import ConversationScopeRepository
 from services.answer_composer import OpenAIAnswerComposer
 from services.conversation_summary_cache import ConversationSummaryCache
-from services.model_clients import OpenAIChatClientProtocol
+from services.model_clients import (
+    OpenAIChatClientProtocol,
+    VoyageEmbeddingClientProtocol,
+    VoyageRerankClientProtocol,
+)
 from services.numerical_fact_extractor import NumericFactExtractor
 from state.agent_state import (
     AgentState,
@@ -48,7 +53,13 @@ from state.agent_state import (
 )
 from streaming.sse_emitter import SSEEmitter
 from subgraphs.informational.answer_synthesizer_node import AnswerSynthesizerNode
-from subgraphs.numerical import PolarsExecutorNode, ResultValidatorNode, TextToSQLNode
+from subgraphs.numerical import (
+    PolarsExecutionError,
+    PolarsExecutorNode,
+    ResultValidatorNode,
+    TextToSQLError,
+    TextToSQLNode,
+)
 from subgraphs.numerical.text_to_sql_node import (
     SqlGenerationRequest,
     SqlGenerationResult,
@@ -80,18 +91,27 @@ class LangGraphChatRunner:
         language_detector: LanguageDetectorProtocol,
         openai_client: OpenAIChatClientProtocol | None,
         metrics: MetricsRegistry,
+        retrieval_embedding_client: VoyageEmbeddingClientProtocol | None = None,
+        retrieval_reranker: VoyageRerankClientProtocol | None = None,
         fact_extractor: NumericFactExtractor | None = None,
         summary_cache: ConversationSummaryCache | None = None,
     ) -> None:
         self._cache_client = cache_client
         self._cache_observability = cache_observability
         self._language_detector = language_detector
-        self._answer_composer = OpenAIAnswerComposer(client=openai_client)
+        self._answer_composer = OpenAIAnswerComposer(
+            client=openai_client, reranker=retrieval_reranker
+        )
+        self._retrieval_embedding_client = retrieval_embedding_client
+        self._retrieval_reranker = retrieval_reranker
         self._router = RouterNode(guardrail_engine=GuardrailEngine())
         self._metrics = metrics
-        self._sql_generator = HeuristicSqlGenerator()
+        if openai_client is None:
+            raise RuntimeError("OpenAI client is required for numerical planning; no fallback is allowed.")
+        self._sql_generator = LlmSqlGenerator(client=openai_client)
         self._fact_extractor = fact_extractor or NumericFactExtractor(client=openai_client)
         self._summary_cache = summary_cache or ConversationSummaryCache(cache_client)
+        self._openai_client = openai_client
 
     async def run_chat(
         self,
@@ -139,7 +159,16 @@ class LangGraphChatRunner:
         except NodeError as exc:
             raise GatewayError(code=exc.code, message=exc.message, status_code=400) from exc
         except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("LangGraph execution failed")
+            logger.exception(
+                "LangGraph execution failed",
+                extra={
+                    "conversation_id": request.conversation_id,
+                    "thread_id": request.thread_id,
+                    "route": self._route_hint(request),
+                    "allow_stateless": request.allow_stateless,
+                    "hint_keys": list(request.hints.keys()) if request.hints else [],
+                },
+            )
             raise GatewayError(
                 code="INTERNAL_ERROR",
                 message="LangGraph execution failed",
@@ -185,7 +214,12 @@ class LangGraphChatRunner:
         self, state: AgentState, context: RunnerContext
     ) -> AgentState:
         scope_repo = ConversationScopeRepository(context.db_session)
-        node = AttachmentScopeLoaderNode(scope_repository=scope_repo, workflow_repository=None)
+        node = AttachmentScopeLoaderNode(
+            scope_repository=scope_repo,
+            workflow_repository=None,
+            embedding_client=self._retrieval_embedding_client,
+            enable_hybrid_search=True,
+        )
         updates = await node(state, sse_emitter=context.sse_emitter)
         return state.model_copy(update=updates)
 
@@ -215,8 +249,10 @@ class LangGraphChatRunner:
         if not tables:
             tables = await self._build_numerical_tables(state)
         if not tables:
-            return self._numerical_fallback(
-                state, "Numeric prompt but no numerical tables were found"
+            raise GatewayError(
+                code="NUMERICAL_TABLES_MISSING",
+                message="Numeric prompt but no numerical tables were built",
+                status_code=400,
             )
         state = state.model_copy(
             update={
@@ -269,54 +305,100 @@ class LangGraphChatRunner:
         scope = state.attachment_scope
         if scope is None or not scope.documents:
             return []
+        if self._openai_client is None:
+            raise GatewayError(
+                code="NUMERICAL_SQL_UNAVAILABLE",
+                message="LLM client is required for numerical schema construction",
+                status_code=503,
+            )
         tables: list[NumericalTable] = []
         for document in scope.documents:
-            parsed = self._parse_markdown_table(document)
-            fact_rows: list[dict[str, Any]] = []
-            if parsed is not None:
-                headers, rows = parsed
-                if rows:
-                    column_names = self._normalize_columns(headers)
-                    fact_rows = self._rows_from_markdown(column_names, rows)
-            if not fact_rows:
-                facts = await self._fact_extractor.extract(document)
-                fact_rows = [fact.to_row() for fact in facts]
-            if not fact_rows:
+            llm_tables = await self._llm_tables_from_document(document)
+            tables.extend(llm_tables)
+        return tables
+
+    async def _llm_tables_from_document(self, document: AttachmentDocument) -> list[NumericalTable]:
+        text_chunks = [chunk.text for chunk in (document.chunks or []) if chunk.text]
+        if not text_chunks:
+            return []
+        prompt_text = "\n\n".join(text_chunks[:10])
+        user_prompt = (
+            "Extract structured tables from the document text. "
+            "Return JSON with the shape: "
+            '{"tables":[{"name":"<table_name>","columns":[{"name":"<col>","type":"number|text"}],"rows":[{"<col>":<value>,...}]}]}. '
+            "Use only columns you define; do not invent a 'value' column. "
+            "Prefer numeric types when appropriate. Keep row counts small (<=5) and faithful to the source."
+            f"\nDocument excerpt:\n{prompt_text}"
+        )
+        messages = [
+            {"role": "system", "content": "You are a data engineer that emits only JSON for tables."},
+            {"role": "user", "content": user_prompt},
+        ]
+        raw = await self._openai_client.complete(messages, temperature=0.0, max_tokens=800)
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            logger.error("llm_table_parse_failed", extra={"document_id": document.document_id, "raw": raw[:500]})
+            return []
+        tables_payload = payload.get("tables") if isinstance(payload, dict) else None
+        if not tables_payload or not isinstance(tables_payload, list):
+            logger.error("llm_table_missing_tables", extra={"document_id": document.document_id})
+            return []
+
+        built: list[NumericalTable] = []
+        for idx, table_spec in enumerate(tables_payload):
+            if not isinstance(table_spec, dict):
                 continue
-
-            sample_row = fact_rows[0]
-            columns = []
-            for name, sample_value in sample_row.items():
-                data_type = "float" if isinstance(sample_value, (int, float)) else "text"
-                columns.append(NumericalTableColumn(name=name, data_type=data_type))
-
-            alias = self._slugify(document.canonical_name or f"table_{len(tables) + 1}")
-            chunk_ids = {
-                row.get("source_chunk")
-                for row in fact_rows
-                if isinstance(row, dict) and row.get("source_chunk")
-            }
-            fallback_chunks = [
+            name = table_spec.get("name") or document.canonical_name or f"table_{idx+1}"
+            alias = self._slugify(f"{name}_{idx+1}")
+            columns_spec = table_spec.get("columns") or []
+            rows_spec = table_spec.get("rows") or []
+            if not columns_spec or not isinstance(columns_spec, list):
+                continue
+            columns: list[NumericalTableColumn] = []
+            name_map: dict[str, str] = {}
+            for col in columns_spec:
+                if not isinstance(col, dict):
+                    continue
+                col_name = self._slugify(col.get("name") or "")
+                if not col_name:
+                    continue
+                col_type_raw = (col.get("type") or "").lower()
+                col_type = "float" if col_type_raw in {"number", "numeric", "float", "integer"} else "text"
+                columns.append(NumericalTableColumn(name=col_name, data_type=col_type))
+                name_map[col_name] = col_name
+            cleaned_rows: list[dict[str, Any]] = []
+            if isinstance(rows_spec, list):
+                for row in rows_spec:
+                    if isinstance(row, dict):
+                        normalized_row: dict[str, Any] = {}
+                        for key, value in row.items():
+                            slug = self._slugify(str(key))
+                            target = name_map.get(slug, slug)
+                            normalized_row[target] = value
+                        cleaned_rows.append(normalized_row)
+            chunk_ids = [
                 chunk.chunk_id for chunk in (document.chunks or []) if chunk.chunk_id
             ][:1]
-            if not chunk_ids:
-                chunk_ids = set(fallback_chunks)
-            tables.append(
-                NumericalTable(
-                    table_id=f"tbl-{document.document_id}",
-                    table_name=document.canonical_name or "Numerical Table",
-                    alias=alias,
-                    columns=columns,
-                    row_count=len(fact_rows),
-                    sample_rows=fact_rows[:5],
-                    metadata={
-                        "document_ids": [document.document_id],
-                        "chunk_ids": sorted(chunk_ids),
-                        "rows": fact_rows,
-                    },
-                )
+            table = NumericalTable(
+                table_id=f"tbl-{document.document_id}-{idx+1}",
+                table_name=name,
+                alias=alias,
+                columns=columns,
+                row_count=len(cleaned_rows),
+                sample_rows=cleaned_rows[:5],
+                metadata={
+                    "document_ids": [document.document_id],
+                    "chunk_ids": chunk_ids,
+                    "rows": cleaned_rows,
+                },
             )
-        return tables
+            logger.info(
+                "numerical.table.built",
+                extra={"alias": alias, "columns": [col.name for col in columns], "row_count": len(cleaned_rows)},
+            )
+            built.append(table)
+        return built
 
     def _rows_from_markdown(
         self, column_names: list[str], rows: list[list[str]]
@@ -382,7 +464,20 @@ class LangGraphChatRunner:
             rows = table.metadata.get("rows") if table.metadata else None
             if not rows:
                 rows = table.sample_rows
-            mapping[table.alias] = pl.DataFrame(rows or []).lazy()
+            logger.info(
+                "numerical.lazyframe.rows.sample",
+                extra={
+                    "alias": table.alias,
+                    "columns": list(rows[0].keys()) if rows else [],
+                },
+            )
+            df = pl.DataFrame(rows or [])
+            lf = df.lazy()
+            logger.info(
+                "numerical.lazyframe.schema",
+                extra={"alias": table.alias, "columns": lf.columns},
+            )
+            mapping[table.alias] = lf
         return mapping
 
     def _build_initial_state(
@@ -509,30 +604,32 @@ class LangGraphChatRunner:
         request: ChatRequestContext,
     ) -> AgentState:
         new_messages = list(state.messages or [])[new_message_start:]
+        if request.allow_stateless or conversation_uuid is None:
+            # Stateless runs should not write messages or checkpoints; surface answers only.
+            return state
+
         persisted_state = state
-        if conversation_uuid is not None:
-            if new_messages:
-                await repository.append_messages(conversation_uuid, new_messages)
-            persisted_state = await repository.save_checkpoint(
-                state,
-                CheckpointSaveOptions(
-                    checkpoint_type=checkpoint_type,
-                    metadata={"route": state.route.value if state.route else None},
-                ),
-            )
+        if new_messages:
+            await repository.append_messages(conversation_uuid, new_messages)
+        persisted_state = await repository.save_checkpoint(
+            state,
+            CheckpointSaveOptions(
+                checkpoint_type=checkpoint_type,
+                metadata={"route": state.route.value if state.route else None},
+            ),
+        )
         await self._commit(db_session)
-        if conversation_uuid is not None and self._summary_cache is not None:
+        if self._summary_cache is not None:
             await self._summary_cache.invalidate(str(conversation_uuid))
-        if conversation_uuid is not None:
-            logger.info(
-                "checkpoint.persist",
-                extra={
-                    "conversation_id": str(conversation_uuid),
-                    "checkpoint_type": checkpoint_type,
-                    "message_count": len(new_messages),
-                    "route": state.route.value if state.route else self._route_hint(request),
-                },
-            )
+        logger.info(
+            "checkpoint.persist",
+            extra={
+                "conversation_id": str(conversation_uuid),
+                "checkpoint_type": checkpoint_type,
+                "message_count": len(new_messages),
+                "route": state.route.value if state.route else self._route_hint(request),
+            },
+        )
         return persisted_state
 
     def _parse_conversation_uuid(self, conversation_id: str) -> UUID | None:
@@ -565,6 +662,17 @@ class HeuristicSqlGenerator(SqlGeneratorProtocol):
         prompt = request.normalized_prompt.lower()
         alias = request.table.alias
         columns = [column.name for column in request.table.columns]
+        if "amount_usd" in columns:
+            value_column = "amount_usd"
+        elif "value" in columns:
+            value_column = "value"
+        else:
+            numeric_columns = [
+                column.name
+                for column in request.table.columns
+                if column.data_type == "float"
+            ]
+            value_column = numeric_columns[0] if numeric_columns else (columns[0] if columns else "value")
         select_clause = ", ".join(columns)
         query = f"SELECT {select_clause} FROM {alias}"
         threshold = self._extract_threshold(prompt)
@@ -572,9 +680,9 @@ class HeuristicSqlGenerator(SqlGeneratorProtocol):
         if threshold is not None:
             if any(word in prompt for word in ("below", "under", "less than")):
                 comparator = "<="
-            query += f" WHERE value {comparator} {threshold}"
+            query += f" WHERE {value_column} {comparator} {threshold}"
         if threshold is not None or "order" in prompt or "exceed" in prompt:
-            query += " ORDER BY value DESC"
+            query += f" ORDER BY {value_column} DESC"
         return SqlGenerationResult(
             sql=query,
             tables=[alias],
@@ -590,6 +698,154 @@ class HeuristicSqlGenerator(SqlGeneratorProtocol):
             return None
         value = float(match.group(1))
         return value if not math.isnan(value) else None
+
+
+class LlmSqlGenerator(SqlGeneratorProtocol):
+    """LLM-driven SQL generator that uses the chat client to plan queries."""
+
+    def __init__(self, client: OpenAIChatClientProtocol) -> None:
+        self._client = client
+
+    async def generate(self, request: SqlGenerationRequest) -> SqlGenerationResult:  # type: ignore[override]
+        if self._client is None:
+            raise TextToSQLError("LLM SQL generator requires an OpenAI client")
+        table = request.table
+        alias = table.alias
+        columns = [column.name for column in table.columns]
+        sample_rows = table.sample_rows or (table.metadata or {}).get("rows") or []
+        row_preview = sample_rows[:3] if isinstance(sample_rows, list) else []
+        columns_with_types = ", ".join(
+            f"{column.name} ({column.data_type})" for column in request.table.columns
+        )
+
+        def prompt(extra_note: str | None = None) -> list[dict[str, str]]:
+            user_content = (
+                "You are a SQL planner for a Polars SQLContext.\n"
+                "- Generate ONE safe SELECT statement for the provided table.\n"
+                "- Use ONLY the listed columns; do NOT create new column names.\n"
+                "- Keep it simple: filters, ordering, limits. No joins or subqueries.\n"
+                "- Prefer numeric columns for comparisons/ordering; if filtering amounts, use 'amount_usd'.\n"
+                f"User request: {request.normalized_prompt}\n"
+                f"Table alias: {alias}\n"
+                f"Columns: {columns_with_types}\n"
+                f"Sample rows: {row_preview}\n"
+                "Use ONLY the columns listed above. Map any geographic labels to 'city_district' and any money values to 'amount_usd'.\n"
+            )
+            if extra_note:
+                user_content += f"Previous attempt error: {extra_note}\nRegenerate valid SQL."
+            return [
+                {
+                    "role": "system",
+                    "content": "Return only SQL. No Markdown, no commentary. Do not invent columns.",
+                },
+                {"role": "user", "content": user_content},
+            ]
+
+        sql = ""
+        error_note = None
+        for _ in range(5):
+            messages = prompt(error_note)
+            raw = await self._client.complete(messages, temperature=0.0, max_tokens=256)
+            sql = self._extract_sql(raw)
+            if not sql:
+                error_note = "empty SQL"
+                continue
+            sql = self._normalize_columns(sql, columns)
+            if "value" in sql.lower():
+                error_note = (
+                    f"query referenced non-existent column 'value'; allowed columns: {', '.join(columns)}"
+                )
+                continue
+            ok, invalid_cols = self._validate_columns(sql, columns, extras=[alias, table.table_id])
+            if not ok:
+                fixed_sql = self._normalize_columns(sql, columns)
+                if fixed_sql != sql:
+                    sql = fixed_sql
+                    ok, invalid_cols = self._validate_columns(
+                        sql, columns, extras=[alias, table.table_id]
+                    )
+                    if ok:
+                        break
+                error_note = (
+                    f"query referenced invalid columns: {', '.join(invalid_cols)}; allowed: {', '.join(columns)}; last SQL: {sql}"
+                )
+                sql = ""
+                continue
+            break
+        if not sql:
+            raise TextToSQLError(f"LLM SQL generator failed: {error_note or 'empty SQL'}")
+        if "value" in sql.lower() and "amount_usd" in columns:
+            sql = re.sub(r"(?i)\bvalue\b", "amount_usd", sql)
+
+        return SqlGenerationResult(
+            sql=sql,
+            tables=[alias],
+            columns={alias: columns},
+            reasoning="llm_sql_planner",
+            table_specs=[{"table_id": table.table_id, "chunk_ids": table.metadata.get("chunk_ids", []) if table.metadata else []}],
+            sql_queries=[sql],
+        )
+
+    def _extract_sql(self, text: str) -> str:
+        fenced = re.findall(r"```(?:sql)?\\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+        candidate = fenced[0] if fenced else text
+        lines = [line.strip() for line in candidate.splitlines() if line.strip()]
+        sql = " ".join(lines)
+        # Keep only the first statement.
+        if ";" in sql:
+            sql = sql.split(";")[0]
+        return sql.strip()
+
+    def _normalize_columns(self, sql: str, columns: list[str]) -> str:
+        replacements: dict[str, str] = {}
+        if "city_district" in columns:
+            replacements.update({"district": "city_district", "city": "city_district"})
+        if "amount_usd" in columns:
+            replacements.update(
+                {
+                    "amount": "amount_usd",
+                    "rental_assistance_q2_1": "amount_usd",
+                    "rental_assistance": "amount_usd",
+                    "value": "amount_usd",
+                }
+            )
+        if "households_served" in columns:
+            replacements["households"] = "households_served"
+        for bad, good in replacements.items():
+            sql = re.sub(rf"(?i)\\b{re.escape(bad)}\\b", good, sql)
+        return sql
+
+    def _validate_columns(
+        self, sql: str, allowed: list[str], extras: list[str] | None = None
+    ) -> tuple[bool, list[str]]:
+        stripped = re.sub(r"'[^']*'", "", sql)
+        tokens = re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b", stripped)
+        keywords = {
+            "select",
+            "from",
+            "where",
+            "and",
+            "or",
+            "order",
+            "by",
+            "desc",
+            "asc",
+            "limit",
+            "group",
+            "having",
+            "as",
+        }
+        allowed_set = set(name.lower() for name in allowed)
+        if extras:
+            allowed_set.update(name.lower() for name in extras)
+        invalid: list[str] = []
+        for token in tokens:
+            lower = token.lower()
+            if lower in keywords or lower.isdigit():
+                continue
+            if lower not in allowed_set:
+                invalid.append(token)
+        return (len(invalid) == 0, invalid)
 
 
 __all__ = ["LangGraphChatRunner", "RunnerContext"]

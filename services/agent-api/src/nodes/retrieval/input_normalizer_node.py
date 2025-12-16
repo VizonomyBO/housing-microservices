@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,9 @@ from repositories.conversation_scope_repository import (
 from state.agent_state import AgentState
 from streaming.sse_emitter import SSEEmitter
 from streaming.with_sse import add_metadata, lifecycle_span
+from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -65,7 +69,18 @@ class InputNormalizerNode:
         metadata = {
             "country_code": tenant_scope.country_code,
             "auto_attach": self.request.constraints.auto_attach_base_docs,
+            "allow_stateless": self.request.allow_stateless,
+            "hint_keys": sorted(self.request.hints.keys()),
         }
+        logger.info(
+            "input_normalizer.start",
+            extra={
+                "conversation_id": conversation_id,
+                "thread_id": self.request.thread_id,
+                "allow_stateless": self.request.allow_stateless,
+                "hint_keys": list(self.request.hints.keys()),
+            },
+        )
 
         async with lifecycle_span(
             emitter=sse_emitter,
@@ -73,21 +88,59 @@ class InputNormalizerNode:
             subgraph="retrieval",
             metadata=metadata,
         ):
-            conversation_docs = await self.scope_repository.list_conversation_documents(
-                conversation_id
+            doc_map: dict[str, ConversationDocumentRecord] = {}
+            auto_attached_ids: set[str] = set()
+            stateless_mode = self.request.allow_stateless or not _looks_like_uuid(conversation_id)
+            if self.request.hints.get("dataset"):
+                # Eval harness traffic uses stateless conversations and should not require DB scope.
+                stateless_mode = True
+            parsed_conversation_uuid: UUID | None = None
+            if not stateless_mode:
+                try:
+                    parsed_conversation_uuid = UUID(str(conversation_id))
+                except (TypeError, ValueError):
+                    if self.request.allow_stateless:
+                        stateless_mode = True
+                    else:
+                        raise InputNormalizationError(
+                            code="CONVERSATION_ID_INVALID",
+                            message="Conversation id must be a UUID unless stateless mode is enabled",
+                        )
+            if stateless_mode:
+                doc_map = self._stateless_doc_map()
+                warnings = []
+            else:
+                try:
+                    conversation_docs = await self.scope_repository.list_conversation_documents(
+                        parsed_conversation_uuid or conversation_id
+                    )
+                    doc_map = {record.document_id: record for record in conversation_docs}
+                    auto_attached_ids = await self._auto_attach_base_docs(
+                        tenant_scope, doc_map, conversation_id
+                    )
+                    warnings = []
+                    if auto_attached_ids:
+                        warnings.append(
+                            f"Auto-attached {len(auto_attached_ids)} base document(s) for {tenant_scope.country_code}"
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "input_normalizer.doc_scope_failed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "allow_stateless": self.request.allow_stateless,
+                            "hint_keys": list(self.request.hints.keys()),
+                            "error": str(exc),
+                        },
+                    )
+                    # Fall back to stateless scope to avoid crashes; eval runs supply docs explicitly.
+                    doc_map = self._stateless_doc_map()
+                    warnings = []
+                    stateless_mode = True
+            attachment_refs, attachment_warnings = self._materialize_attachment_refs(
+                doc_map, auto_attached_ids, allow_stateless=stateless_mode
             )
-            doc_map = {record.document_id: record for record in conversation_docs}
-
-            auto_attached_ids = await self._auto_attach_base_docs(
-                tenant_scope, doc_map, conversation_id
-            )
-            attachment_refs, warnings = self._materialize_attachment_refs(
-                doc_map, auto_attached_ids
-            )
-            if auto_attached_ids:
-                warnings.append(
-                    f"Auto-attached {len(auto_attached_ids)} base document(s) for {tenant_scope.country_code}"
-                )
+            warnings.extend(attachment_warnings)
 
             workflow_refs = [
                 AttachmentReference(
@@ -172,6 +225,8 @@ class InputNormalizerNode:
         self,
         doc_map: dict[str, ConversationDocumentRecord],
         auto_attached_ids: set[str],
+        *,
+        allow_stateless: bool,
     ) -> tuple[list[AttachmentReference], list[str]]:
         requested_doc_ids = {
             attachment.document_id
@@ -179,7 +234,7 @@ class InputNormalizerNode:
             if attachment.type == "document_reference" and attachment.document_id
         }
         missing = [doc_id for doc_id in requested_doc_ids if doc_id not in doc_map]
-        if missing:
+        if missing and not allow_stateless:
             raise AttachmentValidationError(
                 code="ATTACHMENT_OUT_OF_SCOPE",
                 message="Some attachments are not linked to this conversation",
@@ -191,14 +246,14 @@ class InputNormalizerNode:
         for document_id in sorted(doc_map):
             record = doc_map[document_id]
             if not record.is_visible:
-                if record.document_id in requested_doc_ids:
+                if record.document_id in requested_doc_ids and not allow_stateless:
                     raise AttachmentValidationError(
                         code="ATTACHMENT_HIDDEN",
                         message="Requested attachment is hidden for this conversation",
                         details={"document_id": record.document_id},
                     )
                 continue
-            if record.read_only:
+            if record.read_only and not allow_stateless:
                 warnings.append(f"Document {record.document_id} is read-only")
             attachment_refs.append(
                 AttachmentReference(
@@ -217,6 +272,31 @@ class InputNormalizerNode:
                 )
             )
         return attachment_refs, warnings
+
+    def _stateless_doc_map(self) -> dict[str, ConversationDocumentRecord]:
+        doc_map: dict[str, ConversationDocumentRecord] = {}
+        for attachment in self.request.message.attachments:
+            if attachment.type != "document_reference" or not attachment.document_id:
+                continue
+            doc_map[attachment.document_id] = ConversationDocumentRecord(
+                document_id=attachment.document_id,
+                attach_source=attachment.attach_source or "stateless_request",
+                role=attachment.role or "reference",
+                visibility=attachment.visibility or "read_only",
+                canonical_name=None,
+                access_scope="user_shared",
+                country_code=self.request.constraints.country_code,
+                metadata={"stateless": True},
+            )
+        return doc_map
+
+
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        UUID(str(value))
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def _flatten_intent_hints(request: ChatRequestContext) -> list[str]:

@@ -10,8 +10,12 @@ from typing import Any
 import httpx
 from authlib.jose import jwt
 
+from agent_api.http import create_app
+from fastapi.testclient import TestClient
+
 from .judges import JudgeSelector
 from .metrics import MetricEngine, MetricResult
+from .postprocess import render_answer_with_citations
 from .scenarios import EvalScenario
 from .telemetry import EvalTelemetrySink
 
@@ -75,7 +79,12 @@ class EvalRunner:
 
     def run(self, scenario: EvalScenario) -> EvalResult:
         telemetry = EvalTelemetrySink()
+        use_local_app = os.getenv("EVAL_USE_LOCAL_APP", "1").lower() in ("1", "true", "yes")
+        if use_local_app:
+            self._load_env_file()
         base_url = scenario.run_config.base_url or self._env_value("AGENT_BASE_URL")
+        if use_local_app:
+            base_url = "http://testserver"
         if not base_url:
             raise RuntimeError("EVAL_BASE_URL or AGENT_BASE_URL is required for eval runs.")
         token = self._mint_token(
@@ -85,17 +94,33 @@ class EvalRunner:
         )
         headers = {"Authorization": f"Bearer {token}"}
 
+        # Force stateless mode for evals so runs avoid persisting conversations/telemetry.
+        scenario.run_config.allow_stateless = True
         payload = scenario.to_chat_payload()
         for ref in scenario.doc_refs:
             telemetry.record(chunk_id=ref.document_id, score=1.0)
 
-        with httpx.Client(base_url=base_url, headers=headers, timeout=120) as client:
-            conversation_id = self._ensure_conversation(client=client, scenario=scenario)
-            self._attach_documents(
-                client=client, conversation_id=conversation_id, scenario=scenario
-            )
-            payload["thread_id"] = conversation_id
-            payload["allow_stateless"] = False
+        if use_local_app:
+            self._ensure_env("OPENAI_API_KEY")
+            self._ensure_env("DATABASE_URL")
+            self._ensure_env("AUTH_SHARED_SECRET")
+            client = TestClient(create_app(), base_url=base_url, headers=headers)
+        else:
+            client = httpx.Client(base_url=base_url, headers=headers, timeout=120)
+
+        allow_stateless = bool(payload.get("allow_stateless"))
+
+        with client:
+            conversation_id: str | None = None
+            if not allow_stateless:
+                conversation_id = self._ensure_conversation(client=client, scenario=scenario)
+                self._attach_documents(
+                    client=client, conversation_id=conversation_id, scenario=scenario
+                )
+                payload["thread_id"] = conversation_id
+            else:
+                payload["thread_id"] = payload.get("thread_id")
+                payload["allow_stateless"] = True
 
             start = time.perf_counter()
             response = client.post("/v1/chat", json=payload)
@@ -108,7 +133,7 @@ class EvalRunner:
                 ) from exc
 
         body = response.json()
-        answer_text = self._extract_answer(body)
+        answer_text = render_answer_with_citations(body)
         contexts = scenario.document_contexts()
 
         metric_results: list[MetricResult] = []
@@ -146,7 +171,9 @@ class EvalRunner:
 
     def _mint_token(self, *, user_id: str, tenant_id: str | None, secret: str | None) -> str:
         if not secret:
-            raise RuntimeError("AUTH_SHARED_SECRET (or EVAL_AUTH_SECRET) is required for eval runs.")
+            raise RuntimeError(
+                "AUTH_SHARED_SECRET (or EVAL_AUTH_SECRET) is required for eval runs."
+            )
         claims = {
             "sub": user_id,
             "tenant_id": tenant_id,
@@ -161,7 +188,8 @@ class EvalRunner:
     def _ensure_conversation(self, *, client: httpx.Client, scenario: EvalScenario) -> str:
         payload = {
             "title": scenario.name,
-            "namespace": "eval-suite",
+            # Use a unique namespace per run to avoid reusing cached conversations/attachments.
+            "namespace": f"eval-suite-{scenario.name}-{int(time.time() * 1000)}",
             "tags": scenario.tags or ["eval"],
             "metadata": {"dataset": scenario.dataset},
         }
@@ -187,6 +215,25 @@ class EvalRunner:
                     return value.strip().strip('"').strip("'")
         return None
 
+    def _ensure_env(self, key: str) -> None:
+        if key in os.environ and os.environ.get(key):
+            return
+        value = self._env_value(key)
+        if value:
+            os.environ[key] = os.path.expandvars(value)
+
+    def _load_env_file(self) -> None:
+        env_path = Path(__file__).resolve().parents[5] / ".env.prod"
+        if not env_path.exists():
+            return
+        for line in env_path.read_text().splitlines():
+            if not line or line.strip().startswith("#") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            name = name.strip()
+            val = value.strip().strip('"').strip("'")
+            os.environ.setdefault(name, os.path.expandvars(val))
+
     def _attach_documents(
         self, *, client: httpx.Client, conversation_id: str, scenario: EvalScenario
     ) -> None:
@@ -198,5 +245,7 @@ class EvalRunner:
             "visibility": "read_only",
             "role": "reference",
         }
-        response = client.post(f"/v1/conversations/{conversation_id}/attachments/bulk", json=payload)
+        response = client.post(
+            f"/v1/conversations/{conversation_id}/attachments/bulk", json=payload
+        )
         response.raise_for_status()

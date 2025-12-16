@@ -39,7 +39,11 @@ from cache import InMemoryValkeyClient, ValkeyAsyncClient, ValkeyCacheClientProt
 from nodes.retrieval.utils.language import LinguaLanguageDetector, StubLanguageDetector
 from services.ingestion_pipeline import MarkdownChunker, VoyageIngestionPipeline
 from services.langgraph_runner import LangGraphChatRunner
-from services.model_clients import OpenAIChatClient, VoyageEmbeddingClient
+from services.model_clients import (
+    OpenAIChatClient,
+    VoyageEmbeddingClient,
+    VoyageRerankClient,
+)
 from telemetry import CacheObservability, get_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -74,6 +78,8 @@ def create_app() -> FastAPI:
 
         language_detector = _build_language_detector()
         openai_client = None
+        voyage_client = None
+        voyage_reranker = None
         if settings.openai_api_key:
             openai_client = OpenAIChatClient(
                 api_key=settings.openai_api_key,
@@ -84,6 +90,10 @@ def create_app() -> FastAPI:
             voyage_client = VoyageEmbeddingClient(
                 api_key=settings.voyage_api_key,
                 model=settings.voyage_embedding_model,
+            )
+            voyage_reranker = VoyageRerankClient(
+                api_key=settings.voyage_api_key,
+                model=settings.voyage_rerank_model,
             )
             ingestion_pipeline = VoyageIngestionPipeline(
                 voyage_client=voyage_client,
@@ -97,6 +107,8 @@ def create_app() -> FastAPI:
             language_detector=language_detector,
             openai_client=openai_client,
             metrics=registry,
+            retrieval_embedding_client=voyage_client,
+            retrieval_reranker=voyage_reranker,
         )
         if isinstance(get_chat_runner(), UnconfiguredChatRunner):
             set_chat_runner(runner)

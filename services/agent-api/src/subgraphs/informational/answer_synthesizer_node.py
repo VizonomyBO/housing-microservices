@@ -27,6 +27,7 @@ class AnswerSynthesisContext:
     """Inputs surfaced to the answer composer implementation."""
 
     normalized_prompt: str
+    allowed_document_ids: set[str]
     graph_summary: GraphSummary | None
     graph_context: GraphContext
     workflow_plan: WorkflowPlan | None
@@ -114,8 +115,18 @@ class AnswerSynthesizerNode:
                         continue
                     history.append({"role": str(role or "user"), "content": str(content)})
 
+            explicit_document_ids = {
+                ref.document_id
+                for ref in normalized_input.attachment_refs
+                if ref.document_id and ref.provided_in_request
+            }
+            scoped_document_ids = explicit_document_ids or {
+                ref.document_id for ref in normalized_input.attachment_refs if ref.document_id
+            }
+
             context = AnswerSynthesisContext(
                 normalized_prompt=normalized_input.normalized_prompt,
+                allowed_document_ids=scoped_document_ids,
                 chat_history=history,
                 graph_summary=state.graph_summary,
                 graph_context=state.graph_context,

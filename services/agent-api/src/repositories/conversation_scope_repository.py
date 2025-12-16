@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from uuid import UUID
 
+import numpy as np
+from pgvector.vector import Vector as PgVector
 from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.documents import ConversationDocument, Document
 from shared_data_layer.db.models.retrieval import Chunk
 from shared_data_layer.repositories.documents import DocumentRepository
-from sqlalchemy import select
+from sqlalchemy import bindparam, func, select
+from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ConversationDocumentRecord:
@@ -65,6 +70,7 @@ class DocumentChunkPreview:
     text: str
     page_number: int | None = None
     position: int | None = None
+    score: float | None = None
 
 
 class ConversationScopeRepository:
@@ -225,6 +231,131 @@ class ConversationScopeRepository:
             chunk_counts[doc_id] = chunk_counts.get(doc_id, 0) + 1
         return previews
 
+    async def hybrid_chunk_search(
+        self,
+        *,
+        query: str,
+        document_ids: Iterable[str | UUID],
+        embedding: Sequence[float] | None = None,
+        top_k: int = 8,
+        hybrid_weight: float = 0.5,
+        chunk_types: Sequence[str] = ("text",),
+    ) -> dict[str, list[DocumentChunkPreview]]:
+        """Retrieve top chunks per document using hybrid vector + BM25 scoring."""
+
+        uuids = [_as_uuid(doc_id) for doc_id in document_ids]
+        if not uuids or not query:
+            return {}
+
+        chunk_select = (
+            select(
+                Chunk.document_id,
+                Chunk.id,
+                Chunk.position,
+                Chunk.text_content,
+                Chunk.page_number,
+                Chunk.chunk_type,
+            )
+            .where(Chunk.document_id.in_(uuids))
+            .where(Chunk.text_content.is_not(None))
+        )
+        if chunk_types:
+            chunk_select = chunk_select.where(Chunk.chunk_type.in_(tuple(chunk_types)))
+
+        tsquery = func.websearch_to_tsquery("english", query)
+        bm25_expr = func.ts_rank_cd(Chunk.text_tsv, tsquery).label("bm25")
+        bm25_stmt = chunk_select.add_columns(bm25_expr).order_by(bm25_expr.desc())
+        bm25_rows = (await self._session.execute(bm25_stmt.limit(max(top_k * 3, 10)))).all()
+        vector_rows = []
+        vector_scores: dict[str, float] = {}
+        vector_embedding = _coerce_embedding(embedding) if embedding is not None else None
+        if vector_embedding:
+            embedding_array = np.asarray(vector_embedding, dtype=">f4")
+            if embedding_array.ndim != 1:
+                raise ValueError(
+                    f"embedding must be 1D, received ndim={embedding_array.ndim} shape={embedding_array.shape}"
+                )
+            normalized_embedding = embedding_array.tolist()
+            pgvector_embedding = PgVector(normalized_embedding)
+            embedding_param = bindparam(
+                "embedding_vec", pgvector_embedding, type_=Chunk.embedding.type
+            )
+            distance_expr = Chunk.embedding.cosine_distance(embedding_param)
+            vector_stmt = chunk_select.add_columns(
+                distance_expr.label("vector_score")
+            ).order_by(distance_expr)
+            try:
+                vector_rows = (
+                    await self._session.execute(vector_stmt.limit(max(top_k * 3, 10)))
+                ).all()
+            except StatementError as exc:
+                logger.error(
+                    "hybrid_chunk_search.statement_error params=%s",
+                    exc.params,
+                )
+                raise
+            except Exception as exc:
+                logger.error(
+                    "hybrid_chunk_search.vector_failed len=%s type=%s first_type=%s dims=%s",
+                    len(normalized_embedding),
+                    type(normalized_embedding).__name__,
+                    type(normalized_embedding[0]).__name__ if normalized_embedding else None,
+                    pgvector_embedding.dimensions(),
+                )
+                raise
+            for row in vector_rows:
+                distance = float(row.vector_score or 0.0)
+                similarity = max(0.0, 1.0 - distance)
+                vector_scores[str(row.id)] = similarity
+
+        bm25_scores: dict[str, float] = {}
+        for row in bm25_rows:
+            bm25_scores[str(row.id)] = float(row.bm25 or 0.0)
+
+        max_bm25 = max(bm25_scores.values() or [1.0])
+        max_vector = max(vector_scores.values() or [1.0])
+
+        combined: dict[str, float] = {}
+        for chunk_id in set(bm25_scores.keys()) | set(vector_scores.keys()):
+            bm25_component = bm25_scores.get(chunk_id, 0.0) / max_bm25 if max_bm25 else 0.0
+            vector_component = vector_scores.get(chunk_id, 0.0) / max_vector if max_vector else 0.0
+            combined[chunk_id] = (
+                hybrid_weight * vector_component + (1.0 - hybrid_weight) * bm25_component
+            )
+
+        scored_rows = {str(row.id): row for row in bm25_rows}
+        for row in vector_rows:
+            scored_rows.setdefault(str(row.id), row)
+
+        sorted_ids = sorted(combined.keys(), key=lambda cid: combined[cid], reverse=True)
+        selected_ids = set(sorted_ids[: top_k * 2])
+
+        per_doc: dict[str, list[DocumentChunkPreview]] = {}
+        for chunk_id in sorted_ids:
+            if chunk_id not in selected_ids:
+                continue
+            row = scored_rows.get(chunk_id)
+            if row is None:
+                continue
+            doc_id = str(row.document_id)
+            text = (row.text_content or "").strip()
+            if not text:
+                continue
+            per_doc.setdefault(doc_id, [])
+            if len(per_doc[doc_id]) >= top_k:
+                continue
+            per_doc[doc_id].append(
+                DocumentChunkPreview(
+                    document_id=doc_id,
+                    chunk_id=str(row.id),
+                    text=text,
+                    page_number=row.page_number,
+                    position=row.position,
+                    score=combined.get(chunk_id),
+                )
+            )
+        return per_doc
+
     def _map_document(self, document: Document) -> DocumentSummary:
         metadata = document.metadata_ if document is not None else None
         return DocumentSummary(
@@ -276,6 +407,17 @@ class ConversationScopePort(Protocol):
         max_chunks_per_doc: int = 5,
     ) -> dict[str, list[DocumentChunkPreview]]: ...
 
+    async def hybrid_chunk_search(
+        self,
+        *,
+        query: str,
+        document_ids: Iterable[str | UUID],
+        embedding: Sequence[float] | None = None,
+        top_k: int = 8,
+        hybrid_weight: float = 0.5,
+        chunk_types: Sequence[str] = ("text",),
+    ) -> dict[str, list[DocumentChunkPreview]]: ...
+
 
 def _as_uuid(value: str | UUID | None) -> UUID:
     if value is None:
@@ -283,3 +425,17 @@ def _as_uuid(value: str | UUID | None) -> UUID:
     if isinstance(value, UUID):
         return value
     return UUID(str(value))
+
+
+def _coerce_embedding(embedding: Sequence[float]) -> list[float]:
+    if isinstance(embedding, (str, bytes, dict)):
+        raise ValueError(f"embedding must be a 1D sequence of floats, received {type(embedding)}")
+    if any(isinstance(item, Sequence) and not isinstance(item, (str, bytes)) for item in embedding):
+        raise ValueError("embedding must be flat (1D) and cannot contain nested sequences")
+    try:
+        vector = [float(x) for x in embedding]
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise ValueError("Failed to coerce embedding into floats") from exc
+    if not vector:
+        raise ValueError("embedding must not be empty")
+    return vector

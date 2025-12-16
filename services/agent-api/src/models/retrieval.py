@@ -154,6 +154,7 @@ class AttachmentDocumentChunk(BaseModel):
     text: str
     page_number: int | None = None
     position: int | None = None
+    score: float | None = None
 
 
 class AttachmentDocument(BaseModel):

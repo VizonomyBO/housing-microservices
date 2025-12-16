@@ -60,6 +60,23 @@ class FakeScopeRepository:
     ):
         return self._previews
 
+    async def hybrid_chunk_search(
+        self,
+        *,
+        query: str,
+        document_ids,
+        embedding=None,
+        top_k=8,
+        hybrid_weight=0.5,
+        chunk_types=("text",),
+    ):
+        return self._previews
+
+
+class FakeEmbeddingClient:
+    async def embed(self, texts):
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
 
 class FakeWorkflowRepo:
     def __init__(self, workflows: dict[str, FakeWorkflow]):
@@ -94,7 +111,18 @@ async def test_hydrates_documents_and_workflows():
             metadata={"auto_attach_enabled": True},
         )
     }
-    repo = cast(ConversationScopePort, FakeScopeRepository(summaries))
+    previews = {
+        DOC_ID: [
+            DocumentChunkPreview(
+                document_id=DOC_ID,
+                chunk_id="chunk-1",
+                text="District 9 reserved 15% of slots; expanded to five districts.",
+                page_number=1,
+                position=0,
+            )
+        ]
+    }
+    repo = cast(ConversationScopePort, FakeScopeRepository(summaries, previews))
     workflow_repo = cast(
         WorkflowRepositoryProtocol,
         FakeWorkflowRepo({WORKFLOW_ID: FakeWorkflow(WORKFLOW_ID)}),
@@ -129,7 +157,11 @@ async def test_hydrates_documents_and_workflows():
         conversation_id="conv-1",
         normalized_input=normalized_input,
     )
-    node = AttachmentScopeLoaderNode(scope_repository=repo, workflow_repository=workflow_repo)
+    node = AttachmentScopeLoaderNode(
+        scope_repository=repo,
+        workflow_repository=workflow_repo,
+        embedding_client=FakeEmbeddingClient(),
+    )
 
     result = await node(state)
     scope: AttachmentScope = result["attachment_scope"]
@@ -145,7 +177,7 @@ async def test_missing_normalized_input_raises():
         messages=[MessageSnapshot(message=HumanMessage(content="hi"))],
         conversation_id="conv-1",
     )
-    node = AttachmentScopeLoaderNode(scope_repository=repo)
+    node = AttachmentScopeLoaderNode(scope_repository=repo, embedding_client=FakeEmbeddingClient())
     with pytest.raises(InputNormalizationError):
         await node(state)
 
@@ -186,6 +218,7 @@ async def test_missing_documents_and_workflows_marked():
     node = AttachmentScopeLoaderNode(
         scope_repository=repo,
         workflow_repository=cast(WorkflowRepositoryProtocol, FakeWorkflowRepo({})),
+        embedding_client=FakeEmbeddingClient(),
     )
 
     result = await node(state)
@@ -244,7 +277,7 @@ async def test_includes_chunk_previews():
         conversation_id="conv-1",
         normalized_input=normalized_input,
     )
-    node = AttachmentScopeLoaderNode(scope_repository=repo)
+    node = AttachmentScopeLoaderNode(scope_repository=repo, embedding_client=FakeEmbeddingClient())
 
     result = await node(state)
     scope: AttachmentScope = result["attachment_scope"]

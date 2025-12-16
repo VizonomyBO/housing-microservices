@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from shared_data_layer.db.models.conversations import Conversation
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,9 +67,10 @@ class ConversationService:
     ) -> ConversationEnsureResult:
         owner_uuid = _as_uuid(owner_user_id)
         namespace_slug = _normalize_namespace(namespace) or self._default_namespace
-        conversation_id = uuid5(NAMESPACE_URL, f"{namespace_slug}-{owner_uuid}")
-        conversation = await self._session.get(Conversation, conversation_id)
-        created = False
+        # Always create a unique conversation per request to avoid cross-run reuse.
+        conversation_id = uuid4()
+        conversation = None
+        created = True
         normalized_country = _normalize_country_code(country_code)
         desired_title = _normalize_title(title) or (
             self._default_title if namespace_slug == self._default_namespace else None

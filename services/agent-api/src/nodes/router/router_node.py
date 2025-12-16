@@ -376,7 +376,11 @@ class RouterNode:
             r"(greater than|less than|at least|at most|over|under|no more than)", prompt
         )
         percent_signal = "%" in prompt or "percent" in prompt or "percentage" in prompt
-        numeric_language = numerical_keyword_score >= 1 or ledger_signal or table_cues
+        numeric_language = (
+            numerical_keyword_score >= 1
+            or table_cues
+            or (ledger_signal and (digit_count > 0 or percent_signal or threshold_phrase))
+        )
         digit_signal = digit_count >= 2 or (
             digit_count >= 1 and (percent_signal or threshold_phrase or numeric_language)
         )
