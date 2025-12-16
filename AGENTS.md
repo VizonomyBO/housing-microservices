@@ -7,25 +7,26 @@
 - Keep the tracker in sync as you work; run verification (tests/linters) before calling a task review-ready.
 
 ## 2) Project Overview (check memory bank)
-- Services: FastAPI Agent API, FastAPI ingestion service (EC2), Flask auth-service, Flask user-service, optional Node/TS swagger-service.
-- Shared data layer: `packages/shared_data_layer` holds models/repos/fixtures; Agent API should rely on it for persistence.
+- Services: FastAPI Agent API (ReAct with tools), FastAPI ingestion service (text-only sync), Flask auth-service, Flask user-service; optional Swagger is deprecated.
+- Shared data layer: `packages/shared_data_layer` is retained; add new fields via this package only. Graph-RAG relations are deprecated—mark unused relations nullable and document deprecations rather than deleting.
 - Databases: Postgres 16 + pgvector with two logical DBs—`housing` (Agent/shared) and `auth_db` (auth/user). Do not mingle schemas.
-- Retrieval/LLM: Hybrid BM25 + vector with Voyage embeddings + reranker required; attachment gating stays in place until ingestion activates documents.
-- Current status/focus: Read `.kilocode/rules/memory-bank/*.md` (brief, context, tasks, tech, product) before making changes to pick up active constraints or ongoing smoke efforts.
+- Retrieval/LLM: Retrieval RAG only (graph RAG removed). Use Voyage `voyage-context-3` embeddings (e.g., 1024 dims) + `rerank-2.5`; apply advanced RAG techniques (HyDE/HyPE, contextual headers, fusion BM25+vector, rerank, filtering).
+- Current status/focus: Read `.kilocode/rules/memory-bank/*.md` (brief, context, tasks, tech, product) before making changes to pick up active constraints or ongoing efforts.
 
 ## 3) Environments & Tooling (uv-first)
 - Select env first: `env_file=$(scripts/use_env.sh local|dev|prod); set -a && source "$env_file" && set +a`.
 - Env setup: `uv venv --python 3.13 .venv`; deps via `uv sync --all-extras`; add deps with `uv add [--dev] <pkg>`; lock with `uv lock`.
 - Run commands with `uv run <command>` to ensure the pinned Python/venv is used.
-- Local/hybrid/prod compose: use `.env.local` for LocalStack (optional/deferred), `.env.dev` for hybrid, `.env.prod` for AWS/EC2; compose files include `docker-compose.ec2.yml` for hybrid/prod workflows.
+- Local dev: docker compose brings up Postgres, auth, user, ingestion, agent, and LocalStack (S3/needed AWS mocks) in one stack; LocalStack is required for dev AWS services.
+- Prod: EC2 deployment of auth, user, ingestion, agent, and Postgres; use env files per scripts. Hybrid/reduced profiles are deprecated along with Valkey/telemetry extras.
 
 ## 4) Project Structure & Dependencies
-- `services/agent-api` (FastAPI + LangGraph) — chat, retrieval, citations.
-- `services/ingestion-service` (FastAPI) — MarkItDown → chunk → embed → index → activate; `/v1/documents/upload` proxies here.
-- `services/auth-service`, `services/user-service` (Flask) — JWT + user mgmt backed by `auth_db`.
-- `services/swagger-service` (Node/TS) — optional aggregated docs (disabled by default).
-- `packages/shared_data_layer` — authoritative schemas/repos/tests; reuse instead of duplicating models.
-- `scripts/` — env selection, prod smoke, deploy helpers; `test-api.sh` for manual endpoint coverage.
+- `services/agent-api` (FastAPI ReAct agent + tools) — text-only retrieval; uses Voyage `voyage-context-3` embeddings + `rerank-2.5`; tools include retrieval, rerank/filtering helpers, attachment mgmt, and Pyodide sandbox for code.
+- `services/ingestion-service` (FastAPI) — synchronous text-only ingestion (parse → chunk → contextualized embed → persist/activate). No graph RAG edges; no Lambda/S3 pipeline.
+- `services/auth-service`, `services/user-service` (Flask) — JWT and user mgmt backed by `auth_db`.
+- `services/swagger-service` — deprecated/disabled.
+- `packages/shared_data_layer` — authoritative schemas/repos/tests; graph-RAG relations deprecated (mark unused nullable); add new fields here only.
+- `scripts/` — env selection, smoke/deploy helpers (to be updated with deploy automation); `test-api.sh` for manual endpoint coverage.
 
 ## 5) Workflow & Git Hygiene
 - Prefer small, reviewable changes; follow CONTRIBUTING if present. Do not rewrite or drop user changes. Avoid destructive commands (`git reset --hard`, `git checkout --`) unless explicitly requested.
@@ -42,9 +43,9 @@ uv run pytest -n auto
 Add targeted tests when behavior changes; prefer real integrations over stubs.
 
 ## 7) Runtime Safety & Fail-Fast Policy
-- No fallbacks, no mocks for evals or production code: use real dependencies (Voyage/OpenAI/Valkey/rate limiter/ingestion) and propagate failures loudly (proper exceptions/HTTP errors). Test-only bypass flags are allowed only where explicitly marked.
+- No fallbacks, no mocks for evals or production code: use real dependencies (Voyage/OpenAI/ingestion) and propagate failures loudly (proper exceptions/HTTP errors). Test-only bypass flags are allowed only where explicitly marked.
 - Do not introduce stubs/fixtures for production paths. If a dependency is unavailable, fail fast, log, and surface the error rather than silently degrading.
-- Keep attachment safety: documents remain blocked until ingestion activates them; preserve original upload payload for downstream steps when working on workflows/state machines.
+- Attachment/ownership model is simplified: list docs, create conversations, bulk attach/detach by doc IDs; owner_id may be set/null/“0000” for shared docs; allow deletes (DB + S3). Graph RAG ownership rules and refcounting are removed.
 
 ## 8) Task Lists & Trackers
 - When creating task lists or checklists for the project, place them under `tasks/` in the repo root (e.g., `tasks/<slug>.md`). Keep the task-building guidance with the list so future agents follow the same structure.
@@ -52,9 +53,9 @@ Add targeted tests when behavior changes; prefer real integrations over stubs.
 
 ## 9) Operations (brief)
 - AWS/EC2 smoke: `ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`; ensure uploads are unique to avoid dedupe short-circuits.
-- Patch deploy (Python services): `scp` file to EC2, `docker cp` into the target container, then `sudo docker compose -f /opt/housing-microservices/docker-compose.ec2.yml restart <service>`; verify health (`/health` or targeted endpoint). See runbooks in `docs/` and `notes/` for details.
+- Deploy: prefer the deployment automation script (modes: full infra/app redeploy with confirmation, service-only image rebuild/push/update, or hot patch via SSH + container restart). Until then, patch deploys can use `scp` + `docker cp` + compose restart per runbooks.
 
 ## 10) Boundaries & Approvals
-- Use the shared data layer for DB access; do not craft ad-hoc SQL schemas. Maintain separation between `housing` and `auth_db`.
+- Use the shared data layer for DB access; do not craft ad-hoc SQL schemas. Maintain separation between `housing` and `auth_db`. Mark deprecated graph-RAG relations as such instead of deleting the package.
 - Confirm before modifying other packages/services outside the task scope or before changing deployment infrastructure.
 - Avoid removing/renaming plan or tracker files that predate your work unless the task explicitly says to clean them up.
