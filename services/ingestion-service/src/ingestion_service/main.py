@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -15,6 +15,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from pydantic import HttpUrl
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -82,6 +83,11 @@ async def request_upload(
     settings: Settings = Depends(get_settings),
 ) -> UploadInitResponse:
     user = await _require_user(authorization, settings)
+    if not settings.signing_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="Signing secret is not configured",
+        )
     if payload.source_type not in settings.allowed_source_types:
         raise HTTPException(
             status_code=400,
@@ -193,6 +199,8 @@ async def complete_upload(
     authorization: str | None = Header(default=None, convert_underscores=False),
 ) -> UploadCompleteResponse:
     # Validate signature + expiry
+    if not settings.signing_secret:
+        raise HTTPException(status_code=500, detail="Signing secret is not configured")
     fields = {
         "document_id": document_id,
         "ingestion_id": ingestion_id,
@@ -265,7 +273,7 @@ async def complete_upload(
         tags=tags_list,
         file_size_bytes=declared_size or 1,
         access_scope=access_scope,
-        callback_url=None if not callback_url else callback_url,
+        callback_url=None if not callback_url else cast(HttpUrl, callback_url),
         metadata=metadata_obj,
         trace_id=trace_id or None,
         output_dimension=resolved_dimension,

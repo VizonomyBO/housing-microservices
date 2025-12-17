@@ -18,13 +18,15 @@ from ingestion_service.settings import Settings  # noqa: E402
 
 
 def _make_settings(**overrides) -> Settings:
-    base = {
-        "database_url": "postgresql+asyncpg://user:pass@localhost:5432/housing",
-        "voyage_output_dimension": 1024,
-        "vector_store_dimension": 1024,
-    }
-    base.update(overrides)
-    return Settings(**base)
+    return Settings(
+        database_url="postgresql+asyncpg://user:pass@localhost:5432/housing",
+        jwt_secret_key="secret",
+        signing_secret="secret",
+        voyage_api_key="dummy",
+        voyage_output_dimension=1024,
+        vector_store_dimension=1024,
+        **overrides,
+    )
 
 
 def test_chunker_adds_contextual_rewrites() -> None:

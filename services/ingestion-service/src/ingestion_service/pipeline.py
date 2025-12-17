@@ -233,12 +233,12 @@ class IngestionPipeline:
                 f"({self._storage_dimension}). Set VOYAGE_OUTPUT_DIMENSION/VOYAGE_EMBEDDING_DIM "
                 "to the pgvector column dimension (256/512/1024/2048)."
             )
-        self._voyage: VoyageEmbeddingClientProtocol | None = None
-        if settings.voyage_api_key:
-            self._voyage = VoyageEmbeddingClient(
-                api_key=settings.voyage_api_key,
-                model=settings.voyage_model,
-            )
+        if not settings.voyage_api_key:
+            raise IngestionError("Voyage API key is required for ingestion embeddings")
+        self._voyage: VoyageEmbeddingClientProtocol | None = VoyageEmbeddingClient(
+            api_key=settings.voyage_api_key,
+            model=settings.voyage_model,
+        )
 
     async def ingest_file(
         self,
@@ -468,8 +468,10 @@ class IngestionPipeline:
                 output_dimension=output_dimension,
                 input_type="document",
             )
-            if len(embeddings) != len(chunks):
-                raise IngestionError("Embedding count mismatch")
+        if not embeddings:
+            raise IngestionError("Voyage embeddings could not be generated")
+        if len(embeddings) != len(chunks):
+            raise IngestionError("Embedding count mismatch")
 
         owner_id = document.owner_user_id
         country_code = (document.country_code or request.country_code or "UNK").upper()
