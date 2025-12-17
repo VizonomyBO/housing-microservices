@@ -88,3 +88,4 @@ async def test_retrieval_builds_citations_without_network():
     assert ctx.citations
     assert ctx.citations[0]["doc_id"] == "doc1"
     assert "hello world" in ctx.context_text
+    assert ctx.citations[0]["text"] == "hello world"

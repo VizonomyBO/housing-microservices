@@ -99,6 +99,7 @@ class RetrievalService:
                 "canonical_name": chunk.canonical_name,
                 "page_number": chunk.page_number,
                 "position": chunk.position,
+                "text": chunk.text,
             }
             for chunk in context_blocks
         ]
