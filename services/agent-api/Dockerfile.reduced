@@ -7,22 +7,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN pip install --no-cache-dir uv
 
-WORKDIR /app
+WORKDIR /app/services/agent-api
 
-COPY services/agent-api/pyproject.toml /app/pyproject.toml
+COPY services/agent-api/pyproject.toml /app/services/agent-api/pyproject.toml
 # Use the pinned lock to mirror local dev environments
-COPY services/agent-api/uv.lock /app/uv.lock
+COPY services/agent-api/uv.lock /app/services/agent-api/uv.lock
 
-# Copy shared data layer for editable install
+# Copy shared data layer for editable install (resolved from ../../packages in pyproject)
 COPY packages/shared_data_layer /app/packages/shared_data_layer
+
+COPY services/agent-api/src /app/services/agent-api/src
 
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
     uv sync --all-extras
 
-COPY services/agent-api/src /app/src
-
-ENV PYTHONPATH=/app/src:/app/packages
+ENV PYTHONPATH=/app/services/agent-api/src:/app/packages
 
 EXPOSE 8000
 
