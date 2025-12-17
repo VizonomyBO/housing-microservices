@@ -6,6 +6,7 @@ Once the task is done, mark this as completed in the title
 
 ## Objective
 - Research and design a maintainable, object-oriented pytest-based evaluation suite for the Agent API, exercising the ReAct tool stack end-to-end via HTTP (chat/SSE, attachments, retrieval/rerank paths).
+- Download the documents in s3 in prod for USA and use them for the local eval crafting questions about the pdfs.
 
 ## Scope
 - Study current Agent API behavior, tools, and schemas to define eval targets (grounding, citation quality, attachment gating, HyDE/fusion retrieval expectations).
