@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_api.http import create_app
+from agent_api.http.app import create_app
 
 app = create_app()
 

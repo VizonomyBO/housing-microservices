@@ -1,55 +1,110 @@
-"""Pytest configuration for the agent-api service."""
-
-from __future__ import annotations
-
 import os
-import sys
-from pathlib import Path
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
+from uuid import uuid4
 
-import opentelemetry.trace as ot_trace
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from shared_data_layer.db.session import DatabaseSessionManager
 
-os.environ.setdefault("METRICS_AUTH_TOKEN", "test-metrics-token")
-os.environ["ALLOW_IN_MEMORY_VALKEY"] = "1"
-os.environ["ALLOW_STUB_LANGUAGE_DETECTOR"] = "1"
-os.environ["ALLOW_RATE_LIMITER_BYPASS"] = "1"
-os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
-os.environ.setdefault("AUTH_SHARED_SECRET", "test-auth-secret")
-os.environ["REDUCED_SCOPE_ENABLED"] = "1"
-os.environ["REDUCED_SCOPE_USE_REAL_TOOLS"] = "0"
-os.environ["REDUCED_SCOPE_DISABLE_VALKEY"] = "1"
-os.environ["REDUCED_SCOPE_DISABLE_RATE_LIMITING"] = "1"
+from agent_api.auth.validator import AuthContext
+from agent_api.http.app import create_app
+from agent_api.http.deps import get_auth_context, get_runner
+from agent_api.services.conversations import ConversationService
+from agent_api.settings import Settings, load_settings
 
 pytest_plugins = ["shared_data_layer.testing.conftest"]
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = PROJECT_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+
+@pytest.fixture(scope="session")
+def test_user_id() -> str:
+    return str(uuid4())
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _default_database_url(request: pytest.FixtureRequest) -> None:
-    """Ensure DATABASE_URL is set for app startup in local/test runs."""
-
-    if os.getenv("DATABASE_URL"):
-        return
-    database_url = request.getfixturevalue("database_url")
-    async_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    os.environ.setdefault("DATABASE_URL", async_url)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _reset_tracer_provider() -> None:
-    """Allow tests to override the global tracer provider."""
-
-    try:
-        # Clear any previously set provider so per-test overrides take effect.
-        ot_trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
-        if hasattr(ot_trace, "_TRACER_PROVIDER_SET_ONCE"):
-            ot_trace._TRACER_PROVIDER_SET_ONCE._done = False  # type: ignore[attr-defined]
-    except Exception:  # pragma: no cover - defensive
-        pass
+@pytest.fixture(scope="session")
+def configure_env(database_url: str, test_user_id: str) -> None:
+    os.environ["DATABASE_URL"] = database_url
+    os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "test-openai")
+    os.environ["VOYAGE_API_KEY"] = os.environ.get("VOYAGE_API_KEY", "test-voyage")
+    os.environ["INGEST_BASE_URL"] = os.environ.get("INGEST_BASE_URL", "http://example.com")
+    os.environ["METRICS_AUTH_TOKEN"] = os.environ.get("METRICS_AUTH_TOKEN", "token")
+    os.environ["AGENT_API_PORT"] = "8000"
+    os.environ["STACK_PROFILE"] = "test"
+    os.environ["SERVICE_MODE"] = "test"
+    os.environ["AUTH_JWT_ALGORITHMS"] = "HS256"
+    os.environ["AUTH_JWT_LEEWAY_SECONDS"] = "60"
+    os.environ["AUTH_JWKS_CACHE_SECONDS"] = "60"
 
 
-__all__ = []
+@dataclass(slots=True)
+class ChatRunResult:
+    done_payload: dict[str, Any]
+    messages: list[dict[str, Any]] | None = None
+
+
+class FakeRunner:
+    async def run_chat(
+        self,
+        *,
+        request,
+        auth,
+        request_context,
+        sse_emitter,
+        prompt_overrides,
+        hints,
+        response_mode,
+        db_session,
+    ) -> ChatRunResult:
+        service = ConversationService(db_session)
+        await service.append_message(
+            conversation_id=request.conversation_id,
+            role="user",
+            content={"content": request.message.content},
+        )
+        await service.append_message(
+            conversation_id=request.conversation_id,
+            role="assistant",
+            content={"content": "hello!", "citations": []},
+        )
+        await db_session.commit()
+        return ChatRunResult(
+            done_payload={
+                "status": "COMPLETED",
+                "answer": "hello!",
+                "thread_id": request.thread_id,
+                "route": "react",
+                "citations": [],
+                "requires_sql": False,
+            },
+            messages=[{"role": "assistant", "content": "hello!"}],
+        )
+
+
+@pytest.fixture
+def app(configure_env: None, test_user_id: str, database_url: str) -> FastAPI:
+    settings = load_settings()
+    DatabaseSessionManager.init(database_url)
+    app = create_app()
+    app.state.settings = settings
+    app.state.db_initialized = True
+
+    async def _fake_auth() -> AuthContext:
+        return AuthContext(user_id=test_user_id, tenant_id=None, roles=[], scopes=[], metadata={})
+
+    app.dependency_overrides[get_auth_context] = _fake_auth
+    app.dependency_overrides[get_runner] = lambda: FakeRunner()
+    return app
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=app, raise_app_exceptions=True)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def settings(configure_env: None) -> Settings:
+    return load_settings()

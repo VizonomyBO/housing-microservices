@@ -1,4 +1,4 @@
-"""Async SSE emitter and iterator utilities."""
+"""Async SSE emitter with heartbeats."""
 
 from __future__ import annotations
 
@@ -22,18 +22,22 @@ from streaming.events import (
 logger = logging.getLogger(__name__)
 
 
-class SSEEmitterError(RuntimeError):
-    """Raised when the SSE emitter cannot produce a valid frame."""
-
-
 HeartbeatFormatter = Callable[[], str]
 EventEmitterFn = Callable[[str, Mapping[str, Any]], Awaitable[None]]
 
 
 @dataclass(slots=True)
-class SSEEmitter:
-    """Queues LangGraph events and exposes an async iterator for SSE streaming."""
+class StreamSettings:
+    heartbeat_interval: float = 10.0
+    max_queue_size: int = 256
 
+
+class SSEEmitterError(RuntimeError):
+    pass
+
+
+@dataclass(slots=True)
+class SSEEmitter:
     conversation_id: str
     task_id: str | None = None
     request_id: str | None = None
@@ -72,8 +76,6 @@ class SSEEmitter:
         request_id: str | None = None,
         timestamp: datetime | None = None,
     ) -> SSEEnvelope:
-        """Validate payloads and enqueue formatted SSE frames."""
-
         event_type = self._coerce_event(event)
         payload_model = self._coerce_payload(event_type, payload)
         envelope = build_envelope(
@@ -88,8 +90,6 @@ class SSEEmitter:
         return envelope
 
     async def send_envelope(self, envelope: SSEEnvelope) -> None:
-        """Queue a pre-built envelope."""
-
         await self._enqueue(self._format(envelope))
 
     async def close(self) -> None:
@@ -102,8 +102,6 @@ class SSEEmitter:
         return self.iter_sse()
 
     async def iter_sse(self) -> AsyncIterator[str]:
-        """Yield SSE frames with heartbeat keepalives."""
-
         while True:
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=self.heartbeat_interval)
@@ -135,7 +133,7 @@ class SSEEmitter:
                                 "SSE emitter queue full for conversation_id=%s; dropping oldest frame",
                                 self.conversation_id,
                             )
-                except asyncio.QueueEmpty:  # pragma: no cover - defensive
+                except asyncio.QueueEmpty:  # pragma: no cover
                     await asyncio.sleep(0)
 
     def _heartbeat(self) -> str:
@@ -158,7 +156,7 @@ class SSEEmitter:
             return event
         try:
             return SSEEventType(event)
-        except ValueError as exc:  # pragma: no cover - guardrail
+        except ValueError as exc:
             raise SSEEmitterError(f"Unsupported SSE event: {event}") from exc
 
     def _coerce_payload(
@@ -171,6 +169,7 @@ class SSEEmitter:
 
 
 def default_event_emitter(emitter: SSEEmitter) -> EventEmitterFn:
-    """Convenience helper wired into services that expect a callable emitter."""
-
     return emitter.as_event_emitter()
+
+
+__all__ = ["SSEEmitter", "SSEEmitterError", "StreamSettings", "default_event_emitter"]

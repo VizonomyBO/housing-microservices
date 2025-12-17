@@ -2,23 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
-from agent_api.http.deps import (
-    get_auth_context,
-    get_cache_client,
-    get_db_session,
-    get_rate_limiter,
-    get_request_context,
-    get_settings,
-)
+from agent_api.http.deps import get_auth_context, get_db_session, get_request_context
 from agent_api.http.errors import GatewayError
-from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.schemas import (
     AttachmentBulkRequest,
     AttachmentBulkResponse,
@@ -29,17 +21,13 @@ from agent_api.http.schemas import (
     AttachmentRecord,
     AttachmentRequest,
 )
-from agent_api.reduced_scope import reduced_scope_demo_metadata
-from agent_api.settings import Settings
-from cache import ValkeyCacheClientProtocol
-from repositories.conversation_scope_repository import ConversationDocumentRecord
-from services import (
+from agent_api.services.attachments import (
     AttachmentResult,
     AttachmentService,
     AttachmentStatus,
-    ConversationSummaryCache,
     DocumentNotReadyError,
 )
+from agent_api.services.retrieval_scope import ConversationDocumentRecord
 
 router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 
@@ -48,41 +36,28 @@ router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 async def list_attachments(
     conversation_id: str,
     request_context: Annotated[RequestContext, Depends(get_request_context)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> JSONResponse:  # pragma: no cover - exercised via HTTP tests
-    service = AttachmentService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
+) -> JSONResponse:
+    service = AttachmentService(db_session)
     records = await service.list_attachments(conversation_id)
     payload = AttachmentListResponse(
         conversation_id=conversation_id,
         attachments=[_record_to_schema(record) for record in records],
         request_id=request_context.request_id,
     )
-    headers = _build_headers(rate_limiter, settings)
-    return JSONResponse(
-        status_code=status.HTTP_200_OK, content=payload.model_dump(), headers=headers
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=payload.model_dump())
 
 
 @router.post("/{conversation_id}/attachments", summary="Attach a document to a conversation")
-async def attach_document(  # pragma: no cover - exercised via HTTP tests
+async def attach_document(
     conversation_id: str,
     payload: AttachmentRequest,
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
-    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
-    service = AttachmentService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
+    _ensure_authenticated(auth_context)
+    service = AttachmentService(db_session)
     try:
         result = await service.attach_document(
             conversation_id=conversation_id,
@@ -120,50 +95,27 @@ async def attach_document(  # pragma: no cover - exercised via HTTP tests
             status_code=status.HTTP_400_BAD_REQUEST,
         ) from exc
 
-    headers = _build_headers(rate_limiter, settings)
-    summary_cache = ConversationSummaryCache(cache_client)
-    reduced_scope_meta = (
-        reduced_scope_demo_metadata(settings.reduced_scope)
-        if settings.reduced_scope.is_enabled()
-        else None
-    )
-    status_code = status.HTTP_201_CREATED
-    if result.status == AttachmentStatus.FEATURE_DISABLED:
-        await db_session.commit()
-        headers.setdefault("Retry-After", "86400")
-        status_code = status.HTTP_202_ACCEPTED
-    else:
-        await db_session.commit()
-        await summary_cache.invalidate(conversation_id)
-        status_code = status.HTTP_201_CREATED
-
+    await db_session.commit()
     response = AttachmentMutationResponse(
         conversation_id=conversation_id,
         document_id=result.attachment.document_id if result.attachment else None,
-        status=result.status.value,
+        status=_attach_status_literal(result.status),
         attachment=_record_to_schema(result.attachment) if result.attachment else None,
-        auto_attached=result.auto_attached,
+        auto_attached=result.auto_attached or [],
         message=result.message or _default_attachment_message(result),
         request_id=request_context.request_id,
-        reduced_scope=reduced_scope_meta,
     )
-    return JSONResponse(status_code=status_code, content=response.model_dump(), headers=headers)
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=response.model_dump())
 
 
 @router.delete("/{conversation_id}/attachments/{document_id}", summary="Detach a document")
-async def detach_document(  # pragma: no cover - exercised via HTTP tests
+async def detach_document(
     conversation_id: str,
     document_id: str,
     request_context: Annotated[RequestContext, Depends(get_request_context)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
-    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
-    service = AttachmentService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
+    service = AttachmentService(db_session)
     try:
         status_value = await service.detach_document(
             conversation_id=conversation_id,
@@ -176,71 +128,33 @@ async def detach_document(  # pragma: no cover - exercised via HTTP tests
             message=str(exc),
             status_code=status.HTTP_404_NOT_FOUND,
         ) from exc
-    except ValueError:
-        await db_session.rollback()
-        response = AttachmentDeleteResponse(
-            conversation_id=conversation_id,
-            document_id=document_id,
-            status="FORBIDDEN",
-            request_id=request_context.request_id,
-        )
-        headers = _build_headers(rate_limiter, settings)
-        return JSONResponse(
-            status_code=status.HTTP_409_CONFLICT, content=response.model_dump(), headers=headers
-        )
 
     if status_value is AttachmentStatus.DETACHED:
         await db_session.commit()
-        await ConversationSummaryCache(cache_client).invalidate(conversation_id)
     else:
         await db_session.rollback()
-    headers = _build_headers(rate_limiter, settings)
     response = AttachmentDeleteResponse(
         conversation_id=conversation_id,
         document_id=document_id,
-        status=status_value.value,
+        status=_detach_status_literal(status_value),
         request_id=request_context.request_id,
     )
-    return JSONResponse(
-        status_code=status.HTTP_200_OK, content=response.model_dump(), headers=headers
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
 
 
 @router.post(
     "/{conversation_id}/attachments/bulk",
-    summary="Attach all documents for a country to a conversation",
+    summary="Attach a set of documents to a conversation",
 )
-async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
+async def bulk_attach_documents(
     conversation_id: str,
     payload: AttachmentBulkRequest,
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
-    cache_client: Annotated[ValkeyCacheClientProtocol, Depends(get_cache_client)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> JSONResponse:
-    user_id = auth_context.user_id
-    if not user_id:
-        raise GatewayError(
-            code="UNAUTHORIZED",
-            message="User context is required",
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
-    await rate_limiter.acquire(
-        bucket="attachments_bulk",
-        tokens=1,
-        route="attachments.bulk",
-        metadata={
-            "document_ids": len(payload.document_ids),
-        },
-    )
-
-    summary_cache = ConversationSummaryCache(cache_client)
-    service = AttachmentService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
+    _ensure_authenticated(auth_context)
+    service = AttachmentService(db_session)
 
     attached: list[str] = []
     skipped: list[AttachmentBulkSkipped] = []
@@ -250,10 +164,10 @@ async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
             result = await service.attach_document(
                 conversation_id=conversation_id,
                 document_id=doc_id,
-                attach_source="bulk_country",
+                attach_source="bulk",
                 visibility=payload.visibility,
                 role=payload.role,
-                attached_by_user_id=user_id,
+                attached_by_user_id=auth_context.user_id,
                 auto_attach_base_docs=False,
             )
         except DocumentNotReadyError as exc:
@@ -268,39 +182,40 @@ async def bulk_attach_documents(  # pragma: no cover - exercised via HTTP tests
             skipped.append(AttachmentBulkSkipped(document_id=doc_id, reason=str(exc)))
             continue
 
-        if result.status is AttachmentStatus.ATTACHED and result.attachment:
+        if result.status == AttachmentStatus.ATTACHED and result.attachment:
             attached.append(result.attachment.document_id)
-        elif result.status is AttachmentStatus.FEATURE_DISABLED or not result.attachment:
-            skipped.append(
-                AttachmentBulkSkipped(
-                    document_id=doc_id,
-                    reason=result.message or "Attachment feature disabled",
-                )
-            )
         else:
             skipped.append(
                 AttachmentBulkSkipped(
                     document_id=doc_id,
-                    reason=result.message or result.status.value,
+                    reason=result.message or result.status,
                 )
             )
 
     await db_session.commit()
-    if attached:
-        await summary_cache.invalidate(conversation_id)
-    headers = _build_headers(rate_limiter, settings)
     response = AttachmentBulkResponse(
         conversation_id=conversation_id,
         attached=attached,
         skipped=skipped,
         request_id=request_context.request_id,
     )
-    return JSONResponse(
-        status_code=status.HTTP_200_OK, content=response.model_dump(), headers=headers
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
 
 
-def _record_to_schema(record: ConversationDocumentRecord) -> AttachmentRecord:
+def _ensure_authenticated(auth_context: AuthContext) -> None:
+    if not auth_context.user_id:
+        raise GatewayError(
+            code="UNAUTHORIZED",
+            message="Authentication required",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+def _record_to_schema(record: ConversationDocumentRecord | AttachmentRecord | None):
+    if record is None:
+        return None
+    if isinstance(record, AttachmentRecord):
+        return record
     return AttachmentRecord(
         document_id=record.document_id,
         attach_source=record.attach_source,
@@ -314,24 +229,25 @@ def _record_to_schema(record: ConversationDocumentRecord) -> AttachmentRecord:
 
 
 def _default_attachment_message(result: AttachmentResult) -> str:
-    if result.status is AttachmentStatus.ATTACHED:
+    if result.status == AttachmentStatus.ATTACHED:
         return "Attachment linked successfully."
-    if result.status is AttachmentStatus.FEATURE_DISABLED:
+    if result.status == AttachmentStatus.FEATURE_DISABLED:
         return "Attachment skipped because only text chunks are allowed."
-    if result.status is AttachmentStatus.NOT_FOUND:
+    if result.status == AttachmentStatus.NOT_FOUND:
         return "Attachment not found."
     return ""
 
 
-def _build_headers(
-    rate_limiter: RateLimiterProtocol,
-    settings: Settings,
-) -> dict[str, str]:
-    headers = dict(rate_limiter.response_headers())
-    if settings.reduced_scope.text_only_mode():
-        headers.setdefault("X-Cache-Mode", "text-only")
-        headers.setdefault("Viz-Demo-Mode", "text-only")
-    return headers
+def _attach_status_literal(value: str) -> Literal["ATTACHED", "FEATURE_DISABLED", "NOT_FOUND"]:
+    if value in ("ATTACHED", "FEATURE_DISABLED", "NOT_FOUND"):
+        return cast(Literal["ATTACHED", "FEATURE_DISABLED", "NOT_FOUND"], value)
+    return "NOT_FOUND"
+
+
+def _detach_status_literal(value: str) -> Literal["DETACHED", "NOT_FOUND", "FORBIDDEN"]:
+    if value in ("DETACHED", "NOT_FOUND", "FORBIDDEN"):
+        return cast(Literal["DETACHED", "NOT_FOUND", "FORBIDDEN"], value)
+    return "NOT_FOUND"
 
 
 __all__ = ["router"]

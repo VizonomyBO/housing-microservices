@@ -1,109 +1,69 @@
-"""HTTP-facing Pydantic schemas for the FastAPI gateway."""
+"""HTTP-facing Pydantic schemas for the rebuilt Agent API."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
-from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
-
-from agent_api.reduced_scope import ReducedScopeFlags
-from models.retrieval import (
-    ChatConstraints,
-    ChatMessagePayload,
-    ChatRequestContext,
-    IncomingAttachment,
-)
+from pydantic import BaseModel, Field, model_validator
 
 
 class ResponseMode(str, Enum):
-    """Controls whether the HTTP response streams or blocks."""
-
     STREAM = "stream"
     BLOCKING = "blocking"
 
 
-class ChatMessageBody(ChatMessagePayload):
-    """Extends the retrieval ChatMessagePayload for HTTP inputs."""
-
+class ChatMessagePayload(BaseModel):
+    type: Literal["user"] = Field(default="user")
+    content: str
     attachments: list[IncomingAttachment] = Field(default_factory=list)
 
+
+class IncomingAttachment(BaseModel):
+    type: Literal["document_reference", "workflow_reference"]
+    document_id: str | None = None
+    workflow_id: str | None = None
+    visibility: Literal["visible", "hidden", "read_only"] | None = None
+    role: str | None = None
+    attach_source: str | None = None
+
     @model_validator(mode="after")
-    def _enforce_user_message(self) -> ChatMessageBody:
-        if self.type != "user":
-            raise ValueError("POST /v1/chat requires message.type='user'")
+    def _validate(self) -> IncomingAttachment:
+        if self.type == "document_reference" and not self.document_id:
+            raise ValueError("document_reference attachments require document_id")
+        if self.type == "workflow_reference" and not self.workflow_id:
+            raise ValueError("workflow_reference attachments require workflow_id")
         return self
 
 
-class ChatRequestBody(BaseModel):
-    """Incoming request body for POST /v1/chat."""
+class ChatConstraints(BaseModel):
+    country_code: str | None = None
+    auto_attach_base_docs: bool = True
+    max_tool_calls: int | None = None
+    allowed_chunk_types: list[str] | None = None
 
+
+class ChatRequestBody(BaseModel):
     thread_id: str | None = Field(default=None, description="Existing thread identifier")
     session_id: str | None = Field(default=None, description="Logical session grouping id")
-    message: ChatMessageBody
+    message: ChatMessagePayload
     hints: dict[str, Any] = Field(default_factory=dict)
     prompt_overrides: dict[str, Any] = Field(default_factory=dict)
-    response_mode: ResponseMode | None = Field(
-        default=None,
-        description="Preferred response style (streaming vs blocking)",
-    )
-    stream: bool | None = Field(
-        default=None,
-        description="Legacy boolean alias for response_mode; true=stream",
-    )
-    allow_stateless: bool = Field(
-        default=False,
-        description="Opt into stateless chat when thread_id is missing or invalid",
-    )
+    response_mode: ResponseMode | None = Field(default=None)
+    stream: bool | None = Field(default=None, description="Legacy boolean alias for response_mode")
+    allow_stateless: bool = Field(default=False)
     constraints: ChatConstraints = Field(default_factory=ChatConstraints)
 
     def resolved_response_mode(self) -> ResponseMode:
-        """Resolve the response mode, honoring the legacy stream flag."""
-
         if self.response_mode is not None:
             return self.response_mode
         if self.stream is not None:
             return ResponseMode.STREAM if self.stream else ResponseMode.BLOCKING
         return ResponseMode.STREAM
 
-    def to_request_context(
-        self,
-        *,
-        conversation_id: str,
-        owner_user_id: str | None = None,
-        workspace_id: str | None = None,
-        tenant_id: str | None = None,
-        allowed_chunk_types: Iterable[str] | None = None,
-        reduced_scope_flags: ReducedScopeFlags | None = None,
-        allow_stateless: bool | None = None,
-    ) -> ChatRequestContext:
-        """Convert the HTTP payload into the internal ChatRequestContext."""
-
-        message_payload = ChatMessagePayload.model_validate(self.message.model_dump())
-        constraints = self.constraints.model_copy(deep=True)
-        if allowed_chunk_types is not None:
-            constraints.allowed_chunk_types = list(allowed_chunk_types)
-        return ChatRequestContext(
-            conversation_id=conversation_id,
-            thread_id=conversation_id,
-            session_id=self.session_id,
-            allow_stateless=bool(allow_stateless) if allow_stateless is not None else False,
-            message=message_payload,
-            hints=dict(self.hints or {}),
-            constraints=constraints,
-            owner_user_id=owner_user_id,
-            workspace_id=workspace_id,
-            tenant_id=tenant_id,
-            reduced_scope=reduced_scope_flags,
-        )
-
 
 class BlockingChatResponse(BaseModel):
-    """JSON structure returned when clients opt out of streaming."""
-
     thread_id: str
     request_id: str
     done: dict[str, Any]
@@ -111,45 +71,10 @@ class BlockingChatResponse(BaseModel):
 
 
 class PaginationMetadata(BaseModel):
-    """Shared pagination metadata envelope for list endpoints."""
-
     page: int = Field(ge=1)
     page_size: int = Field(ge=1)
     total_count: int = Field(ge=0)
     has_next: bool
-
-
-__all__ = [
-    "AttachmentBulkRequest",
-    "AttachmentBulkResponse",
-    "AttachmentBulkSkipped",
-    "AttachmentDeleteResponse",
-    "AttachmentListResponse",
-    "AttachmentMutationResponse",
-    "AttachmentRecord",
-    "AttachmentRequest",
-    "BlockingChatResponse",
-    "ChatMessageBody",
-    "ChatRequestBody",
-    "ConversationCreateRequest",
-    "ConversationListItem",
-    "ConversationListResponse",
-    "ConversationPageInfo",
-    "ConversationRecordResponse",
-    "ConversationResponse",
-    "ConversationSummaryResponse",
-    "DemoPurgeDocumentsRequest",
-    "DemoPurgeDocumentsResponse",
-    "DemoResetConversationRequest",
-    "DemoResetConversationResponse",
-    "DocumentListItem",
-    "DocumentListResponse",
-    "PaginationMetadata",
-    "PillarAnswerPayload",
-    "PillarResponse",
-    "PillarSourcePayload",
-    "ResponseMode",
-]
 
 
 class DocumentListItem(BaseModel):
@@ -163,7 +88,7 @@ class DocumentListItem(BaseModel):
     ingestion_stage: str | None = None
     ingestion_started_at: datetime | None = None
     ingestion_completed_at: datetime | None = None
-    content_hash: str
+    content_hash: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
     metadata: dict[str, Any] | None = None
@@ -173,93 +98,12 @@ class DocumentListResponse(BaseModel):
     documents: list[DocumentListItem]
     pagination: PaginationMetadata
     request_id: str
-    reduced_scope: dict[str, Any] | None = None
-
-
-class DemoResetConversationRequest(BaseModel):
-    """Payload for POST /v1/demo/reset-conversation."""
-
-    conversation_id: str | None = Field(
-        default=None,
-        description="Target conversation. Defaults to deterministic reduced-e2e slug.",
-    )
-    namespace: str | None = Field(
-        default="reduced-e2e",
-        description="Namespace used when deriving the deterministic conversation id.",
-    )
-
-    @model_validator(mode="after")
-    def _validate_fields(self) -> DemoResetConversationRequest:
-        if self.conversation_id:
-            self.conversation_id = self.conversation_id.strip()
-            if not self.conversation_id:
-                self.conversation_id = None
-        if self.namespace:
-            self.namespace = self.namespace.strip() or "reduced-e2e"
-        return self
-
-
-class DemoResetConversationResponse(BaseModel):
-    """Response payload for POST /v1/demo/reset-conversation."""
-
-    conversation_id: str
-    detached_documents: int
-    deleted_messages: int
-    deleted_checkpoints: int
-    deleted_agent_runs: int
-    request_id: str
-    reduced_scope: dict[str, Any] | None = None
-
-
-class DemoPurgeDocumentsRequest(BaseModel):
-    """Payload for POST /v1/demo/purge-documents."""
-
-    document_aliases: list[str] = Field(
-        default_factory=list,
-        description="Optional fixture aliases that should be purged (case-insensitive).",
-    )
-    content_hashes: list[str] = Field(
-        default_factory=list,
-        description="Optional SHA-256 hashes to purge. When omitted, purges all user docs.",
-    )
-
-    @model_validator(mode="after")
-    def _normalize_lists(self) -> DemoPurgeDocumentsRequest:
-        aliases = {alias.strip().upper() for alias in self.document_aliases if alias.strip()}
-        hashes: set[str] = set()
-        for value in self.content_hashes:
-            if not value:
-                continue
-            normalized = value.strip().lower()
-            if normalized and len(normalized) == 64:
-                try:
-                    int(normalized, 16)
-                except ValueError as exc:
-                    raise ValueError("content_hashes must be hexadecimal strings") from exc
-                hashes.add(normalized)
-            else:
-                raise ValueError("content_hashes must be 64-character hex strings")
-        self.document_aliases = sorted(aliases)
-        self.content_hashes = sorted(hashes)
-        return self
-
-
-class DemoPurgeDocumentsResponse(BaseModel):
-    """Response payload for POST /v1/demo/purge-documents."""
-
-    purged_documents: int
-    document_ids: list[str] = Field(default_factory=list)
-    content_hashes: list[str] = Field(default_factory=list)
-    request_id: str
-    reduced_scope: dict[str, Any] | None = None
 
 
 class ConversationCreateRequest(BaseModel):
-    """Payload for POST /v1/conversations."""
-
     title: str | None = Field(default=None, max_length=255)
     country_code: str | None = Field(default=None, description="ISO-3 country code")
-    namespace: str | None = Field(default="reduced-e2e", max_length=64)
+    namespace: str | None = Field(default="default")
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] | None = Field(default=None)
 
@@ -274,7 +118,7 @@ class ConversationCreateRequest(BaseModel):
                 raise ValueError("country_code must be a 3-letter ISO code")
             self.country_code = code
         if self.namespace is not None:
-            self.namespace = self.namespace.strip() or None
+            self.namespace = (self.namespace or "").strip() or "default"
         cleaned_tags: list[str] = []
         tag_keys: set[str] = set()
         for tag in self.tags:
@@ -290,8 +134,6 @@ class ConversationCreateRequest(BaseModel):
 
 
 class ConversationRecordResponse(BaseModel):
-    """Response body representing a conversation."""
-
     conversation_id: str
     owner_user_id: str | None = None
     namespace: str
@@ -305,8 +147,6 @@ class ConversationRecordResponse(BaseModel):
 
 
 class ConversationMessageResponse(BaseModel):
-    """Transcript entry surfaced by conversation read endpoints."""
-
     message_id: str
     role: Literal["system", "user", "assistant", "tool"]
     content: Any
@@ -315,27 +155,20 @@ class ConversationMessageResponse(BaseModel):
 
 
 class ConversationPageInfo(BaseModel):
-    """Pagination envelope for conversation transcripts."""
-
     next_cursor: str | None = None
     remaining_count: int = 0
 
 
 class ConversationResponse(BaseModel):
-    """Envelope returned by create/read endpoints."""
-
     conversation: ConversationRecordResponse
     attachments: list[AttachmentRecord] = Field(default_factory=list)
     messages: list[ConversationMessageResponse] = Field(default_factory=list)
     page_info: ConversationPageInfo | None = None
     request_id: str
     created: bool | None = None
-    reduced_scope: dict[str, Any] | None = None
 
 
 class ConversationListItem(BaseModel):
-    """Lightweight conversation projection for list endpoint."""
-
     conversation_id: str
     owner_user_id: str | None = None
     namespace: str
@@ -346,14 +179,13 @@ class ConversationListItem(BaseModel):
     document_count: int = 0
     created_at: datetime
     updated_at: datetime | None = None
-    last_activity_at: datetime
+    last_activity_at: datetime | None = None
 
 
 class ConversationListResponse(BaseModel):
     conversations: list[ConversationListItem]
     pagination: PaginationMetadata
     request_id: str
-    reduced_scope: dict[str, Any] | None = None
 
 
 class ConversationSummaryResponse(BaseModel):
@@ -362,9 +194,8 @@ class ConversationSummaryResponse(BaseModel):
     message_count: int
     user_prompt_count: int
     last_message_at: datetime | None = None
-    last_activity_at: datetime
+    last_activity_at: datetime | None = None
     request_id: str
-    reduced_scope: dict[str, Any] | None = None
 
 
 class AttachmentRecord(BaseModel):
@@ -417,7 +248,6 @@ class AttachmentMutationResponse(BaseModel):
     auto_attached: list[str] = Field(default_factory=list)
     message: str | None = None
     request_id: str
-    reduced_scope: dict[str, Any] | None = None
 
 
 class AttachmentDeleteResponse(BaseModel):
@@ -427,27 +257,30 @@ class AttachmentDeleteResponse(BaseModel):
     request_id: str
 
 
-class PillarSourcePayload(BaseModel):
-    chunk_id: str
-    document_id: str | None = None
-    chunk_type: str | None = None
-    evidence_text: str
-    page_number: int | None = None
-
-
-class PillarAnswerPayload(BaseModel):
-    pillar: str
-    score: float | None = None
-    summary_markdown: str
-    answer_json: dict[str, Any]
-    document_id: str
-    generated_at: datetime | None = None
-    sources: list[PillarSourcePayload] = Field(default_factory=list)
-
-
-class PillarResponse(BaseModel):
-    country_code: str
-    conversation_id: str | None = None
-    pillars: list[PillarAnswerPayload]
-    request_id: str
-    reduced_scope: dict[str, Any] | None = None
+__all__ = [
+    "AttachmentBulkRequest",
+    "AttachmentBulkResponse",
+    "AttachmentBulkSkipped",
+    "AttachmentDeleteResponse",
+    "AttachmentListResponse",
+    "AttachmentMutationResponse",
+    "AttachmentRecord",
+    "AttachmentRequest",
+    "BlockingChatResponse",
+    "ChatConstraints",
+    "ChatMessagePayload",
+    "ChatRequestBody",
+    "ConversationCreateRequest",
+    "ConversationListItem",
+    "ConversationListResponse",
+    "ConversationMessageResponse",
+    "ConversationPageInfo",
+    "ConversationRecordResponse",
+    "ConversationResponse",
+    "ConversationSummaryResponse",
+    "DocumentListItem",
+    "DocumentListResponse",
+    "IncomingAttachment",
+    "PaginationMetadata",
+    "ResponseMode",
+]

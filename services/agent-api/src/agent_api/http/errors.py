@@ -1,34 +1,40 @@
-"""Error helpers shared by FastAPI routes and middleware."""
+"""HTTP-friendly error helpers."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass(slots=True)
 class GatewayError(Exception):
-    """Structured error compatible with the documented envelope."""
-
-    code: str
-    message: str
-    status_code: int = 500
-    details: dict[str, Any] | None = None
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
 
 
 def error_payload(
-    *, code: str, message: str, request_id: str | None, details: Any | None = None
+    *, code: str, message: str, request_id: str | None = None, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Return the canonical error envelope for API responses."""
-
-    return {
+    payload = {
         "error": {
             "code": code,
             "message": message,
-            "details": details or {},
-            "request_id": request_id,
         }
     }
+    if request_id:
+        payload["request_id"] = request_id
+    if details:
+        payload["error"]["details"] = details
+    return payload
 
 
 __all__ = ["GatewayError", "error_payload"]

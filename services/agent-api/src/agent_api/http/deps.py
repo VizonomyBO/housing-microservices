@@ -1,38 +1,47 @@
-"""Dependency functions shared by FastAPI routes."""
+"""FastAPI dependency providers."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_api.auth import AuthTokenValidator, AuthValidationError
-from agent_api.http.context import AuthContext, RequestContext
-from agent_api.http.rate_limit import RateLimiterProtocol
-from agent_api.http.streaming import ChatRunnerProtocol, StreamSettings, UnconfiguredChatRunner
+from agent_api.agent.runner import ChatRunnerProtocol, UnconfiguredRunner
+from agent_api.auth.validator import AuthContext, AuthTokenValidator, AuthValidationError
+from agent_api.http.context import RequestContext
 from agent_api.settings import Settings, load_settings
-from cache import ValkeyCacheClientProtocol
-from services import (
-    PillarService,
-    ReducedScopeIngestionJobService,
-    ReducedScopeWorkerRuntime,
-)
-from telemetry import CacheObservability, MetricsRegistry, get_metrics_registry
+from streaming.sse_emitter import StreamSettings
 
-_RUNNER_STATE: dict[str, ChatRunnerProtocol] = {"runner": UnconfiguredChatRunner()}
+_RUNNER: ChatRunnerProtocol = UnconfiguredRunner()
 _STREAM_SETTINGS = StreamSettings()
-_CACHE_CLIENT_STATE: dict[str, ValkeyCacheClientProtocol | None] = {"client": None}
-_RATE_LIMITER_STATE: dict[str, RateLimiterProtocol | None] = {"limiter": None}
-_AUTH_VALIDATOR_STATE: dict[str, AuthTokenValidator | None] = {"validator": None}
+_AUTH_VALIDATOR: AuthTokenValidator | None = None
+
+
+def get_runner() -> ChatRunnerProtocol:
+    return _RUNNER
+
+
+def set_chat_runner(runner: ChatRunnerProtocol) -> None:
+    global _RUNNER  # noqa: PLW0603
+    _RUNNER = runner
+
+
+def get_stream_settings() -> StreamSettings:
+    return _STREAM_SETTINGS
+
+
+def get_settings(request: Request) -> Settings:
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        settings = load_settings()
+        request.app.state.settings = settings
+    return settings
 
 
 async def get_request_context(request: Request) -> RequestContext:
-    """Extract correlation headers and memoize them on the request state."""
-
     request_id = (
         getattr(request.state, "request_id", None)
         or request.headers.get("Viz-Request-Id")
@@ -52,8 +61,6 @@ async def get_request_context(request: Request) -> RequestContext:
 
 
 async def get_auth_context(request: Request) -> AuthContext:
-    """Validate the Authorization header and return the authenticated user context."""
-
     header = request.headers.get("Authorization")
     if not header:
         raise HTTPException(
@@ -71,82 +78,6 @@ async def get_auth_context(request: Request) -> AuthContext:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     request.state.auth_context = context
     return context
-
-
-def get_chat_runner() -> ChatRunnerProtocol:
-    return _RUNNER_STATE["runner"]
-
-
-def set_chat_runner(runner: ChatRunnerProtocol) -> None:
-    _RUNNER_STATE["runner"] = runner
-
-
-def get_stream_settings() -> StreamSettings:
-    return _STREAM_SETTINGS
-
-
-def get_cache_client(request: Request) -> ValkeyCacheClientProtocol:
-    if hasattr(request, "app"):
-        client = getattr(request.app.state, "valkey_client", None)
-        if client is not None:
-            return client
-    if _CACHE_CLIENT_STATE["client"] is not None:
-        return _CACHE_CLIENT_STATE["client"]
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Cache client is not configured; set VALKEY_URL or explicitly enable "
-        "ALLOW_IN_MEMORY_VALKEY=1 for tests/dev.",
-    )
-
-
-def set_cache_client(client: ValkeyCacheClientProtocol) -> None:
-    _CACHE_CLIENT_STATE["client"] = client
-
-
-def get_rate_limiter(request: Request) -> RateLimiterProtocol:
-    if hasattr(request, "app"):
-        limiter = getattr(request.app.state, "rate_limiter", None)
-        if limiter is not None:
-            return limiter
-    if _RATE_LIMITER_STATE["limiter"] is not None:
-        return _RATE_LIMITER_STATE["limiter"]
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Rate limiter is not configured; set ALLOW_RATE_LIMITER_BYPASS=1 for tests/dev "
-        "or configure a real limiter backend.",
-    )
-
-
-def set_rate_limiter(limiter: RateLimiterProtocol) -> None:
-    _RATE_LIMITER_STATE["limiter"] = limiter
-
-
-def get_settings(request: Request) -> Settings:
-    """Return the cached Settings instance stored on the app state."""
-
-    if not hasattr(request, "app"):
-        raise RuntimeError("FastAPI request context is required for get_settings")
-    settings = getattr(request.app.state, "settings", None)
-    if settings is None:
-        settings = load_settings()
-        request.app.state.settings = settings
-    return settings
-
-
-def get_metrics_registry_dep(request: Request) -> MetricsRegistry:
-    registry = getattr(request.app.state, "metrics_registry", None)
-    if registry is None:
-        registry = get_metrics_registry()
-        request.app.state.metrics_registry = registry
-    return registry
-
-
-def get_cache_observability(request: Request) -> CacheObservability:
-    observability = getattr(request.app.state, "cache_observability", None)
-    if observability is None:
-        observability = CacheObservability(metrics=get_metrics_registry_dep(request))
-        request.app.state.cache_observability = observability
-    return observability
 
 
 async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -167,62 +98,22 @@ async def maybe_get_db_session(request: Request) -> AsyncIterator[AsyncSession |
         yield session
 
 
-async def get_reduced_scope_runtime(
-    settings: Annotated[Settings, Depends(get_settings)],
-    db_session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> ReducedScopeWorkerRuntime:
-    if not settings.reduced_scope.is_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Reduced scope runtime is disabled; enable REDUCED_SCOPE_ENABLED=1 only for "
-            "demo/testing or use the production ingestion/export pipeline.",
-        )
-    ingestion_service = ReducedScopeIngestionJobService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
-    pillar_service = PillarService(
-        db_session,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
-    return ReducedScopeWorkerRuntime(
-        session=db_session,
-        ingestion_service=ingestion_service,
-        pillar_service=pillar_service,
-        allowed_chunk_types=settings.reduced_scope.allowed_chunk_types,
-    )
+def _resolve_auth_validator(request: Request) -> AuthTokenValidator:
+    global _AUTH_VALIDATOR  # noqa: PLW0603
+    if _AUTH_VALIDATOR:
+        return _AUTH_VALIDATOR
+    settings = get_settings(request)
+    _AUTH_VALIDATOR = AuthTokenValidator(settings.auth)
+    return _AUTH_VALIDATOR
 
 
 __all__ = [
     "get_auth_context",
-    "get_cache_client",
-    "get_cache_observability",
-    "get_chat_runner",
     "get_db_session",
-    "get_metrics_registry_dep",
-    "get_rate_limiter",
-    "get_reduced_scope_runtime",
     "get_request_context",
+    "get_runner",
     "get_settings",
     "get_stream_settings",
     "maybe_get_db_session",
-    "set_cache_client",
     "set_chat_runner",
-    "set_rate_limiter",
 ]
-
-
-def _resolve_auth_validator(request: Request) -> AuthTokenValidator:
-    if hasattr(request, "app"):
-        validator = getattr(request.app.state, "auth_validator", None)
-        if validator is not None:
-            return validator
-        settings = get_settings(request)
-        metrics = get_metrics_registry_dep(request)
-        validator = AuthTokenValidator(settings.auth, metrics=metrics)
-        request.app.state.auth_validator = validator
-        return validator
-    if _AUTH_VALIDATOR_STATE["validator"] is None:
-        settings = load_settings()
-        _AUTH_VALIDATOR_STATE["validator"] = AuthTokenValidator(settings.auth)
-    return _AUTH_VALIDATOR_STATE["validator"]

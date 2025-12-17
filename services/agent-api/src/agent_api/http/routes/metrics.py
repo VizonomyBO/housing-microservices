@@ -1,13 +1,13 @@
-"""Prometheus metrics endpoint for FastAPI."""
+"""Prometheus metrics endpoint."""
 
 from __future__ import annotations
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from prometheus_client import REGISTRY, generate_latest
 
-from agent_api.http.deps import get_metrics_registry_dep, get_settings
-from telemetry.metrics_registry import MetricsRegistry
+from agent_api.http.deps import get_settings
 
 router = APIRouter(tags=["metrics"])
 
@@ -46,9 +46,8 @@ async def _verify_metrics_auth(request: Request) -> None:
 @router.get("/metrics", summary="Prometheus scrape endpoint")
 async def get_metrics(
     _: Annotated[None, Depends(_verify_metrics_auth)],
-    registry: Annotated[MetricsRegistry, Depends(get_metrics_registry_dep)],
 ) -> Response:
-    payload = registry.render_prometheus()
+    payload = generate_latest(REGISTRY)
     headers = {
         "Cache-Control": "no-store",
         "Pragma": "no-cache",

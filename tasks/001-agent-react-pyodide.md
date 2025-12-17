@@ -1,4 +1,4 @@
-# Task: Rebuild Agent API to ReAct Tool Stack (No Cache/Rate Limit)
+# [COMPLETED] Task: Rebuild Agent API to ReAct Tool Stack (No Cache/Rate Limit)
 
 Follow `.kilocode/rules/memory-bank-instructions.md`, `AGENTS.md`, and `services/agent-api/AGENTS.md` before editing; create/update a plan + tracker in the repo root per instructions.
 The agent must commit the changes before terminating the task.

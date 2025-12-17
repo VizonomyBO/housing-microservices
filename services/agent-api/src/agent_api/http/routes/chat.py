@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends
@@ -11,45 +11,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
-    get_cache_observability,
-    get_chat_runner,
-    get_metrics_registry_dep,
-    get_rate_limiter,
+    get_db_session,
     get_request_context,
-    get_settings,
+    get_runner,
     get_stream_settings,
-    maybe_get_db_session,
 )
 from agent_api.http.errors import GatewayError
-from agent_api.http.rate_limit import RateLimiterProtocol
 from agent_api.http.schemas import ChatRequestBody, ResponseMode
-from agent_api.http.streaming import (
-    ChatRunnerProtocol,
-    StreamSettings,
-    build_streaming_response,
-    run_blocking_chat,
-)
-from agent_api.reduced_scope import ReducedScopeSettings, reduced_scope_demo_metadata
-from agent_api.settings import Settings
-from models.retrieval import ChatRequestContext
-from services import ConversationService
-from telemetry import CacheObservability, MetricsRegistry
+from agent_api.http.streaming import build_streaming_response, run_blocking_chat
+from agent_api.models.chat import ChatRequestContext
+from agent_api.services.conversations import ConversationService
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
 
-@router.post("/chat", summary="Invoke the LangGraph chat agent")
+@router.post("/chat", summary="Invoke the ReAct chat agent")
 async def post_chat(
     payload: ChatRequestBody,
-    chat_runner: Annotated[ChatRunnerProtocol, Depends(get_chat_runner)],
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
-    stream_settings: Annotated[StreamSettings, Depends(get_stream_settings)],
-    metrics_registry: Annotated[MetricsRegistry, Depends(get_metrics_registry_dep)],
-    cache_observability: Annotated[CacheObservability, Depends(get_cache_observability)],
-    db_session: Annotated[AsyncSession | None, Depends(maybe_get_db_session)],
-    rate_limiter: Annotated[RateLimiterProtocol, Depends(get_rate_limiter)],
-    settings: Annotated[Settings, Depends(get_settings)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    stream_settings: Annotated[Any, Depends(get_stream_settings)],
+    chat_runner: Annotated[Any, Depends(get_runner)],
 ):
     user_id = _require_user(auth_context)
     conversation_id, stateless = await _resolve_conversation_id(payload, user_id, db_session)
@@ -57,17 +40,11 @@ async def post_chat(
         payload,
         conversation_id,
         auth_context,
-        reduced_scope=settings.reduced_scope,
         allow_stateless=stateless,
     )
     hints = dict(payload.hints or {})
     prompt_overrides = dict(payload.prompt_overrides or {})
     mode = payload.resolved_response_mode()
-    demo_metadata = (
-        reduced_scope_demo_metadata(settings.reduced_scope)
-        if settings.reduced_scope.is_enabled()
-        else None
-    )
 
     if mode is ResponseMode.STREAM:
         return await build_streaming_response(
@@ -78,12 +55,7 @@ async def post_chat(
             hints=hints,
             prompt_overrides=prompt_overrides,
             stream_settings=stream_settings,
-            metrics=metrics_registry,
-            cache_observability=cache_observability,
             db_session=db_session,
-            rate_limiter=rate_limiter,
-            reduced_scope=settings.reduced_scope,
-            demo_metadata=demo_metadata,
         )
 
     return await run_blocking_chat(
@@ -94,12 +66,7 @@ async def post_chat(
         hints=hints,
         prompt_overrides=prompt_overrides,
         stream_settings=stream_settings,
-        metrics=metrics_registry,
-        cache_observability=cache_observability,
         db_session=db_session,
-        rate_limiter=rate_limiter,
-        reduced_scope=settings.reduced_scope,
-        demo_metadata=demo_metadata,
     )
 
 
@@ -107,22 +74,21 @@ def _build_request_context(
     payload: ChatRequestBody,
     conversation_id: str,
     auth_context: AuthContext,
-    *,
-    reduced_scope: ReducedScopeSettings | None = None,
     allow_stateless: bool = False,
 ) -> ChatRequestContext:
-    allowed_chunk_types = None
-    reduced_scope_flags = None
-    if reduced_scope is not None and reduced_scope.is_enabled():
-        if reduced_scope.text_only_mode():
-            allowed_chunk_types = list(reduced_scope.allowed_chunk_types)
-        reduced_scope_flags = reduced_scope.to_flags()
-    return payload.to_request_context(
+    message_payload = payload.message
+    thread_id = payload.thread_id or conversation_id
+    return ChatRequestContext(
         conversation_id=conversation_id,
-        owner_user_id=auth_context.user_id,
-        allowed_chunk_types=allowed_chunk_types,
-        reduced_scope_flags=reduced_scope_flags,
+        thread_id=thread_id,
+        session_id=payload.session_id,
         allow_stateless=allow_stateless,
+        message=message_payload,
+        hints=dict(payload.hints or {}),
+        constraints=payload.constraints,
+        owner_user_id=auth_context.user_id,
+        workspace_id=None,
+        tenant_id=auth_context.tenant_id,
     )
 
 
@@ -133,21 +99,11 @@ def _generate_thread_id() -> str:
 async def _resolve_conversation_id(
     payload: ChatRequestBody,
     user_id: str,
-    db_session: AsyncSession | None,
+    db_session: AsyncSession,
 ) -> tuple[str, bool]:
-    """Determine the conversation id and whether the run should be stateless."""
-
     allow_stateless = bool(payload.allow_stateless)
     thread_id = payload.thread_id
-
-    if db_session is None:
-        if allow_stateless:
-            return thread_id or _generate_thread_id(), True
-        raise GatewayError(
-            code="DATABASE_UNAVAILABLE",
-            message="Database session is required",
-            status_code=503,
-        )
+    service = ConversationService(db_session)
 
     if thread_id:
         if not _looks_like_uuid(thread_id):
@@ -158,7 +114,6 @@ async def _resolve_conversation_id(
                     status_code=400,
                 )
             return thread_id, True
-        service = ConversationService(db_session)
         try:
             record = await service.fetch_conversation(
                 thread_id,
@@ -182,19 +137,22 @@ async def _resolve_conversation_id(
                 message="Conversation not found",
                 status_code=404,
             ) from exc
-        return record.conversation_id, False
+        return str(record.id), False
 
     if allow_stateless:
         return _generate_thread_id(), True
 
-    service = ConversationService(db_session)
     result = await service.ensure_conversation(
         owner_user_id=user_id,
         country_code=payload.constraints.country_code,
         title=payload.message.content[:80] or None,
-        namespace="adhoc-chat",
+        namespace=payload.message.attachments[0].attach_source
+        if payload.message.attachments
+        else "adhoc-chat",
+        tags=[],
+        metadata=None,
     )
-    return result.conversation.conversation_id, False
+    return str(result.id), False
 
 
 def _require_user(auth_context: AuthContext) -> str:
