@@ -28,6 +28,16 @@ ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode services-only
 ```
 Options: `--destroy-first` (confirmation required), `--no-sync`, `--no-build`, `--host`, `--ssh-key`, `--patch-file` (hot-patch path).
 
+### One-shot deploy + smoke
+Deploy the ingestion-first stack (services-only by default) and immediately run the prod smoke with the FSAP PDF:
+```bash
+env_file=$(scripts/use_env.sh prod)
+ENV_FILE="$env_file" ./scripts/prod_deploy_and_smoke.sh \
+  --ssh-key ArchaaS/dist/vizonomy-v2-ec2-dev2.pem \
+  --log-file /tmp/prod_deploy_and_smoke_$(date +%s).log
+```
+Key flags: `--deploy-mode services-only|full-redeploy|skip`, `--no-build`, `--no-sync`, `--host`, `--smoke-file` (defaults to `services/agent-api/evals/data/MEX_2016_Mexico Financial Sector Assessment Program Housing Finance.pdf`), `--output-file` (defaults to `prod_sample_run.json`).
+
 ## Smoke (automated)
 Runs ingestion → activation → attachment → chat over live endpoints using the FastAPI ingestion service.
 ```bash
