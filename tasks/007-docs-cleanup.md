@@ -1,4 +1,4 @@
-# Task: Rewrite Docs/Prompts for the Revamped Architecture
+# Task: [Completed] Rewrite Docs/Prompts for the Revamped Architecture
 
 Follow `.kilocode/rules/memory-bank-instructions.md` and `AGENTS.md`; create/update a plan + tracker in the repo root. Use service-specific AGENTS when touching those areas.
 The agent must commit the changes before terminating the task.
