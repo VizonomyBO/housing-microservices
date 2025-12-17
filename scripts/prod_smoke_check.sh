@@ -23,6 +23,7 @@ fi
 
 require_var AGENT_BASE_URL
 require_var AUTH_BASE_URL
+require_var INGEST_BASE_URL
 require_var PROD_DEMO_EMAIL
 require_var PROD_DEMO_PASSWORD
 require_var PROD_DEMO_COUNTRY
@@ -84,12 +85,8 @@ if [[ $cleanup_upload -eq 1 ]]; then
   trap 'rm -f "${upload_files[@]}"' EXIT
 fi
 
-USE_INGEST_API=0
-if [[ -n "${INGEST_BASE_URL:-}" ]]; then
-  USE_INGEST_API=1
-  INGEST_UPLOAD_URL="${INGEST_BASE_URL%/}/v1/documents/upload"
-  log "INGEST_BASE_URL detected; smoke test will upload via $INGEST_UPLOAD_URL (FastAPI ingestion service)"
-fi
+INGEST_UPLOAD_URL="${INGEST_BASE_URL%/}/v1/documents/upload"
+log "Using ingestion service upload endpoint: $INGEST_UPLOAD_URL"
 
 get_file_size() {
   local path="$1"
@@ -234,59 +231,6 @@ ingest_upload_document() {
   echo "$document_id"
 }
 
-agent_upload_document() {
-  local file_path="$1"
-  local document_name="$2"
-  local chunk_type="${3:-text}"
-  local file_hash
-  file_hash=$(compute_file_hash "$file_path")
-  local payload
-  payload=$(jq -n \
-    --rawfile content "$file_path" \
-    --arg name "$document_name" \
-    --arg chunk "$chunk_type" \
-    --arg country "$PROD_DEMO_COUNTRY" \
-    '{
-        document_name:$name,
-        content:$content,
-        content_type:"text/markdown",
-        chunk_type:$chunk,
-        access_scope:"user_private",
-        country_code:$country,
-        language:"en",
-        tags:["demo","prod_smoke"],
-        metadata:{smoke_test:true}
-     }')
-  log "Uploading document via Agent API"
-  local resp
-  resp=$(curl -sS -X POST "$AGENT_URL/v1/documents/upload" \
-    -H "Authorization: Bearer $access_token" \
-    -H 'Content-Type: application/json' \
-    -d "$payload")
-  local status document_id
-  status=$(echo "$resp" | jq -r '.status // empty')
-  document_id=$(echo "$resp" | jq -r '.document_id // empty')
-  if [[ -z "$document_id" ]]; then
-    echo "$resp" | jq '.' >&2
-    log "Agent API upload failed"
-    exit 1
-  fi
-  case "$status" in
-    COMPLETED)
-      poll_document_activation "$document_id" "$file_hash"
-      ;;
-    DEDUPED)
-      log "Document $document_id already ingested; reusing existing record"
-      ;;
-    *)
-      echo "$resp" | jq '.' >&2
-      log "Agent API upload failed (status=$status)"
-      exit 1
-      ;;
-  esac
-  echo "$document_id"
-}
-
 AUTH_URL="${AUTH_BASE_URL%/}"
 AGENT_URL="${AGENT_BASE_URL%/}"
 OUT_FILE="${PROD_SAMPLE_OUTPUT:-prod_sample_run.json}"
@@ -332,13 +276,8 @@ for idx in "${!upload_files[@]}"; do
   file_path="${upload_files[$idx]}"
   upload_name="${upload_names[$idx]}"
   source_ext="${file_path##*.}"
-  if [[ $USE_INGEST_API -eq 1 ]]; then
-    new_doc_id=$(ingest_upload_document "$file_path" "$upload_name" "$source_ext")
-    log "Uploaded document via ingestion API: $new_doc_id"
-  else
-    new_doc_id=$(agent_upload_document "$file_path" "$upload_name")
-    log "Uploaded document via Agent API: $new_doc_id"
-  fi
+  new_doc_id=$(ingest_upload_document "$file_path" "$upload_name" "$source_ext")
+  log "Uploaded document via ingestion API: $new_doc_id"
   uploaded_doc_ids+=("$new_doc_id")
 done
 

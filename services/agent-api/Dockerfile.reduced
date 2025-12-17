@@ -9,7 +9,9 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-COPY services/agent-api-new/pyproject.toml /app/pyproject.toml
+COPY services/agent-api/pyproject.toml /app/pyproject.toml
+# Use the pinned lock to mirror local dev environments
+COPY services/agent-api/uv.lock /app/uv.lock
 
 # Copy shared data layer for editable install
 COPY packages/shared_data_layer /app/packages/shared_data_layer
@@ -18,7 +20,7 @@ RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
     uv sync --all-extras
 
-COPY services/agent-api-new/src /app/src
+COPY services/agent-api/src /app/src
 
 ENV PYTHONPATH=/app/src:/app/packages
 

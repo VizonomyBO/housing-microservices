@@ -1,65 +1,47 @@
 # Quick Start Guide
 
-Spin up the Housing microservices stack (FastAPI gateway + legacy services) with the new root `docker compose` workflow. Follow these steps and you can interact with the demo in a few minutes.
+Spin up the simplified stack (agent-api, ingestion-service, auth-service, user-service, Postgres, LocalStack) with the root `docker compose` file.
 
 ## 1. Prerequisites
 - Docker Desktop / Engine 25.x with Compose V2 (`docker compose`).
 - Git + a bash-compatible shell.
-- Optional: [uv](https://github.com/astral-sh/uv) if you need to run scripts or tests locally.
+- [uv](https://github.com/astral-sh/uv) if you need to run scripts or tests locally.
 
-## 2. Clone & Copy Env
+## 2. Pick an Environment
+Use `scripts/use_env.sh` to pick the right env file and export it:
 ```bash
-git clone <repo-url>
-cd housing-microservices
-cp env.example .env
+env_file=$(scripts/use_env.sh local|dev|prod)
+set -a && source "$env_file" && set +a
 ```
-Edit `.env` to set secure passwords, JWT secrets, and AWS credentials (if you plan to hit real AWS). Use `.env.local` for personal overrides.
+`.env.local` is LocalStack-first; `.env.dev` points at the remote data plane; `.env.prod` targets AWS/EC2.
 
-## 3. Choose a Profile
-| Profile | Command | Starts |
-| --- | --- | --- |
-| Reduced Agent API demo | `docker compose --profile reduced up --build agent-api` | Postgres + db-init + agent-api + db-shell + LocalStack for AWS mocks. |
-| Full platform | `docker compose --profile full up --build` | All services (auth, user, agent, marker), LocalStack, Valkey, otel-collector. |
-| Default (auth + user) | `docker compose up --build` | Legacy stack without agent-api (marker removed). |
-
-Set `STACK_PROFILE=reduced` or `STACK_PROFILE=full` in your shell (or `.env`) so services know which runtime to activate. Override `COMPOSE_PROFILES` if you need extra helpers (e.g., `COMPOSE_PROFILES=full,ops`).
-
-## 4. Launch & Verify
+## 3. Bring Up the Dev Stack (LocalStack required)
 ```bash
-# Reduced profile example
-STACK_PROFILE=reduced \
-COMPOSE_PROFILES=reduced \
-  docker compose --profile reduced up --build agent-api
-
-# Full stack example
-STACK_PROFILE=full \
-COMPOSE_PROFILES=full \
-  docker compose --profile full up --build
+docker compose --env-file "$env_file" up -d --build
+./test-api.sh
 ```
-Once healthy, visit:
-- (Swagger removed)
-- Agent API: `http://localhost:${AGENT_API_PORT:-8000}/docs`
-- Auth health: `curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health`
-- LocalStack status: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`
-
-## 5. Seed & Admin Tasks
-- Seeding happens automatically via the `db-init` service. To rerun: `docker compose run --rm db-init`.
-- Inspect the database: `docker compose --profile reduced run --rm db-shell psql -h postgres -U agent_api -d agent_reduced`.
-- Run FastAPI CLI helpers: `docker compose --profile reduced exec agent-api uv run agent_api.cli --help`.
-- Smoke test reduced profile: `services/agent-api/scripts/verify_reduced_scope_compose.sh`.
-
-## 6. LocalStack vs AWS
-- LocalStack is enabled by default (`USE_LOCALSTACK=1`).
-- To use real AWS, set `USE_LOCALSTACK=0` and provide real AWS credentials in `.env`, then restart services that talk to AWS (`docker compose restart agent-api`).
-
-## 7. Tear Down & Troubleshooting
+Health probes:
 ```bash
-docker compose down              # stop containers, keep volumes
-docker compose down -v           # nuke Postgres + LocalStack data
+curl http://localhost:${AUTH_SERVICE_PORT:-5001}/health
+curl http://localhost:${USER_SERVICE_PORT:-5002}/v1/health
+curl http://localhost:${INGESTION_SERVICE_PORT:-8085}/health
 ```
-Common fixes:
-- **Ports busy**: `lsof -i :8000` and stop conflicting processes.
-- **db-init failed**: confirm passwords in `.env` match `scripts/init-databases.sh`, then `docker compose run --rm db-init`.
-- **LocalStack unhealthy**: check `docker compose logs localstack`, or temporarily set `USE_LOCALSTACK=0`.
 
-For deeper instructions, read `docs/runbooks/reduced_scope_demo.md` (reduced profile) and `docs/runbooks/full_stack_compose.md` (full stack).
+## 4. Hybrid / Remote Data Plane (Optional)
+Run the same services locally while pointing at remote databases/AWS:
+```bash
+env_file=$(scripts/use_env.sh dev)
+set -a && source "$env_file" && set +a
+docker compose --env-file "$env_file" -f docker-compose.ec2.yml up -d --build agent-api auth-service user-service ingestion-service
+```
+
+## 5. Tear Down
+```bash
+docker compose --env-file "$env_file" down              # stop containers, keep volumes
+docker compose --env-file "$env_file" down -v           # also delete Postgres + LocalStack data
+```
+
+## 6. Troubleshooting
+- Agent API requires `OPENAI_API_KEY` and `VOYAGE_API_KEY`; set them before bringing the stack up.
+- LocalStack must be healthy for dev: `curl http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health`.
+- Rerun migrations if needed: `docker compose --env-file "$env_file" run --rm db-init`.

@@ -7,6 +7,10 @@ services:
     environment:
       DATABASE_URL: ${AUTH_DATABASE_URL}
 
+  ingestion-service:
+    environment:
+      DATABASE_URL: ${HOUSING_DATABASE_URL:-${DATABASE_URL}}
+
   agent-api:
     environment:
       DATABASE_URL: ${DATABASE_URL}

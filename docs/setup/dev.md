@@ -22,7 +22,7 @@ Run services locally while pointing at the shared AWS data plane (Postgres/S3/in
 3) Verify
    ```bash
    curl -fsS "$AUTH_BASE_URL/health"
-   curl -fsS "$USER_SERVICE_URL/v1/health"
+   curl -fsS "$USER_BASE_URL/v1/health"
    curl -fsS "$AGENT_BASE_URL/health"
    curl -fsS "$INGEST_BASE_URL/health"
    ```

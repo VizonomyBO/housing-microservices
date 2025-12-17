@@ -1,118 +1,78 @@
-# Shared snippets to keep service definitions concise
 x-service-defaults: &service-defaults
   env_file:
     - ${ENV_FILE:-.env.local}
-
-x-monorepo-build: &monorepo-build
-  context: .
+  restart: unless-stopped
+  networks:
+    - housing-net
 
 services:
   postgres:
     <<: *service-defaults
     image: pgvector/pgvector:pg16
     container_name: housing-postgres
-    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-housing}
       POSTGRES_USER: ${POSTGRES_USER:-vizonomy_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       AUTH_DB: ${AUTH_DB:-auth_db}
-      AGENT_API_DB: ${AGENT_API_DB:-agent_reduced}
-      AGENT_API_DB_USER: ${AGENT_API_DB_USER:-agent_api}
-      AGENT_API_DB_PASSWORD: ${AGENT_API_DB_PASSWORD:-agent_api_pass}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
     healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "pg_isready -U ${POSTGRES_USER:-vizonomy_user} -d ${POSTGRES_DB:-housing}"
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vizonomy_user} -d ${POSTGRES_DB:-housing}"]
       interval: 10s
       timeout: 5s
       retries: 10
-    networks:
-      - microservices-net
 
   db-init:
     <<: *service-defaults
     build:
-      <<: *monorepo-build
+      context: .
       dockerfile: services/agent-api/Dockerfile.reduced
-    profiles:
-      - reduced
-      - full
-      - ops
+    container_name: db-init
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
     command: >-
-      bash -c "uv run python ../../packages/shared_data_layer/src/shared_data_layer/manage.py migrate && uv run python scripts/seed_reduced_scope_data.py --if-empty"
-    networks:
-      - microservices-net
+      bash -c "uv run python /app/packages/shared_data_layer/src/shared_data_layer/manage.py migrate"
+    restart: "no"
 
-  agent-api:
+  localstack:
     <<: *service-defaults
-    build:
-      <<: *monorepo-build
-      dockerfile: services/agent-api/Dockerfile.reduced
-    profiles:
-      - reduced
-      - full
-    depends_on:
-      postgres:
-        condition: service_healthy
-      db-init:
-        condition: service_completed_successfully
+    image: localstack/localstack:latest
+    container_name: localstack
+    environment:
+      SERVICES: ${LOCALSTACK_SERVICES:-s3,sns,sqs,secretsmanager,events}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
     ports:
-      - "${AGENT_API_PORT:-8000}:8000"
-    environment:
-      SERVICE_MODE: ${SERVICE_MODE:-reduced}
-      REDUCED_SCOPE_USE_REAL_TOOLS: ${REDUCED_SCOPE_USE_REAL_TOOLS:-0}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agent_api:agent_api_pass@postgres:5432/agent_reduced}
-      USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
-      LOCALSTACK_HOST: ${LOCALSTACK_HOST:-localstack}
-      LOCALSTACK_EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
-    networks:
-      - microservices-net
-      - localstack-net
-
-  db-shell:
-    <<: *service-defaults
-    image: postgres:16
-    profiles:
-      - ops
-      - reduced
-      - full
-    depends_on:
-      postgres:
-        condition: service_healthy
-    entrypoint: ["bash", "-c", "sleep infinity"]
-    environment:
-      PGPASSWORD: ${AGENT_API_DB_PASSWORD:-agent_api_pass}
-    networks:
-      - microservices-net
+      - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4566/_localstack/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   auth-service:
     <<: *service-defaults
     build:
-      <<: *monorepo-build
       context: ./services/auth-service
       dockerfile: Dockerfile
     container_name: auth-service
-    ports:
-      - "${AUTH_SERVICE_PORT:-5001}:5000"
     depends_on:
       postgres:
         condition: service_healthy
+      localstack:
+        condition: service_healthy
+    ports:
+      - "${AUTH_SERVICE_PORT:-5001}:5000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
@@ -121,9 +81,9 @@ services:
       FLASK_ENV: ${FLASK_ENV:-production}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SES_REGION: ${SES_REGION:-us-east-1}
-      SES_SOURCE_EMAIL: ${SES_SOURCE_EMAIL:-addis@vizonomy.com}
+      SES_SOURCE_EMAIL: ${SES_SOURCE_EMAIL:-noreply@example.com}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
-      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL:-https://app.vizonomy.com/reset-password}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL:-http://localhost:3000/reset-password}
       PORT: 5000
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:
@@ -132,23 +92,22 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
-    networks:
-      - microservices-net
 
   user-service:
     <<: *service-defaults
     build:
-      <<: *monorepo-build
       context: ./services/user-service
       dockerfile: Dockerfile
     container_name: user-service
-    ports:
-      - "${USER_SERVICE_PORT:-5002}:5001"
     depends_on:
       postgres:
         condition: service_healthy
       auth-service:
         condition: service_healthy
+      localstack:
+        condition: service_healthy
+    ports:
+      - "${USER_SERVICE_PORT:-5002}:5001"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
@@ -163,85 +122,103 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
-    networks:
-      - microservices-net
 
-  localstack:
+  ingestion-service:
     <<: *service-defaults
-    image: localstack/localstack:latest
-    container_name: localstack
-    profiles:
-      - reduced
-      - aws-mock
-      - full
-      - agent-api
-      - default
-    ports:
-      - "${LOCALSTACK_EDGE_PORT:-4566}:4566"
-    environment:
-      SERVICES: ${LOCALSTACK_SERVICES:-s3,sqs,sns,events,secretsmanager}
-      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
-      EDGE_PORT: ${LOCALSTACK_EDGE_PORT:-4566}
-      DEBUG: ${LOCALSTACK_DEBUG:-0}
-    volumes:
-      - localstack_data:/var/lib/localstack
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "curl -f http://localhost:4566/_localstack/health || exit 1"
-      interval: 15s
-      timeout: 5s
-      retries: 10
-    networks:
-      - microservices-net
-      - localstack-net
-
-  valkey:
-    <<: *service-defaults
-    image: valkey/valkey:7
-    profiles:
-      - full
-    ports:
-      - "${VALKEY_PORT:-6379}:6379"
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "valkey-cli ping || redis-cli ping"
-      interval: 15s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - shared_cache:/data
-    networks:
-      - microservices-net
-
-  otel-collector:
-    <<: *service-defaults
-    image: otel/opentelemetry-collector:0.99.0
-    profiles:
-      - full
-    command:
-      - "--config=/etc/otel-collector-config.yaml"
-    volumes:
-      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
-    ports:
-      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
-      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+    build:
+      context: .
+      dockerfile: services/ingestion-service/Dockerfile
+    container_name: ingestion-service
     depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    ports:
+      - "${INGESTION_SERVICE_PORT:-8085}:8085"
+    environment:
+      DATABASE_URL: ${HOUSING_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
+      AUTH_BASE_URL: ${AUTH_INTERNAL_BASE_URL:-${AUTH_BASE_URL:-http://auth-service:5000}}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-context-3}
+      VOYAGE_OUTPUT_DIMENSION: ${VOYAGE_OUTPUT_DIMENSION:-1024}
+      VECTOR_STORE_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      SIGNING_SECRET: ${SIGNING_SECRET:-${JWT_SECRET_KEY:-dev-secret}}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  agent-api:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: services/agent-api/Dockerfile.reduced
+    container_name: agent-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      ingestion-service:
+        condition: service_healthy
       localstack:
-        condition: service_started
-    networks:
-      - microservices-net
+        condition: service_healthy
+    ports:
+      - "${AGENT_API_PORT:-8000}:8000"
+    environment:
+      STACK_PROFILE: ${STACK_PROFILE:-dev}
+      SERVICE_MODE: ${SERVICE_MODE:-dev}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
+      INGEST_BASE_URL: ${AGENT_INGEST_BASE_URL:-http://ingestion-service:8085}
+      INGEST_UPLOAD_API_KEY: ${INGEST_UPLOAD_API_KEY:-}
+      METRICS_NAMESPACE: ${METRICS_NAMESPACE:-agent-api}
+      METRICS_AUTH_HEADER: ${METRICS_AUTH_HEADER:-Authorization}
+      METRICS_AUTH_SCHEME: ${METRICS_AUTH_SCHEME:-Bearer}
+      METRICS_AUTH_TOKEN: ${METRICS_AUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_EMBEDDING_MODEL: ${VOYAGE_EMBEDDING_MODEL:-voyage-context-3}
+      VOYAGE_EMBEDDING_DIMENSIONS: ${VOYAGE_EMBEDDING_DIMENSIONS:-1024}
+      VOYAGE_RERANK_MODEL: ${VOYAGE_RERANK_MODEL:-rerank-2.5}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-${AUTH_INTERNAL_BASE_URL:-http://auth-service:5000}}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-agent-api}
+      AUTH_SHARED_SECRET: ${AUTH_SHARED_SECRET:-${JWT_SECRET_KEY:-dev-secret}}
+      AUTH_JWT_ALGORITHMS: ${AUTH_JWT_ALGORITHMS:-RS256,HS256}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-}
+      AUTH_JWKS_CACHE_SECONDS: ${AUTH_JWKS_CACHE_SECONDS:-3600}
+      AUTH_JWT_LEEWAY_SECONDS: ${AUTH_JWT_LEEWAY_SECONDS:-60}
+      AUTH_REQUIRED_SCOPES: ${AUTH_REQUIRED_SCOPES:-}
+      AUTH_SCOPE_CLAIM: ${AUTH_SCOPE_CLAIM:-scope}
+      AUTH_TENANT_CLAIM: ${AUTH_TENANT_CLAIM:-tenant_id}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      AGENT_API_CORS_ORIGINS: ${AGENT_API_CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      AGENT_API_CORS_ALLOW_CREDENTIALS: ${AGENT_API_CORS_ALLOW_CREDENTIALS:-false}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:
   localstack_data:
-  shared_cache:
 
 networks:
-  microservices-net:
-    driver: bridge
-  localstack-net:
-    driver: bridge
-  public-edge:
+  housing-net:
     driver: bridge

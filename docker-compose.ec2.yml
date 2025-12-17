@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-ec2-defaults: &ec2-defaults
   env_file:
     - ${ENV_FILE:-.env.prod}
@@ -17,8 +15,35 @@ services:
       context: .
       dockerfile: services/agent-api/Dockerfile.reduced
     environment:
+      STACK_PROFILE: ${STACK_PROFILE:-prod}
+      SERVICE_MODE: ${SERVICE_MODE:-prod}
       DATABASE_URL: ${DATABASE_URL}
+      INGEST_BASE_URL: ${AGENT_INGEST_BASE_URL:-http://ingestion-service:8085}
+      INGEST_UPLOAD_API_KEY: ${INGEST_UPLOAD_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_EMBEDDING_MODEL: ${VOYAGE_EMBEDDING_MODEL:-voyage-context-3}
+      VOYAGE_EMBEDDING_DIMENSIONS: ${VOYAGE_EMBEDDING_DIMENSIONS:-1024}
+      VOYAGE_RERANK_MODEL: ${VOYAGE_RERANK_MODEL:-rerank-2.5}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-${AUTH_INTERNAL_BASE_URL:-${AUTH_BASE_URL:-http://auth-service:5000}}}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-agent-api}
+      AUTH_SHARED_SECRET: ${AUTH_SHARED_SECRET:-${JWT_SECRET_KEY:-}}
+      AUTH_JWT_ALGORITHMS: ${AUTH_JWT_ALGORITHMS:-RS256,HS256}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-}
+      AUTH_JWKS_CACHE_SECONDS: ${AUTH_JWKS_CACHE_SECONDS:-3600}
+      AUTH_JWT_LEEWAY_SECONDS: ${AUTH_JWT_LEEWAY_SECONDS:-60}
+      AUTH_REQUIRED_SCOPES: ${AUTH_REQUIRED_SCOPES:-}
+      AUTH_SCOPE_CLAIM: ${AUTH_SCOPE_CLAIM:-scope}
+      AUTH_TENANT_CLAIM: ${AUTH_TENANT_CLAIM:-tenant_id}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      AGENT_API_CORS_ORIGINS: ${AGENT_API_CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      METRICS_NAMESPACE: ${METRICS_NAMESPACE:-agent-api}
+      METRICS_AUTH_HEADER: ${METRICS_AUTH_HEADER:-Authorization}
+      METRICS_AUTH_SCHEME: ${METRICS_AUTH_SCHEME:-Bearer}
+      METRICS_AUTH_TOKEN: ${METRICS_AUTH_TOKEN:-}
       USE_LOCALSTACK: ${USE_LOCALSTACK:-0}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
       UV_CACHE_DIR: /tmp/uv-cache
     command:
@@ -34,6 +59,11 @@ services:
       - "${UVICORN_WORKERS:-1}"
     ports:
       - "${AGENT_API_PORT:-8000}:8000"
+    depends_on:
+      ingestion-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -50,11 +80,15 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      AUTH_BASE_URL: ${AUTH_BASE_URL:-}
+      AUTH_BASE_URL: ${AUTH_INTERNAL_BASE_URL:-${AUTH_BASE_URL:-http://auth-service:5000}}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-3}
-      SIGNING_SECRET: ${INGESTION_SIGNING_SECRET:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-context-3}
+      VOYAGE_OUTPUT_DIMENSION: ${VOYAGE_OUTPUT_DIMENSION:-1024}
+      VECTOR_STORE_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      SIGNING_SECRET: ${SIGNING_SECRET:-${JWT_SECRET_KEY:-}}
       UV_CACHE_DIR: /tmp/uv-cache
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
     command:
       - uvicorn
       - ingestion_service.main:app
@@ -82,6 +116,7 @@ services:
       - "${AUTH_SERVICE_PORT:-5001}:5000"
     environment:
       DATABASE_URL: ${AUTH_DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
       PORT: 5000
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SES_REGION: ${SES_REGION:-us-east-1}
