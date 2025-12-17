@@ -339,8 +339,10 @@ ask_question() {
     log "Raw response: $body"
     exit 1
   fi
-  jq -c --arg q "$question" --arg a "$answer" \
-    --argjson citations "$(echo "$body" | jq -c '.done.citations // .done.payload.citations // []')" \
+  local citations_json
+  citations_json=$(echo "$body" | jq -c '.done.citations // .done.payload.citations // []')
+  jq -n -c --arg q "$question" --arg a "$answer" \
+    --argjson citations "$citations_json" \
     --argjson raw "$body" \
     '{question:$q, answer:$a, citations:$citations, raw:$raw}' >>"$TMP_QAS"
   log "Answered: $question"
