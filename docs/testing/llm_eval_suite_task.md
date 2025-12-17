@@ -1,18 +1,18 @@
 # Task: Implement LLM Agent Eval Suite (pytest, real Agent API, GPT-5.1 + reasoning.effort)
 
-This brief is for a fresh coding agent. Follow `AGENTS.md` (root and `services/agent-api/AGENTS.md`) and keep the memory bank/docs in sync. Key context lives in `docs/testing/llm_eval_suite_proposal.md`.
+This brief is for a fresh coding agent. Follow `AGENTS.md` (root and `services/agent-api/AGENTS.md`) and keep the memory bank/docs in sync. Key context lives in `docs/testing/llm_eval_suite_proposal.md`. Stack is ingestion-first (FastAPI ingestion) with BM25 + pgvector (Voyage `voyage-context-3`) reranked by `rerank-2.5`, and a ReAct agent with a Pyodide tool; graph/planner/cache/reduced-scope flows are deprecated.
 
 ## Scope
 - Build and maintain a pytest-driven eval harness under `services/agent-api/tests/evals` using typed scenario models and LLM-as-judge metrics.
 - Always hit the real Agent API using production credentials from `.env.prod`; no stubs, fixtures, or mocking. Conversations and attachments are created via real endpoints with HS256 tokens minted from `AUTH_SHARED_SECRET`.
-- Reuse the prod-seeded reduced E2E documents (policy, ledger, KPI) instead of uploading new ones; attach them in every scenario and capture retrieval traces.
+- Use the ingestion service to seed eval documents (policy/ledger/KPI or fresh smoke uploads) and attach the live IDs recorded by `scripts/prod_smoke_check.sh`; avoid reduced-scope shortcuts.
 - Use GPT-based judges for all rubric metrics (default `gpt-5.1` with `reasoning.effort=medium`, override via `EVAL_JUDGE_MODEL`) and keep the metric stack limited to DeepEval GEval + Ragas context metrics plus deterministic checks.
 - Dump eval artifacts to JSON (gitignored), and treat thresholds as gates for smoke coverage rather than perf benchmarking.
 
 ## Current Harness Snapshot (added in this task)
 - Package layout: `services/agent-api/tests/evals/core/` (`scenarios.py`, `runner.py`, `metrics.py`, `judges.py`, `telemetry.py`), datasets under `datasets/`, pytest entrypoint `test_scenarios.py`, gitignored `artifacts/evals/`.
 - Real API + data: Runner uses `AGENT_BASE_URL` and a minted JWT (HS256) to call `/v1/conversations`, bulk-attach docs, and post `/v1/chat` with `allow_stateless=false`. Required env: `source .env.prod`, set `EVAL_USER_ID=11111111-2222-3333-4444-555555555555`, and provide `OPENAI_API_KEY`.
-- Real documents: Attach prod doc IDs for reduced E2E smoke—policy `fb400d68-3200-4e07-9231-cea9ee7163eb`, ledger `6806e86f-549f-4588-84de-2dd089a8f7da`, KPI `232d5d61-f083-448f-ae2f-2aa9b9a1a3c0`—with content mirrors under `services/agent-api/tests/data/reduced_e2e/*.md`.
+- Real documents: Prefer fresh uploads via ingestion-service or the stamped PDFs used by `scripts/prod_smoke_check.sh`; record live doc IDs in datasets instead of relying on reduced-scope seeds.
 - Metrics: DeepEval GEval for `faithfulness`/`answer_relevance`, Ragas for `context_precision`/`context_recall`, deterministic `citation_coverage` + `latency`. Judge default is `gpt-5.1` with `reasoning.effort=medium`; override via `EVAL_JUDGE_MODEL`. OPENAI_API_KEY is mandatory; no stubbed judges.
 - Artifacts: JSON dumped under `services/agent-api/tests/evals/artifacts/evals/<ts>/<scenario>/result.json` (gitignored). Override with `EVAL_ARTIFACTS_DIR=<path>` when needed.
 - Execution: `cd services/agent-api && uv run pytest tests/evals -m eval` (requires `.env.prod`, AUTH_SHARED_SECRET/OPENAI_API_KEY, network to prod + OpenAI). Artifacts written automatically via `EvalResult.write_artifacts()`.

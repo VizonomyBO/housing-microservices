@@ -1,5 +1,7 @@
 # Task 16 – Cleanup, quality gates, and data reset for final deploy (fresh session prompt)
 
+> **Revamp note:** Apply to the current ingestion-first stack (FastAPI services on EC2, voyage-context-3 + `rerank-2.5`, ReAct agent with Pyodide). Legacy cache/rate-limiter/Step Functions/reduced-scope steps are deprecated; rely on `scripts/deploy_stack.sh`, `scripts/prod_smoke_check.sh`, and the updated docs/runbooks.
+
 ## Objective
 Finish with a clean codebase and fresh data: run quality gates, tidy docs, and reset documents/chats in the DBs so the final deploy starts with no old smoke artifacts.
 

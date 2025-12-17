@@ -1,5 +1,7 @@
 # Reduced-Stack SSE Walkthrough
 
+> **Archived (pre-revamp):** References reduced-stack/demo headers and Valkey-related metadata. The current stack is ingestion-first with no reduced-scope or cache layer; use the standard smoke commands in `docs/runbooks/prod_setup.md`.
+
 This note shows how to tail `/v1/chat` as Server-Sent Events (SSE) when you ask the “advanced reasoning” question documented in the production runbook.
 
 ## 1. Command Recap

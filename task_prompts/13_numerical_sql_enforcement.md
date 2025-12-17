@@ -1,5 +1,7 @@
 # Task 13 – Enforce SQL/Polars for all numeric reasoning
 
+> **Revamp note:** Use the ReAct agent stack (BM25 + pgvector with voyage-context-3, `rerank-2.5`, Pyodide tool for calculations) and the ingestion-first flow. Graph/planner/cache/Step Functions/reduced-scope features are deprecated; keep grounding/citations strict.
+
 ## Objective
 Force the agent to route any numeric reasoning through the SQL/Polars toolchain, even when the source is prose rather than a formal table. Add an LLM-backed numeric fact extractor that lifts numbers from attached documents into an ephemeral table and have the router treat any numeric signal as `requires_sql=true` so Polars executes all arithmetic/aggregations. No manual hints; behavior must mirror production.
 

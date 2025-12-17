@@ -1,32 +1,31 @@
 # Prod Setup (AWS/EC2)
 
-Use this flow to deploy to the shared AWS environment (EC2 services + remote Postgres + ingestion service). Full details remain in `docs/runbooks/prod_setup.md`; this page is the quick start.
+Quick start for the ingestion-first stack on EC2. Full walkthrough lives in `docs/runbooks/prod_setup.md`.
 
 ## Prereqs
-- Docker/Compose, Terraform 1.7+, AWS CLI, `jq`, `curl`, `uv` (optional).
-- Env file: `.env.prod` (contains AWS creds, EC2 host, DB URLs, open CORS).
-- SSH key: `ArchaaS/dist/vizonomy-v2-ec2-dev2.pem` (from Terraform outputs).
+- Docker/Compose, Terraform 1.7+, AWS CLI, `jq`, `curl`.
+- Env file: `.env.prod` (AWS creds, EC2 host, DB URLs, CORS).
+- SSH key from Terraform outputs (e.g., `ArchaaS/dist/vizonomy-v2-ec2-dev2.pem`).
 
-## Deploy + Smoke (quick path)
+## Deploy + smoke
 ```bash
 env_file=$(scripts/use_env.sh prod)
 set -a && source "$env_file" && set +a
 
-# Deploy infra + services (opens ports)
+# Deploy infra + services (preserves DB unless --destroy-first)
 ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode full-redeploy
 
-# Verify health
+# Health
 curl -fsS "$AUTH_BASE_URL/health"
-curl -fsS "$USER_SERVICE_URL/v1/health"
+curl -fsS "$USER_BASE_URL/v1/health"
 curl -fsS "$AGENT_BASE_URL/health"
 curl -fsS "$INGEST_BASE_URL/health"
 
-# AWS smoke via ingestion service (uploads PDFs, polls, attaches, chats)
+# Smoke: ingestion → activation → attach → chat
 ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
 ```
 
-## CORS posture
-- `.env.prod` sets `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` for testing. To allowlist, edit the env file, then redeploy (`scripts/deploy_stack.sh --mode services-only --env-file .env.prod ...`).
-
-## More detail
-- See `docs/runbooks/prod_setup.md` for the full curl walkthrough, Terraform flags, and reset/cleanup steps.
+## Notes
+- Stack is text-only: ingestion-service runs MarkItDown → contextual chunking → Voyage `voyage-context-3` embeddings → pgvector activation; Agent API never ingests directly.
+- Graph/Step Functions/Valkey/reduced-scope/telemetry features are deprecated.
+- `.env.prod` ships permissive CORS (`AGENT_API_CORS_ORIGINS=*`, `CORS_ORIGINS=*`) for testing; tighten and redeploy as needed.

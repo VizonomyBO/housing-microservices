@@ -2,6 +2,8 @@
 
 # Database Schema & Persistence Rules Deep Dive
 
+> **Note:** This schema retains graph/workflow tables and historical Step Functions/Lambda artifacts for backward compatibility, but the active stack is ingestion-first (FastAPI) and text-only. Graph RAG/planner, cache/rate-limiter, and reduced-scope modes are deprecated; keep related fields nullable and documented only.
+
 ## 1. Design Principles
 
 1. **Dual-scope corpus**: `base` documents (shared, country-scoped) live alongside `user` documents (private/shared). Access control derives from `conversation_documents` attachments rather than implicit ownership.
@@ -10,7 +12,7 @@
 4. **Snapshot fidelity**: All derived assets copy `content_hash` so provenance survives even when documents are shared.
 5. **Deterministic replay**: Conversations, tool traces, and checkpoints retain enough state for LangGraph to resume from any node.
 6. **Performance-aware retrieval**: Text/table/image chunks sit in a single table with vector + tsvector indexes plus metadata filters.
-7. **Graph-first augmentation**: Knowledge-graph and workflow-graph materializations live alongside chunks so GraphRAG/workflow planning can remain deterministic and queryable inside Postgres.
+7. **Graph-first augmentation (deprecated)**: Knowledge-graph and workflow-graph materializations remain for history but are not used by the current text-only stack; keep them nullable and documented only.
 8. **Minimal PII**: Store only `user_id` references; upstream tokens remain transient.
 9. **Migration safety + observability**: Schema evolves additively with reversible migrations, tracked ref counts, and metrics for ingestion/deletion pipelines.
 
@@ -28,8 +30,8 @@
 | Document registry | `documents`, `ingestion_jobs`, `artifacts` | Track uploads (base + user), ingestion stages, and dedup metadata. |
 | Conversation access | `conversation_documents` | Attach documents (base or user) to chats, maintain ref counts. |
 | Retrieval corpus | `chunks`, `chunk_metrics` | Embeddable units keyed by `document_id` + `content_hash`. |
-| Knowledge graph | `graph_entities`, `graph_edges`, `graph_evidence`, `graph_communities` | Persist entities/relationships derived during ingestion for GraphRAG. |
-| Workflow playbooks | `workflow_graphs`, `workflow_nodes`, `workflow_edges`, `workflow_versions` | Store coarse/mid/fine troubleshooting paths consumed by WorkflowPlanner. |
+| Knowledge graph (deprecated) | `graph_entities`, `graph_edges`, `graph_evidence`, `graph_communities` | Historical GraphRAG artifacts; keep nullable and documented only. |
+| Workflow playbooks (deprecated) | `workflow_graphs`, `workflow_nodes`, `workflow_edges`, `workflow_versions` | Historical workflow planner artifacts; keep nullable and documented only. |
 | Conversations & checkpoints | `conversations`, `messages`, `message_tool_calls`, `message_citations`, `agent_state_checkpoints` | Persist LangGraph transcripts and evidence. |
 | Async insights | `pillar_answers`, `pillar_answer_sources`, `retrieval_runs`, `retrieval_run_items` | Pre-computed answers and retrieval telemetry. |
 

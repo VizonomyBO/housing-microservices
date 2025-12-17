@@ -1,5 +1,7 @@
 # Infrastructure & Deployment
 
+> **Archived (pre-revamp):** Describes the deprecated ECS/Lambda/Valkey/telemetry footprint. The active stack is EC2 + Postgres + FastAPI/Flask services with synchronous ingestion and no cache/rate-limiter layer. Use `scripts/deploy_stack.sh` and `docs/runbooks/prod_setup.md` for current deploy flows.
+
 ## Overview
 This document defines the infrastructure architecture and deployment strategy for the Housing Service. We use **Terraform** for Infrastructure as Code (IaC) and **GitHub Actions** for CI/CD, deploying to a hybrid **ECS Fargate + Lambda** environment on AWS.
 

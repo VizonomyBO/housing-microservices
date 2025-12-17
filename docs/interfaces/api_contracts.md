@@ -2,6 +2,8 @@
 
 # API & Event Contracts Deep Dive
 
+> **Archived (pre-revamp):** Describes the legacy Step Functions/Lambda ingestion, cache/rate-limiter, and planner stack. The active system uses synchronous FastAPI ingestion with voyage-context-3 embeddings, BM25+vector retrieval, and no cache/planner/telemetry layers. See `docs/overview/system_architecture.md` and `docs/agents/*` for the supported flow.
+
 ## 1. REST Gateway Contracts
 ### 1.1 Shared HTTP Semantics
 

@@ -1,5 +1,7 @@
 # Step 9 – AWS Curl + Smoke Progress Log (2025-02-03)
 
+> **Archived (pre-revamp):** Documents the legacy Step Functions/Lambda ingestion troubleshooting. The active stack uses the synchronous FastAPI ingestion service (MarkItDown → voyage-context-3 → pgvector) with no Step Functions or cache layer.
+
 ## Key Instructions & Constraints
 - Follow `AGENTS.md` (plan/tracker required, `.venv.tooling` for automation scripts, `services/agent-api/.venv` + `uv run` for service tooling).
 - Focus exclusively on AWS verification right now (per latest user directive); LocalStack validation remains deferred.

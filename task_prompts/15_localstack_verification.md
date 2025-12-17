@@ -1,5 +1,7 @@
 # Task 15 – LocalStack (or docker-based) verification (fresh session prompt)
 
+> **Archived (pre-revamp):** Mentions Step Functions/Lambda simulators and reduced-scope modes. Current LocalStack use is limited to S3/AWS mocks for the FastAPI ingestion-first stack (no Step Functions/Valkey). Follow `docs/runbooks/full_stack_compose.md` for dev verification.
+
 ## Objective
 Run the full ingestion + chat flow locally without AWS. LocalStack Pro is unavailable for Step Functions/Lambda, so prefer a docker-based emulation or the best available LocalStack setup. This runs after AWS + EC2 deployment is stable.
 

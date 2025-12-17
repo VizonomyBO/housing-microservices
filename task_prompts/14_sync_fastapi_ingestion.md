@@ -1,5 +1,7 @@
 # Task 14 – Replace Lambda ingestion with a simple FastAPI service on EC2
 
+> **Status:** Implemented — the FastAPI ingestion service is now the only upload path (MarkItDown → voyage-context-3 embeddings → pgvector activation). Keep this prompt for history; Step Functions/Lambda ingestion is deprecated.
+
 ## Objective
 **Status: Completed.** The Lambda-based ingestion flow has been replaced with a single FastAPI app on EC2 (port 8085) that performs synchronous PDF ingestion end-to-end using MarkItDown, chunking, embeddings, and activation. No Redis/workers—just a long-running process handling the full pipeline. The API surface mirrors the prior ingestion Lambda interface so upstream clients (agent-api, scripts, smoke) continue to work.
 

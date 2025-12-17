@@ -1,5 +1,7 @@
 # Asynchronous Jobs & Queues
 
+> **Archived (pre-revamp):** Covers the deprecated SQS/Step Functions/Lambda worker stack. The current platform is synchronous ingestion-first (FastAPI) with no worker fleet or cache/rate-limiter layer. See `docs/overview/system_architecture.md` for the supported model.
+
 ## Overview
 This document outlines the architecture for asynchronous background processing in the Housing Service. We use message queues (e.g., SQS) to decouple ingestion, PDF generation, and other long-running tasks from the main API request/response cycle.
 

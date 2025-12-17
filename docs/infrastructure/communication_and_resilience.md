@@ -1,5 +1,7 @@
 # Communication & Resilience
 
+> **Archived (pre-revamp):** Captures legacy cache/rate-limiter hooks, async worker interactions, and LangGraph subgraphs tied to Step Functions/Lambda flows. The current stack is ingestion-first (FastAPI services + Postgres) without Valkey/cache or Lambda planners. Refer to `docs/overview/system_architecture.md` for supported patterns.
+
 ## Overview
 With the architectural shift to a co-located **FastAPI + LangGraph** service, "inter-service" communication is primarily internal (function calls). This document defines the resilience patterns for these internal interactions, as well as the external boundaries with the User Service and Async Workers.
 

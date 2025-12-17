@@ -1,5 +1,7 @@
 # Task 11 – Automate env switching (fresh session prompt)
 
+> **Archived (pre-revamp):** Keep for history only. Current stack is ingestion-first (FastAPI) with voyage-context-3 + rerank-2.5 and no Valkey/cache/Step Functions/reduced-scope modes. Use `scripts/use_env.sh` and the updated docs/runbooks for env handling.
+
 ## Objective
 Create a single source of truth to toggle between AWS, LocalStack, and hybrid dev for compose, scripts, and lambdas. It’s allowed to touch any `.env*` files (gitignored) and to add helper scripts/templates.
 

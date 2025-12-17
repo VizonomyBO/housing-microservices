@@ -1,5 +1,7 @@
 # Task 12 – Deploy services to EC2 (same host as Postgres) (fresh session prompt)
 
+> **Archived (pre-revamp):** References legacy deployment modes. The active workflow uses `scripts/deploy_stack.sh` with the ingestion-first stack (no Step Functions/Valkey/telemetry). See updated runbooks under `docs/runbooks/`.
+
 ## Objective
 Package and run agent-api, auth-service, and user-service on the existing EC2 that hosts Postgres (marker-service is legacy and should be ignored unless explicitly requested). Services must use public IP/hostnames for DB and peers so they can later be moved off-box without code changes. Expose required ports via security groups. Automate start/stop/update.
 

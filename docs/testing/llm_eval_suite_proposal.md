@@ -3,6 +3,7 @@
 ## Goals & Constraints
 - Type-safe, OOP-first eval scenarios runnable via `uv run pytest`, not bespoke CLIs.
 - Exercise the real Agent API over HTTP using production credentials (`.env.prod`); no dependency overrides, stubs, or mocks.
+- Target the ingestion-first, text-only stack (FastAPI ingestion, BM25 + pgvector with Voyage `voyage-context-3` + `rerank-2.5`, ReAct agent with Pyodide tool). Avoid graph/planner/cache/reduced-scope paths.
 - Attach existing prod documents stored in AWS Postgres/S3, load conversation history, and evaluate responses with LLM-as-judge metrics.
 - Capture retrieval traces (chunk IDs, scores, latency) for metrics and write eval artifacts to JSON under `artifacts/evals/` (gitignored).
 - Treat eval runs as read-only at the product level: create real conversations/attachments but avoid custom in-memory stores or bypassed persistence layers.

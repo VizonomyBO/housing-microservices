@@ -1,201 +1,87 @@
-# Production Runbook (AWS-first ingestion)
+# Production Runbook (AWS/EC2)
 
-For a quick-start version, see `docs/setup/prod.md`. This runbook keeps the full curl walkthrough and terraform/deploy details.
+Deploy the ingestion-first stack (agent-api, ingestion-service, auth-service, user-service, Postgres) to EC2 and run the synchronous ingestion smoke. Legacy Lambda/Step Functions, Valkey cache, telemetry, and reduced-scope modes are deprecated.
 
-End-to-end guide for deploying the prod stack (Terraform + EC2 services), running the AWS curl walkthrough (login → presign via ingestion service → form upload → poll → attach → chat), and exposing a frontend-ready endpoint reference. Swagger is unhealthy in prod—use the curls below instead.
-
-## 1) Live endpoints (AWS)
+## Live endpoints
 - `AGENT_BASE_URL=http://52.207.140.87:8000`
 - `AUTH_BASE_URL=http://52.207.140.87:5001`
-- `INGEST_BASE_URL=http://52.207.140.87:8085` (FastAPI ingestion service on EC2)
-- Auth demo creds: `PROD_DEMO_EMAIL` / `PROD_DEMO_PASSWORD` from `.env.prod`.  
-Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && set +a` to load them.
+- `INGEST_BASE_URL=http://52.207.140.87:8085`
+- Auth demo creds: `PROD_DEMO_EMAIL` / `PROD_DEMO_PASSWORD` (from `.env.prod`)
 
-## 2) Environment & prerequisites
-- Tools: Docker 25+ with Compose V2, Terraform 1.7+, AWS CLI, `jq`, `curl`. Python/uv optional (`scripts/ensure_tooling_env.sh` seeds `.venv.tooling`).
-- Env toggle (required before any command):  
+## Prereqs
+- Docker + Compose, Terraform 1.7+, AWS CLI, `jq`, `curl`.
+- Env selection is required:  
   ```bash
-  env_file=$(scripts/use_env.sh prod)   # USE_LOCALSTACK=0, real AWS endpoints
+  env_file=$(scripts/use_env.sh prod)
   set -a && source "$env_file" && set +a
   ```
-- Env files: `.env.local` (LocalStack), `.env.dev` (cloud data plane with local services), `.env.prod` (AWS). Each file sets `ENV_FILE` so compose/env scripts pick up the right configuration.
-- LocalStack is deferred per user directive; keep USE_LOCALSTACK=0 for this runbook.
+- SSH key from Terraform outputs (defaults to `ArchaaS/dist/...pem`) for deploy/patched restarts.
 
-## 2.5) CORS configuration (agent-api/auth-service)
-- `agent-api` now reads `AGENT_API_CORS_ORIGINS` (falls back to `CORS_ORIGINS`); auth/user-service continue to use `CORS_ORIGINS`.
-- During the current testing phase, `.env.prod` (and `.env.dev` if you use it) set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
-- Verify headers any time with `ORIGIN=https://my-frontend.example ./scripts/test_cors.sh` (hits local + AWS endpoints).
-- To allowlist specific origins/IPs instead, edit the env file(s) before redeploy:  
-  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.prod ./scripts/deploy_stack.sh --mode services-only ...`) so containers reload the values.
-- Revert to `*` if you need fully open CORS again during testing.
-
-## 3) Frontend integration quick reference
-- **Auth (AUTH_BASE_URL)**
-  - Login: `POST /v1/auth/login` with `{"login": "...", "password": "..."}` → `{access_token, refresh_token, user_id}`.
-- **Agent API (AGENT_BASE_URL)**
-  - Health: `GET /health`, `GET /v1/health`.
-  - Documents: `GET /v1/documents?page=1&page_size=50&content_hash=<sha256>` returns status (`pending|active|failed`) and `ingestion_stage`. Failed docs include `metadata.ingestion_failure`.
-  - Conversations: `POST /v1/conversations` body `{"country_code":"US","namespace":"prod-demo"}` → `{conversation_id}`.
-  - Attachments: `POST /v1/conversations/{id}/attachments` body `{"document_id":"...","auto_attach_base_docs":false}`. Returns `409 DOCUMENT_NOT_READY` until the doc is `active`. For bulk, call `POST /v1/conversations/{id}/attachments/bulk` with `{"document_ids":["...","..."]}` (frontend can fetch IDs via `/v1/documents?country_code=ARG` first).
-  - Chat (SSE): `POST /v1/chat` with headers `Accept: text/event-stream`, `Authorization: Bearer $TOKEN`, body:
-    ```json
-    {
-      "thread_id": "<conversation_id>",
-      "message": {"type": "user", "content": "KPI/ledger question"},
-      "constraints": {"country_code": "US", "auto_attach_base_docs": false}
-    }
-    ```
-    Expect `requires_sql: true` for KPI/ledger prompts and nodes `numerical_text_to_sql`, `numerical_polars_executor`, `numerical_result_validator`.
-- **Ingestion FastAPI service (INGEST_BASE_URL, port 8085)** — only upload path; Agent API no longer ingests directly.
-  - Presign: `POST /v1/documents/upload` with JSON:
-    ```json
-    {
-      "document_name": "Prod Smoke 1738880000",
-      "source_type": "pdf",
-      "country_code": "US",
-      "language": "en",
-      "file_size_bytes": 123456,
-      "tags": ["demo","ingestion"],
-      "metadata": {"scenario": "prod_smoke"}
-    }
-    ```
-    Requires `Authorization: Bearer $TOKEN` (and `x-api-key` if configured). Response includes `document_id`, `upload.url`, and `upload.fields` (SigV4 POST fields per AWS docs: `policy`, `x-amz-credential`, `x-amz-algorithm`, `x-amz-signature`, `Content-Type`, etc.).
-  - Upload to S3: `curl -X POST "$UPLOAD_URL" -F "key=..." ... -F "file=@/path/to.pdf;type=$CONTENT_TYPE"`.
-
-## 4) Deploy (infra + EC2 services)
-Use the unified deploy entrypoint for the cache-free stack:
+## Deploy
+Use the unified deploy script (cache-free stack only):
 ```bash
-# terraform apply + docker compose rollout (defaults: .env.prod, terraform.v2.tfvars, workspace=prod)
-ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_stack.sh --mode full-redeploy
+# terraform apply + compose rollout (DB preserved unless --destroy-first is passed)
+ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode full-redeploy
 
-# If infra is already up and you just want to push code/config changes
-ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_stack.sh --mode services-only
+# or services-only when infra is already up
+ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode services-only
 ```
-Notes:
-- `--destroy-first` forces a terraform destroy before apply (confirmation required). Avoid unless you explicitly intend to recreate infra; DB data is otherwise preserved.
-- Compose is scoped to `agent-api`, `ingestion-service`, `auth-service`, and `user-service` (no Lambda/Step Functions/Valkey/telemetry/nginx/swagger).
-- Old helpers (`deploy_prod_stack.sh`, `deploy_ec2_services.sh`, `provision_remote_stack.sh`) are deprecated stubs that point to `deploy_stack.sh`.
+Options: `--destroy-first` (confirmation required), `--no-sync`, `--no-build`, `--host`, `--ssh-key`, `--patch-file` (hot-patch path).
 
-## 5) AWS curl walkthrough (manual)
-The commands below run entirely against the live AWS endpoints and the new ingestion FastAPI service on EC2. Use fresh copies of the sample PDFs to bypass content-hash dedupe.
-
-1. **Set env + token**
-   ```bash
-   env_file=$(scripts/use_env.sh aws)
-   set -a && source "$env_file" && set +a
-   TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
-     -H 'Content-Type: application/json' \
-     -d "{\"login\":\"$PROD_DEMO_EMAIL\",\"password\":\"$PROD_DEMO_PASSWORD\"}" \
-     | jq -r '.access_token')
-   ```
-2. **Pick a unique PDF (repeat for policy/ledger/KPI)**  
-   ```bash
-   SRC=services/agent-api/tests/data/reduced_e2e/doc_policy.pdf   # or doc_ledger.pdf / doc_kpi.pdf
-   FILE=/tmp/prod_ingest_$(basename "$SRC" .pdf)_$(date +%s).pdf
-   cp "$SRC" "$FILE"
-   printf '\n%% smoke-run %s\n' "$(date -Iseconds)" >> "$FILE"   # stamp to avoid content-hash dedupe
-   FILE_SIZE=$(stat -c%s "$FILE")
-   FILE_HASH=$(sha256sum "$FILE" | awk '{print $1}')
-   ```
-3. **Request presigned upload via ingestion service** (FastAPI on EC2; no S3 POST required)
-   - Ingestion is text-only and synchronous (MarkItDown → contextual chunking → voyage-context-3 embeddings → activate). Allowed `source_type` values: `pdf`, `docx`, `doc`, `txt`, `md`, `html`, `json`.
-   - Default embeddings use `voyage-context-3` at `VOYAGE_OUTPUT_DIMENSION` (1024 by default; must match pgvector dimension). Optionally include `output_dimension` in the POST body to pick 256/512/1024/2048 when the DB is configured for that shape.
-   ```bash
-   UPLOAD_RESP=$(jq -n \
-     --arg name "Prod Smoke $(date +%s)" \
-     --arg country "$PROD_DEMO_COUNTRY" \
-     --argjson size "$FILE_SIZE" \
-     '{document_name:$name, source_type:"pdf", country_code:$country, language:"en",
-       file_size_bytes:$size, tags:["demo","prod_smoke"], metadata:{scenario:"prod_manual"}}' | \
-     curl -sS -X POST "$INGEST_BASE_URL/v1/documents/upload" \
-       -H 'Content-Type: application/json' \
-       -H "Authorization: Bearer $TOKEN" \
-       ${INGEST_UPLOAD_API_KEY:+-H "x-api-key: $INGEST_UPLOAD_API_KEY"} \
-       -d @-)
-   echo "$UPLOAD_RESP" | jq .
-   DOC_ID=$(echo "$UPLOAD_RESP" | jq -r '.document_id')
-   UPLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.upload.url')
-   UPLOAD_FIELDS=$(echo "$UPLOAD_RESP" | jq -c '.upload.fields')
-   ```
-4. **POST the binary to ingestion service form endpoint**  
-   (The FastAPI service returns an HMAC-signed form; upload directly to its `/v1/documents/upload/complete` URL with your bearer token. No S3 POST/fields juggling needed.)
-   ```bash
-   FORM_ARGS=()
-   while IFS=$'\t' read -r key val; do FORM_ARGS+=(-F "$key=$val"); done \
-     < <(echo "$UPLOAD_FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv')
-   FORM_ARGS+=(-F "file=@${FILE}")
-   curl -sSf -X POST "$UPLOAD_URL" -H "Authorization: Bearer $TOKEN" "${FORM_ARGS[@]}"
-   ```
-5. **Poll Agent API until active (or failed)**
-   ```bash
-   until curl -sS "$AGENT_BASE_URL/v1/documents?page=1&page_size=50&content_hash=$FILE_HASH" \
-     -H "Authorization: Bearer $TOKEN" \
-     | tee /tmp/doc_status.json \
-     | jq -e --arg doc "$DOC_ID" '.documents[] | select(.document_id==$doc) | select(.status=="active")'; do
-       echo "waiting for ingestion..."; sleep 5;
-   done
-   ```
-   If the document shows `status: "failed"`, check `metadata.ingestion_failure` for the convert error and avoid attaching.
-6. **Create conversation + attach**
-   ```bash
-   CONV_ID=$(curl -sS -X POST "$AGENT_BASE_URL/v1/conversations" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H 'Content-Type: application/json' \
-     -d '{"country_code":"'"$PROD_DEMO_COUNTRY"'","namespace":"prod-demo"}' \
-     | jq -r '.conversation.conversation_id')
-
-   curl -sS -X POST "$AGENT_BASE_URL/v1/conversations/$CONV_ID/attachments" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H 'Content-Type: application/json' \
-     -d '{"document_id":"'"$DOC_ID"'","auto_attach_base_docs":false}' \
-     | jq .
-   ```
-7. **Stream chat (numerical SSE)**
-   ```bash
-   ADV_PROMPT="Using the uploaded PDFs and KPI dashboard, flag any zone over the 80-point trigger and summarize arrears guardrails."
-   curl -N \
-     -H "Authorization: Bearer $TOKEN" \
-     -H 'Accept: text/event-stream' \
-     -H 'Content-Type: application/json' \
-     -d '{"thread_id":"'"$CONV_ID"'","message":{"type":"user","content":"'"$ADV_PROMPT"'"},"constraints":{"country_code":"'"$PROD_DEMO_COUNTRY"'","auto_attach_base_docs":false}}' \
-     "$AGENT_BASE_URL/v1/chat" | tee /tmp/sse_full_flow.log
-   ```
-   Confirm `requires_sql:true` and the numerical nodes appear in the SSE stream.
-
-## 6) Automated smoke (multi-PDF)
-Run the helper in AWS mode to upload **all three** PDFs (`doc_policy.pdf`, `doc_ledger.pdf`, `doc_kpi.pdf`) via the FastAPI ingestion service, poll until `active`, attach, and fire three prompts. Each upload is copied to `/tmp/prod_smoke_upload_XXXX.pdf` to avoid dedupe.
+## Smoke (automated)
+Runs ingestion → activation → attachment → chat over live endpoints using the FastAPI ingestion service.
 ```bash
-ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
+ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
 ```
-- Output: updates `prod_sample_run.json` with answers + `requires_sql` fields; smoke log captured via `tee`.
-- Override a single upload: `SMOKE_UPLOAD_FILE=/tmp/custom.pdf ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh`.
-- Expectations: KPI/ledger prompts show `requires_sql:true`, non-empty `sql_queries`, and `table_results` rows. Numeric prompts in prose (no markdown table) are auto-routed to SQL via the synthesized numeric-fact table, so `requires_sql` should still be `true` when digits/ledger/KPI language appears.
+- Uploads stamped copies of the policy/ledger/KPI PDFs to avoid dedupe.
+- Uses synchronous ingestion (MarkItDown → voyage-context-3 embeddings → pgvector → activate) and checks `status=active` before attaching.
+- Produces `prod_sample_run.json` with answers/citations/SQL traces.
 
-## 7) Troubleshooting & cleanup
-- `DOCUMENT_NOT_READY` on attach → keep polling `/v1/documents` until `status=active`.
-- `status=failed` with `ingestion_failure` → conversion error is fatal (fail-on-parse); do not re-attach until a new upload succeeds.
-- S3 dedupe: each run must upload a unique binary (copy with `$(date +%s)` as above) to avoid the ingestion API short-circuiting with `status: "DEDUPED"`.
-- Cleanup:
-  ```bash
-  terraform -chdir=ArchaaS workspace select prod && terraform -chdir=ArchaaS destroy -var-file=terraform.v2.tfvars
-  COMPOSE_PROFILES=reduced,ops docker compose down -v --remove-orphans
-  ```
-  (LocalStack destroy is the same with workspace `localstack` and `configs/localstack.tfvars` if needed later.)
-  - Data reset (AWS) before final deploy:
-    ```bash
-    # housing DB – remove smoke docs/chats and cascades
-    set -a && source .env.prod && set +a
-    PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB \
-      -c "begin; delete from conversations; delete from documents; commit;"
+## Smoke (manual walkthrough)
+1) **Auth**  
+```bash
+TOKEN=$(curl -sS -X POST "$AUTH_BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"login":"'"$PROD_DEMO_EMAIL"'","password":"'"$PROD_DEMO_PASSWORD"'"}' | jq -r '.access_token')
+```
+2) **Upload via ingestion service (text-only, synchronous)**  
+```bash
+FILE=/tmp/prod_manual_$(date +%s).txt; echo "Prod manual smoke $(date -Iseconds)" > "$FILE"
+SIZE=$(stat -c%s "$FILE")
+REQ=$(jq -n --arg name "Prod Manual $(date +%s)" --arg country "$PROD_DEMO_COUNTRY" --argjson size "$SIZE" \
+  '{document_name:$name, source_type:"txt", country_code:$country, language:"en", file_size_bytes:$size, tags:["prod","manual"], metadata:{scenario:"prod_manual"}}')
+RESP=$(curl -sS -X POST "$INGEST_BASE_URL/v1/documents/upload" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$REQ")
+UPLOAD_URL=$(echo "$RESP" | jq -r '.upload.url'); FIELDS=$(echo "$RESP" | jq -c '.upload.fields'); DOC_ID=$(echo "$RESP" | jq -r '.document_id')
+FORM=(); while IFS=$'\t' read -r k v; do FORM+=(-F "$k=$v"); done < <(echo "$FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv'); FORM+=(-F "file=@$FILE")
+curl -sSf -X POST "$UPLOAD_URL" -H "Authorization: Bearer $TOKEN" "${FORM[@]}" >/dev/null
+```
+3) **Poll until active**  
+```bash
+until curl -sS "$AGENT_BASE_URL/v1/documents?page=1&page_size=50&content_hash=$(sha256sum "$FILE" | awk '{print $1}')" \
+  -H "Authorization: Bearer $TOKEN" | jq -e --arg doc "$DOC_ID" '.documents[] | select(.document_id==$doc) | select(.status=="active")'; do
+  sleep 5
+done
+```
+4) **Conversation, attach, chat**  
+```bash
+CONV=$(curl -sS -X POST "$AGENT_BASE_URL/v1/conversations" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"country_code":"'"$PROD_DEMO_COUNTRY"'","namespace":"prod-manual"}' | jq -r '.conversation.conversation_id')
+curl -sS -X POST "$AGENT_BASE_URL/v1/conversations/$CONV/attachments" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"document_id":"'"$DOC_ID"'","auto_attach_base_docs":false}' >/dev/null
+curl -sS -X POST "$AGENT_BASE_URL/v1/chat" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"thread_id":"'"$CONV"'","message":{"type":"user","content":"Summarize the uploaded file."},"constraints":{"country_code":"'"$PROD_DEMO_COUNTRY"'","auto_attach_base_docs":false}}' | jq .
+```
 
-    # auth_db – drop stale refresh tokens
-    PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $AUTH_DB \
-      -c "begin; delete from refresh_tokens; commit;"
-    ```
-  - Quality gates (services/agent-api):
-    ```bash
-    uv run ruff format .
-    uv run ruff check --fix .
-    uv run ty check .
-    uv run pytest -n auto
-    ```
+## Troubleshooting
+- `DOCUMENT_NOT_READY`: wait for ingestion to activate; ingestion is synchronous but may take a few seconds for larger files.
+- `status=failed`: check `metadata.ingestion_failure` and re-upload with a fresh binary (content-hash dedupe is enforced).
+- Missing citations or empty answers: verify `OPENAI_API_KEY`/`VOYAGE_API_KEY` in the env file and rerun; no cache/rate-limit fallbacks exist.
+- CORS: `.env.prod` sets `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` for testing; tighten and redeploy if needed.
+
+## Cleanup
+- Redeploy with `--destroy-first` only when you intend to tear down/recreate infra (DB data is otherwise preserved).
+- Remove local containers/volumes after smokes: `COMPOSE_PROFILES=reduced,ops docker compose down -v --remove-orphans` (or the equivalent for your profile).

@@ -1,5 +1,7 @@
 # Observability & Operations
 
+> **Archived (pre-revamp):** Reflects the deprecated telemetry stack (OTEL collectors, cache metrics, Lambda traces). Current workflows rely on service health endpoints and smoke scripts; telemetry extras are not part of the supported stack.
+
 ## Overview
 This document defines the observability strategy (Logging, Tracing, Metrics) and operational procedures (Runbooks) for the Housing Service. We adhere to OpenTelemetry (OTEL) standards for telemetry and use structured JSON logging.
 

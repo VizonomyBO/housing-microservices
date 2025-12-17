@@ -1,5 +1,7 @@
 # Root Compose Modernization Plan (Task 01)
 
+> **Archived (pre-revamp):** References reduced/full profiles, Valkey/telemetry helpers, and Lambda/Step Functions simulators. The current Compose file already runs the retained services (agent-api, ingestion-service, auth-service, user-service, Postgres, LocalStack) without these extras.
+
 ## 1. Objectives & Deployment Modes
 - Unify every microservice under the root `docker-compose.yml` so `docker compose up` becomes the single entrypoint.
 - Support two runtime profiles:

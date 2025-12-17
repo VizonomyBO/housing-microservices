@@ -1,5 +1,7 @@
 # Task 10 – Harden AWS-mode compose for auth/user (fresh session prompt)
 
+> **Archived (pre-revamp):** References legacy compose/DB defaults and reduced-scope assumptions. Keep for history; follow current ingestion-first stack (FastAPI ingestion, ReAct agent with voyage-context-3 + rerank-2.5, no Valkey/cache/Step Functions) and updated docs under `docs/overview` and `docs/runbooks` when hardening auth/user.
+
 ## Objective
 Run auth-service and user-service locally against the AWS Postgres host so JWT login works without manual tokens when the stack points at AWS. Ensure `.env*` files reflect the remote DB and any required hostnames/ports.
 
