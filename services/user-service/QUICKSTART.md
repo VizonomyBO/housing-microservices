@@ -2,7 +2,7 @@
 
 ## Overview
 
-The User Service is a Flask-based microservice for managing user profiles and information. It shares the same database as the auth-service and provides endpoints for user management.
+The User Service is a FastAPI microservice for managing user profiles and information. It shares the `auth_db` database with the auth-service and validates tokens by calling the auth-service.
 
 ## Quick Start
 
@@ -12,15 +12,17 @@ The User Service is a Flask-based microservice for managing user profiles and in
 # Navigate to user-service directory
 cd services/user-service
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (uv is preferred)
+uv venv --python 3.13 .venv
+export UV_PROJECT_ENV=.venv
+uv pip install -r requirements.txt
 
 # Set up environment
 cp .env.example .env
 # Edit .env with your configuration
 
 # Run the service
-python run.py
+uv run python run.py
 ```
 
 The service will be available at `http://localhost:5001`
@@ -48,20 +50,20 @@ The service will be available at `http://localhost:5002`
 
 ```bash
 # First, get a token from auth-service
-TOKEN=$(curl -X POST http://localhost:5001/auth/login \
+TOKEN=$(curl -X POST http://localhost:5001/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"password"}' \
   | jq -r '.access_token')
 
 # Get your profile
-curl http://localhost:5002/users/me \
+curl http://localhost:5002/v1/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Update Current User Profile
 
 ```bash
-curl -X PUT http://localhost:5002/users/me \
+curl -X PUT http://localhost:5002/v1/users/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -75,34 +77,34 @@ curl -X PUT http://localhost:5002/users/me \
 
 ```bash
 # Get admin token
-ADMIN_TOKEN=$(curl -X POST http://localhost:5001/auth/login \
+ADMIN_TOKEN=$(curl -X POST http://localhost:5001/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"password"}' \
   | jq -r '.access_token')
 
 # List users
-curl http://localhost:5002/users?page=1&per_page=20 \
+curl http://localhost:5002/v1/users?page=1&per_page=20 \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ### Get User by ID (Admin or Self)
 
 ```bash
-curl http://localhost:5002/users/123 \
+curl http://localhost:5002/v1/users/123 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Search Users (Admin Only)
 
 ```bash
-curl "http://localhost:5002/users/search?q=john&limit=10" \
+curl "http://localhost:5002/v1/users/search?q=john&limit=10" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ### Update User (Admin Only)
 
 ```bash
-curl -X PUT http://localhost:5002/users/123 \
+curl -X PUT http://localhost:5002/v1/users/123 \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -115,7 +117,7 @@ curl -X PUT http://localhost:5002/users/123 \
 ### Delete User (Admin Only)
 
 ```bash
-curl -X DELETE http://localhost:5002/users/123 \
+curl -X DELETE http://localhost:5002/v1/users/123 \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
@@ -123,18 +125,18 @@ curl -X DELETE http://localhost:5002/users/123 \
 
 ### Public Endpoints
 - `GET /` - Service info
-- `GET /health` - Health check
+- `GET /health` or `/v1/health` - Health check
 
 ### Authenticated Endpoints
-- `GET /users/me` - Get current user
-- `PUT /users/me` - Update current user
-- `GET /users/<id>` - Get user by ID (self or admin)
+- `GET /v1/users/me` - Get current user
+- `PUT /v1/users/me` - Update current user
+- `GET /v1/users/<id>` - Get user by ID (self or admin)
 
 ### Admin Only Endpoints
-- `GET /users` - List all users (paginated)
-- `GET /users/search` - Search users
-- `PUT /users/<id>` - Update any user
-- `DELETE /users/<id>` - Delete user
+- `GET /v1/users` - List all users (paginated)
+- `GET /v1/users/search` - Search users
+- `PUT /v1/users/<id>` - Update any user
+- `DELETE /v1/users/<id>` - Delete user
 
 ## Running Tests
 
@@ -173,8 +175,9 @@ make clean
 Key environment variables:
 
 - `PORT` - Service port (default: 5001)
-- `DATABASE_URL` - PostgreSQL connection string
+- `AUTH_DATABASE_URL` - PostgreSQL connection string for the shared auth_db
 - `JWT_SECRET_KEY` - Must match auth-service key
+- `AUTH_SERVICE_URL` / `AUTH_INTERNAL_BASE_URL` - Base URL for auth-service token validation
 - `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` - Token expiration (default: 15)
 - `DEBUG` - Enable debug mode (default: False)
 
@@ -199,7 +202,7 @@ The user-service integrates with:
 ### Service won't start
 
 Check:
-- Database connection (DATABASE_URL)
+- Database connection (AUTH_DATABASE_URL)
 - Port availability (default: 5001)
 - JWT_SECRET_KEY matches auth-service
 
@@ -225,4 +228,3 @@ Ensure:
 3. Add user avatar upload
 4. Implement user activity logging
 5. Add email notification integration
-

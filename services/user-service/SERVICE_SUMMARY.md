@@ -2,7 +2,7 @@
 
 ## Overview
 
-A complete Flask-based microservice for user profile management with JWT authentication, role-based access control, and comprehensive testing.
+A FastAPI microservice for user profile management with JWT authentication (validated via auth-service), role-based access control, and coverage-driven tests. The service is cache-free and relies on the shared `auth_db`.
 
 ## What Was Created
 
@@ -11,7 +11,8 @@ A complete Flask-based microservice for user profile management with JWT authent
 ```
 user-service/
 ├── app/
-│   ├── __init__.py              # Flask app factory with CORS, rate limiting
+│   ├── __init__.py              # Package init (legacy compatibility)
+│   ├── main.py                  # FastAPI app setup and CORS
 │   ├── config.py                # Configuration management (prod/test)
 │   ├── api/
 │   │   ├── users.py            # User management endpoints
@@ -101,10 +102,10 @@ user-service/
 
 ### Docker Support
 
-- **Dockerfile** - Multi-stage Python 3.11 image
-- **docker-compose.yml** - Updated to include user-service on port 5002
+- **Dockerfile** - Python 3.13 image using uv-managed virtualenv
+- **docker-compose.yml** - Includes user-service on port 5002
 - Health checks for service orchestration
-- Shared database with auth-service
+- Shared `auth_db` database with auth-service
 
 ### Documentation
 
@@ -115,38 +116,33 @@ user-service/
 ### Requirements
 
 #### Production Dependencies (requirements/base.txt)
-- Flask 3.0.0
-- Flask-SQLAlchemy 3.1.1
-- Flask-CORS 4.0.0
-- Flask-Limiter 3.5.0
+- FastAPI 0.121.3
+- Uvicorn 0.38.0
+- httpx 0.28.1
+- SQLAlchemy 2.0.36
 - PyJWT 2.8.0
 - psycopg2-binary 2.9.11
 - email-validator 2.1.0
+- python-dotenv 1.0.0
 
-#### Development Dependencies (requirements/dev.txt)
-- pytest 7.4.3
-- pytest-cov 4.1.0
-- pytest-flask 1.3.0
-- black 23.12.1
-- flake8 7.0.0
-- mypy 1.7.1
+#### Development/Test Dependencies (requirements/dev.txt, requirements/test.txt)
+- pytest, pytest-cov, pytest-mock, factory-boy
+- ruff
+- mypy
+- types-requests
 
 ## Integration Points
 
 ### 1. Auth Service Integration
-- Shares JWT_SECRET_KEY for token validation
-- Uses same JWT token format (sub, role, iat)
-- No dependency on auth-service for validation
+- Uses `/v1/auth/verify-token` via `AUTH_SERVICE_URL`/`AUTH_INTERNAL_BASE_URL`
+- Shares `JWT_SECRET_KEY` for HS256 validation when direct verification is needed
 
 ### 2. Database Integration
-- Shares PostgreSQL database with auth-service
-- Uses identical User model schema
-- Connection pooling with pre-ping
+- Shares `auth_db` PostgreSQL database with auth-service
+- Uses identical User model schema and connection pooling
 
 ### 3. Swagger Service Integration
-- Auto-discoverable via service registry
-- Healthcheck endpoint for monitoring
-- Service info endpoint for documentation
+- Swagger aggregator is optional/disabled in the simplified stack
 
 ## Security Features
 
@@ -167,10 +163,8 @@ user-service/
    - Strict-Transport-Security
    - Content-Security-Policy
 
-4. **Rate Limiting**
-   - 200 requests per day default
-   - 50 requests per hour default
-   - Configurable per endpoint
+4. **Request Guards**
+   - No shared cache/Valkey rate limiter; relies on auth-service token verification and upstream platform quotas.
 
 5. **CORS Configuration**
    - Configurable allowed origins
@@ -181,21 +175,21 @@ user-service/
 
 - **Port**: 5001 (container), 5002 (host via docker-compose)
 - **Database**: PostgreSQL (shared with auth-service)
-- **Architecture Pattern**: Flask application factory
+- **Architecture Pattern**: FastAPI application with shared auth-service middleware
 - **Testing**: 28+ comprehensive tests
-- **Code Quality**: No linting errors, type hints, formatted with black
+- **Code Quality**: Ruff + mypy based checks, formatted with ruff
 
 ## Usage Examples
 
 ### Get Current User
 ```bash
-curl http://localhost:5002/users/me \
+curl http://localhost:5002/v1/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Update Profile
 ```bash
-curl -X PUT http://localhost:5002/users/me \
+curl -X PUT http://localhost:5002/v1/users/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"first_name": "Jane", "last_name": "Doe"}'
@@ -203,13 +197,13 @@ curl -X PUT http://localhost:5002/users/me \
 
 ### List Users (Admin)
 ```bash
-curl "http://localhost:5002/users?page=1&per_page=20&role=public" \
+curl "http://localhost:5002/v1/users?page=1&per_page=20&role=public" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 ### Search Users (Admin)
 ```bash
-curl "http://localhost:5002/users/search?q=john&limit=10" \
+curl "http://localhost:5002/v1/users/search?q=john&limit=10" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
@@ -245,8 +239,9 @@ python run.py
 ```
 
 ### Environment Variables Required
-- DATABASE_URL
+- AUTH_DATABASE_URL
 - JWT_SECRET_KEY (must match auth-service)
+- AUTH_SERVICE_URL / AUTH_INTERNAL_BASE_URL
 - SECRET_KEY
 - CORS_ORIGINS
 
@@ -268,7 +263,7 @@ python run.py
 - **Database Connection Pooling**: Configured with pre-ping
 - **Query Optimization**: Proper indexes on email, role, status, country_code
 - **Pagination**: All list endpoints support pagination
-- **Rate Limiting**: Prevents API abuse
+- **Guards**: Relies on auth-service token validation and upstream quotas (no shared cache)
 - **Health Checks**: Quick database connectivity test
 
 ## Monitoring & Observability
@@ -276,7 +271,7 @@ python run.py
 - Health check endpoint for service monitoring
 - Database connectivity check in health endpoint
 - Service version exposed in index endpoint
-- Request logging via Flask
+- Standard FastAPI/uvicorn request logging
 
 ## Testing Coverage
 
@@ -288,9 +283,9 @@ python run.py
 
 ## Code Quality
 
-- **Linting**: No flake8 errors
+- **Linting**: Ruff checks
 - **Type Hints**: mypy compatible
-- **Formatting**: Black formatted (100 char line length)
+- **Formatting**: Ruff formatter (100 char line length)
 - **Documentation**: Comprehensive docstrings
 - **Tests**: High coverage with meaningful assertions
 
@@ -299,4 +294,3 @@ python run.py
 **Service Status**: ✅ Production Ready
 **Last Updated**: 2025-11-13
 **Version**: 1.0.0
-

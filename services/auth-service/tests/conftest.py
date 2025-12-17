@@ -31,6 +31,7 @@ class TestConfig(Config):
     SECRET_KEY = "test-secret"
     CORS_ORIGINS = ["*"]
     COOKIE_SECURE = False  # Disable secure cookies for testing (no HTTPS)
+    ENABLE_SIMPLE_GUARDS = False
     APP_NAME = "Account Management Service"
     APP_VERSION = "1.0.0"
     SERVICE_NAME = "auth-service"

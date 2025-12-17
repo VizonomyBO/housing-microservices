@@ -11,12 +11,12 @@ try:
     from flask import Flask
     from flask_sqlalchemy import SQLAlchemy
 
-    # Create a minimal Flask app just to initialize SQLAlchemy
-    # This allows db.Model to be available for models without running Flask
+    # Create a minimal Flask app just to initialize SQLAlchemy (legacy compatibility)
     _minimal_app = Flask(__name__)
     _minimal_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    # Set a dummy URI if not available - it won't be used in FastAPI mode
-    _minimal_app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///:memory:")
+    _minimal_app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "AUTH_DATABASE_URL", os.getenv("DATABASE_URL", "sqlite:///:memory:")
+    )
     db = SQLAlchemy()
     db.init_app(_minimal_app)
     _DB_AVAILABLE = True
@@ -29,21 +29,14 @@ except ImportError:
 from app.config import Config
 
 # Conditional Flask imports for full Flask app support
+_FLASK_AVAILABLE = _DB_AVAILABLE
 try:
     from flask_cors import CORS
-    from flask_limiter import Limiter
-    from flask_limiter.util import get_remote_address
 
-    limiter = Limiter(
-        key_func=get_remote_address,
-        default_limits=["200 per day", "50 per hour"],
-        storage_uri="memory://",
-    )
-    _FLASK_AVAILABLE = True
+    _CORS_AVAILABLE = True
 except ImportError:
     # Flask extensions not available - this is fine for FastAPI mode
-    _FLASK_AVAILABLE = False
-    limiter = None  # type: ignore[assignment]
+    _CORS_AVAILABLE = False
 
 
 def create_app(config_class=Config):
@@ -60,20 +53,19 @@ def create_app(config_class=Config):
     # Initialize extensions
     if db is not None:
         db.init_app(app)
-    if limiter is not None:
-        limiter.init_app(app)
-    CORS(
-        app,
-        resources={
-            r"/*": {
-                "origins": app.config.get("CORS_ORIGINS", ["*"]),
-                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                "allow_headers": ["Content-Type", "Authorization"],
-                "expose_headers": ["Content-Type", "Authorization"],
-                "supports_credentials": True,
-            }
-        },
-    )
+    if _CORS_AVAILABLE:
+        CORS(
+            app,
+            resources={
+                r"/*": {
+                    "origins": app.config.get("CORS_ORIGINS", ["*"]),
+                    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                    "allow_headers": ["Content-Type", "Authorization"],
+                    "expose_headers": ["Content-Type", "Authorization"],
+                    "supports_credentials": True,
+                }
+            },
+        )
 
     # Register blueprints
     from app.api.auth import auth_bp  # type: ignore[attr-defined]

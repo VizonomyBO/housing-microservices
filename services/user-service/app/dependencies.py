@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """Get a database session with proper cleanup"""
     session = get_session()
     try:

@@ -8,25 +8,35 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
+from app.config import Config
 from app.dependencies import AuthenticatedUser, DatabaseSession
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 from app.utils.email import EmailClient, SesConfig
+from app.utils.request_guard import GuardRule, SimpleRequestGuard
 from app.utils.security import generate_reset_token, verify_password
 
 router = APIRouter(prefix="/v1/auth", tags=["Authentication"])
 logger = logging.getLogger(__name__)
 
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address)
-
 ERROR_NO_DATA = "No data provided"
 ERROR_UNEXPECTED = "An unexpected error occurred"
 ERROR_UNKNOWN = "Unknown error"
 ERROR_AUTH_FAILED = "Authentication failed"
+ERROR_TOO_MANY_REQUESTS = "Request limit exceeded. Please try again later."
+
+_request_guard = SimpleRequestGuard(
+    {
+        "register": GuardRule(5, 60),
+        "login": GuardRule(10, 60),
+        "refresh": GuardRule(20, 60),
+        "logout": GuardRule(10, 60),
+        "forgot_password": GuardRule(3, 3600),
+        "reset_password": GuardRule(5, 3600),
+        "change_password": GuardRule(5, 3600),
+    }
+)
 
 
 # Pydantic models for request/response
@@ -146,6 +156,31 @@ def _get_config(request: Request):
     return request.app.state.config
 
 
+def _should_apply_guard(config: Config) -> bool:
+    """Determine if in-process request guards should be enforced."""
+    return getattr(config, "ENABLE_SIMPLE_GUARDS", True) and not getattr(
+        config, "TESTING", False
+    )
+
+
+def _guard_request(scope: str, request: Request) -> None:
+    """Apply a lightweight guard in lieu of external rate limiters."""
+    config = _get_config(request)
+    if not _should_apply_guard(config):
+        return
+
+    identity = request.client.host if request.client else "unknown"
+    if not _request_guard.allow(scope, identity):
+        logger.warning(
+            "Request blocked by guard",
+            extra={"scope": scope, "identity": identity},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=ERROR_TOO_MANY_REQUESTS,
+        )
+
+
 def _set_cookies(
     response: Response,
     access_token: str,
@@ -183,7 +218,6 @@ def _clear_cookies(response: Response, cookie_secure: bool):
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-@limiter.limit("5 per minute")
 async def register(
     request: Request, session: DatabaseSession, payload: RegisterRequest
 ) -> JSONResponse:
@@ -191,6 +225,7 @@ async def register(
     Register a new user.
     """
     try:
+        _guard_request("register", request)
         logger.info(
             "Attempting to create user",
             extra={"email": payload.email, "username": payload.username},
@@ -257,7 +292,6 @@ async def register(
 
 
 @router.post("/login")
-@limiter.limit("10 per minute")
 async def login(
     request: Request,
     response: Response,
@@ -268,6 +302,7 @@ async def login(
     Authenticate user and return access and refresh tokens.
     """
     try:
+        _guard_request("login", request)
         if not payload.login or not payload.password:
             logger.warning("Login attempt with missing credentials")
             raise HTTPException(
@@ -347,7 +382,6 @@ async def login(
 
 
 @router.post("/refresh")
-@limiter.limit("20 per minute")
 async def refresh(
     request: Request,
     response: Response,
@@ -360,6 +394,7 @@ async def refresh(
     Supports both cookie-based and JSON body-based refresh tokens.
     """
     try:
+        _guard_request("refresh", request)
         refresh_token = refresh_token_cookie or payload.refresh_token
 
         if not refresh_token:
@@ -418,7 +453,6 @@ async def refresh(
 
 
 @router.post("/logout")
-@limiter.limit("10 per minute")
 async def logout(
     request: Request,
     response: Response,
@@ -431,6 +465,7 @@ async def logout(
     Supports both cookie-based and JSON body-based refresh tokens.
     """
     try:
+        _guard_request("logout", request)
         refresh_token = refresh_token_cookie or payload.refresh_token
 
         if not refresh_token:
@@ -458,7 +493,6 @@ async def logout(
 
 
 @router.post("/forgot-password")
-@limiter.limit("3 per hour")
 async def forgot_password(
     request: Request, payload: ForgotPasswordRequest, session: DatabaseSession
 ) -> JSONResponse:
@@ -466,6 +500,7 @@ async def forgot_password(
     Request password reset token.
     """
     try:
+        _guard_request("forgot_password", request)
         logger.info("Password reset request", extra={"email": payload.email})
         user = UserService.get_user_by_email(session, payload.email)
 
@@ -519,7 +554,6 @@ async def forgot_password(
 
 
 @router.post("/reset-password")
-@limiter.limit("5 per hour")
 async def reset_password(
     request: Request, payload: ResetPasswordRequest, session: DatabaseSession
 ) -> JSONResponse:
@@ -527,6 +561,7 @@ async def reset_password(
     Reset password using a valid reset token.
     """
     try:
+        _guard_request("reset_password", request)
         from app.models.user import User
 
         logger.info("Attempting password reset with token")
@@ -614,7 +649,6 @@ async def verify_token(
 
 
 @router.post("/change-password")
-@limiter.limit("5 per hour")
 async def change_password(
     request: Request,
     payload: ChangePasswordRequest,
@@ -626,6 +660,7 @@ async def change_password(
     Requires current password and new password.
     """
     try:
+        _guard_request("change_password", request)
         user_id = user.user_id
 
         # Get user directly from database

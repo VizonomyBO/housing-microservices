@@ -11,44 +11,31 @@ This document defines how the Housing Service and API Gateway handle user identi
 ## JWT Validation Implementation
 
 ### Library & Algorithm
-- **Library**: `python-jose[cryptography]` (v3.3+)
-- **Algorithm**: RS256 (asymmetric, RSA public/private key pair)
-- **Public Key Source**: JWKS (JSON Web Key Set) endpoint from User Service
-    - Example: `https://user-service.internal/auth/.well-known/jwks.json`
-    - **Caching**: Public keys cached for 1 hour (reduce upstream calls)
+- **Library**: `PyJWT`
+- **Algorithm**: HS256 using `JWT_SECRET_KEY` (`AUTH_SHARED_SECRET` shared with downstream services)
+- **Validation Paths**: Auth-service validates tokens directly (`verify_token_direct`); other services call `/v1/auth/verify-token` or verify locally with the shared secret.
 
 ### Claims Validation
 The following JWT claims are validated on every request:
 - **`exp` (Expiration)**: Token must not be expired (reject with 401)
-- **`sub` (Subject)**: Extracted as `user_id` for context propagation
-- **`iss` (Issuer)**: Must match expected User Service identifier
-- **`aud` (Audience)**: (Optional) Validates token is intended for Housing Service
+- **`sub` or `user_id`**: Extracted as `user_id` for context propagation/ownership
+- **`iss`/`aud` (Optional)**: Only enforced when explicitly configured upstream; default HS256 path does not require them
 
 ### FastAPI Dependency Pattern
 ```python
-from jose import jwt, JWTError
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+import jwt
 
-security = HTTPBearer()
-
-async def get_current_user(token: str = Depends(security)):
-    try:
-        payload = jwt.decode(
-            token.credentials,
-            public_key,  # From JWKS endpoint
-            algorithms=["RS256"],
-            issuer="user-service",
-            audience="housing-service"  # Optional
-        )
-        return payload["sub"]  # user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+def verify_token(token: str, secret: str):
+    payload = jwt.decode(token, secret, algorithms=["HS256"])
+    return {
+        "user_id": payload.get("user_id") or payload.get("sub"),
+        "roles": payload.get("roles", [payload.get("role")] if payload.get("role") else []),
+    }
 ```
 
 ## Required Claims
 The token MUST contain the following claims:
-- `sub` (Subject): The unique `user_id`.
+- `sub`/`user_id`: The unique `user_id` (propagated as owner_id; shared flows may use null/`"0000"` downstream)
 - `exp` (Expiration): Token expiration timestamp.
 - `roles` (Optional): List of user roles if applicable for coarse-grained access control.
 
@@ -56,45 +43,11 @@ The token MUST contain the following claims:
 - **User ID Only**: We persist ONLY the `user_id` in our databases (PostgreSQL, Vector DB) to reference user ownership of documents and conversations.
 - **No PII**: We do not store PII (Personally Identifiable Information) like names or emails within the Housing Service. If needed, these are fetched from the User Service using the `user_id`.
 
-## Rate Limiting
-- **Identity Consumption**: The centralized rate limiter uses the `user_id` (extracted from the token) as the key to track and enforce limits.
-- **Policy**: Rate limits are applied per user, not per IP, to ensure fair usage across devices.
-
-### Rate Limiting Implementation
-
-- **Algorithm**: Token bucket (allows burst traffic while enforcing average rate)
-- **Storage**: Valkey (Redis-compatible) - Distributed state across API instances
-- **Library**: `slowapi` (FastAPI-native) or custom middleware
-- **Key Format**: `ratelimit:{user_id}:{endpoint_group}` (e.g., `ratelimit:uuid:search`)
-
-### Rate Limit Tiers
-| User Role | Requests/Minute | Burst Allowance |
-|-----------|-----------------|------------------|
-| Standard  | 100             | 120              |
-| Premium   | 500             | 600              |
-| Admin     | Unlimited       | N/A              |
-
-### Response Headers
-When rate limit is hit:
-- **HTTP Status**: 429 Too Many Requests
-- **Headers**:
-    - `Retry-After`: Seconds until limit resets
-    - `X-RateLimit-Limit`: Max requests per window
-    - `X-RateLimit-Remaining`: Requests remaining in current window
-
-**Example Integration**:
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=lambda: get_user_id_from_token())
-app.state.limiter = limiter
-
-@app.get("/search")
-@limiter.limit("100/minute")  # Standard tier
-async def search_documents(...):
-    ...
-```
+## Request Guards & Quotas
+- **Cache-free**: Distributed rate limiters and cache layers (SlowAPI/Valkey) are removed in the simplified stack.
+- **Lightweight guards**: Auth-service uses an in-process guard per endpoint scope, keyed by client host, to cap bursts (e.g., register 5/min, login 10/min, refresh 20/min; reset/change/forgot-password guarded hourly). Controlled via `ENABLE_SIMPLE_GUARDS`.
+- **Behavior**: Exceeding a guard returns HTTP 429; state is memory-only and bypassed in tests (`ENABLE_SIMPLE_GUARDS=false`).
+- **Downstream services**: Rely on upstream platform/WAF quotas or simple per-endpoint guards instead of shared caches.
 
 ## Authorization & Roles
 - **Handcrafted Roles**: We utilize a custom role-based access control (RBAC) system defined by the User Service.

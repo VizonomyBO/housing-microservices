@@ -1,11 +1,11 @@
 services:
   auth-service:
     environment:
-      DATABASE_URL: ${AUTH_DATABASE_URL}
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL}
 
   user-service:
     environment:
-      DATABASE_URL: ${AUTH_DATABASE_URL}
+      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL}
 
   ingestion-service:
     environment:

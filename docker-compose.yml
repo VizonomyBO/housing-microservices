@@ -74,11 +74,10 @@ services:
     ports:
       - "${AUTH_SERVICE_PORT:-5001}:5000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
+      AUTH_DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
       JWT_ACCESS_TOKEN_EXPIRES: ${JWT_ACCESS_TOKEN_EXPIRES:-900}
       JWT_REFRESH_TOKEN_EXPIRES: ${JWT_REFRESH_TOKEN_EXPIRES:-2592000}
-      FLASK_ENV: ${FLASK_ENV:-production}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SES_REGION: ${SES_REGION:-us-east-1}
       SES_SOURCE_EMAIL: ${SES_SOURCE_EMAIL:-noreply@example.com}
@@ -109,11 +108,10 @@ services:
     ports:
       - "${USER_SERVICE_PORT:-5002}:5001"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
+      AUTH_DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${AUTH_DB:-auth_db}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
       JWT_ACCESS_TOKEN_EXPIRES_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRES_MINUTES:-15}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:5000}
-      FLASK_ENV: ${FLASK_ENV:-production}
       PORT: 5001
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     healthcheck:

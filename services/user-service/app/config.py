@@ -14,8 +14,15 @@ class Config:
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
     # Database
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/user_service"
+    _db_name = os.getenv("AUTH_DB", "auth_db")
+    _db_user = os.getenv("POSTGRES_USER", "vizonomy_user")
+    _db_password = os.getenv("POSTGRES_PASSWORD", "postgres")
+    _db_host = os.getenv("POSTGRES_HOST", "localhost")
+    _db_port = os.getenv("POSTGRES_PORT", "5432")
+    SQLALCHEMY_DATABASE_URI = (
+        os.getenv("AUTH_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or f"postgresql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
@@ -30,7 +37,11 @@ class Config:
     )
 
     # Auth Service Configuration
-    AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:5001")
+    AUTH_SERVICE_URL = (
+        os.getenv("AUTH_INTERNAL_BASE_URL")
+        or os.getenv("AUTH_BASE_URL")
+        or os.getenv("AUTH_SERVICE_URL", "http://localhost:5001")
+    )
 
     # CORS
     # Default includes common local frontends (localhost:3000, localhost:5173) plus "*"

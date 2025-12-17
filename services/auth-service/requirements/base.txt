@@ -1,10 +1,9 @@
 # FastAPI and ASGI server
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-slowapi==0.1.9  # Rate limiting for FastAPI
+fastapi==0.121.3
+uvicorn[standard]==0.38.0
 
 # Database
-SQLAlchemy==2.0.23
+SQLAlchemy==2.0.36
 psycopg2-binary==2.9.11
 
 # Authentication & Security
@@ -12,9 +11,9 @@ PyJWT==2.8.0
 argon2-cffi==23.1.0
 
 # Validation
-pydantic==2.5.0
-pydantic[email]==2.5.0
-email-validator==2.1.0
+pydantic==2.10.5
+pydantic[email]==2.10.5
+email-validator==2.2.0
 
 # HTTP client for middleware
 httpx==0.28.1
@@ -23,8 +22,6 @@ httpx==0.28.1
 python-dotenv==1.0.0
 boto3==1.35.63
 
-# Keep Flask-SQLAlchemy for model compatibility (models use db.Model)
-# Flask is required for Flask-SQLAlchemy to work
+# Legacy Flask support (kept for optional compatibility paths)
 Flask==3.0.0
 Flask-SQLAlchemy==3.1.1
-

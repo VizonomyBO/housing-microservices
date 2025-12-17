@@ -1,14 +1,13 @@
 # Shared automation environment for Terraform/DB scripts
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-slowapi==0.1.9
+fastapi==0.121.3
+uvicorn[standard]==0.38.0
 SQLAlchemy==2.0.36
 psycopg2-binary==2.9.11
 PyJWT==2.8.0
 argon2-cffi==23.1.0
-pydantic==2.12.5
-pydantic[email]==2.12.5
-email-validator==2.1.0
+pydantic==2.10.5
+pydantic[email]==2.10.5
+email-validator==2.2.0
 httpx==0.28.1
 python-dotenv==1.0.0
 Flask==3.0.0

@@ -10,9 +10,17 @@ class Config:
     """Base configuration"""
 
     # Database
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL", "postgresql://account_user:secure_password@localhost:5432/account_db"
+    _db_name = os.getenv("AUTH_DB", "auth_db")
+    _db_user = os.getenv("POSTGRES_USER", "vizonomy_user")
+    _db_password = os.getenv("POSTGRES_PASSWORD", "postgres")
+    _db_host = os.getenv("POSTGRES_HOST", "localhost")
+    _db_port = os.getenv("POSTGRES_PORT", "5432")
+    _default_db = (
+        os.getenv("AUTH_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or f"postgresql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
     )
+    SQLALCHEMY_DATABASE_URI = _default_db
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_size": 10,
@@ -29,6 +37,7 @@ class Config:
 
     # Security
     SECRET_KEY = os.getenv("SECRET_KEY", os.urandom(32))
+    ENABLE_SIMPLE_GUARDS = os.getenv("ENABLE_SIMPLE_GUARDS", "true").lower() == "true"
     # Cookie security: Set to False in development when HTTPS is not available
     COOKIE_SECURE = os.getenv("COOKIE_SECURE", "True").lower() == "true"
 
@@ -38,9 +47,6 @@ class Config:
         "CORS_ORIGINS",
         "http://localhost:3000,http://localhost:5173,*",
     ).split(",")
-
-    # Rate Limiting
-    RATELIMIT_STORAGE_URL = "memory://"
 
     # Email (for password reset)
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")

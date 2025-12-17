@@ -7,25 +7,13 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
 from app.api import auth, system
-from app.api.auth import limiter
 from app.config import Config
 from app.database import create_tables, init_db
 from app.middleware import AuthMiddleware
-
-
-def _rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle rate limit exceeded exceptions"""
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Rate limit exceeded. Please try again later."},
-    )
 
 
 def _create_cors_kwargs(config: Config) -> dict[str, object]:
@@ -40,6 +28,15 @@ def _create_cors_kwargs(config: Config) -> dict[str, object]:
         "allow_headers": ["Authorization", "Content-Type"],
         "expose_headers": ["Authorization", "Content-Type"],
     }
+
+
+def _resolve_auth_base_url() -> str:
+    """Resolve the auth base URL from env vars for consistency with other services."""
+    return (
+        os.getenv("AUTH_INTERNAL_BASE_URL")
+        or os.getenv("AUTH_BASE_URL")
+        or os.getenv("AUTH_SERVICE_URL", "http://localhost:5001")
+    )
 
 
 @asynccontextmanager
@@ -71,11 +68,6 @@ def create_api_app(config_class: type[Config] = Config) -> FastAPI:
 
     fastapi_app.state.config = config_obj
 
-    # Initialize rate limiter
-    fastapi_app.state.limiter = limiter
-    fastapi_app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    fastapi_app.add_middleware(SlowAPIMiddleware)
-
     # Add CORS middleware
     cors_kwargs = _create_cors_kwargs(config_obj)
     fastapi_app.add_middleware(CORSMiddleware, **cors_kwargs)
@@ -84,7 +76,7 @@ def create_api_app(config_class: type[Config] = Config) -> FastAPI:
     # This will protect all /v1/* routes EXCEPT public paths defined in middleware
     fastapi_app.add_middleware(
         AuthMiddleware,
-        auth_service_url=os.getenv("AUTH_SERVICE_URL", "http://localhost:5001"),
+        auth_service_url=_resolve_auth_base_url(),
         mock_validation=getattr(config_obj, "TESTING", False),
         use_direct_validation=True,  # Use direct validation since we're in the same service
     )

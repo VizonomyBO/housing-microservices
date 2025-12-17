@@ -2,7 +2,9 @@
 
 ## Overview
 
-The user-service now uses **service-to-service authentication** by calling the auth-service's `/auth/verify-token` endpoint to validate JWT tokens on every authenticated request.
+The user-service now uses **service-to-service authentication** by calling the auth-service's `/v1/auth/verify-token` endpoint to validate JWT tokens on every authenticated request.
+
+_Current FastAPI implementation_: `app/utils/auth.validate_token` performs an HTTP GET to `/v1/auth/verify-token` via `AUTH_SERVICE_URL`/`AUTH_INTERNAL_BASE_URL` using `httpx` with short timeouts. The legacy Flask snippets below are retained for historical context.
 
 ## Architecture Change
 
@@ -344,4 +346,3 @@ The user-service now validates ALL tokens by calling the auth-service's `/auth/v
 **Last Updated:** 2025-11-13  
 **Version:** 1.0.0  
 **Status:** ✅ Production Ready
-

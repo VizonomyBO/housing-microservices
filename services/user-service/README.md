@@ -1,6 +1,6 @@
 # User Service
 
-User profile management microservice built with Flask.
+User profile management microservice built with FastAPI.
 
 ## Features
 
@@ -38,15 +38,17 @@ User profile management microservice built with Flask.
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.13+
+- uv (recommended) or pip
 - PostgreSQL
-- pip
 
 ### Installation
 
-1. Install dependencies:
+1. Install dependencies with uv:
 ```bash
-pip install -r requirements.txt
+uv venv --python 3.13 .venv
+export UV_PROJECT_ENV=.venv
+uv pip install -r requirements.txt
 ```
 
 2. Set up environment variables:
@@ -57,7 +59,7 @@ cp .env.example .env
 
 3. Run the service:
 ```bash
-python run.py
+uv run python run.py
 ```
 
 The service will start on port 5001 by default.
@@ -76,20 +78,20 @@ docker run -p 5001:5001 --env-file .env user-service
 Run tests with pytest:
 
 ```bash
-# Install test dependencies
-pip install -r requirements/test.txt
+# Install test dependencies (after setting UV_PROJECT_ENV)
+uv pip install -r requirements/test.txt
 
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=app --cov-report=html
+uv run pytest --cov=app --cov-report=html
 
 # Run only unit tests
-pytest -m unit
+uv run pytest -m unit
 
 # Run only integration tests
-pytest -m integration
+uv run pytest -m integration
 ```
 
 ## Development
@@ -97,25 +99,25 @@ pytest -m integration
 Install development dependencies:
 
 ```bash
-pip install -r requirements/dev.txt
+uv pip install -r requirements/dev.txt
 ```
 
-Format code with black:
+Format code with ruff:
 
 ```bash
-black app/ tests/
+uv run ruff format app tests
 ```
 
-Check code with flake8:
+Check code with ruff:
 
 ```bash
-flake8 app/ tests/
+uv run ruff check app tests
 ```
 
 Type check with mypy:
 
 ```bash
-mypy app/
+uv run mypy app/
 ```
 
 ## Configuration
@@ -125,7 +127,8 @@ Configuration is managed through environment variables:
 - `SECRET_KEY` - Flask secret key
 - `DEBUG` - Enable debug mode (default: False)
 - `PORT` - Service port (default: 5001)
-- `DATABASE_URL` - PostgreSQL connection string
+- `AUTH_DATABASE_URL` - PostgreSQL connection string for auth_db
+- `AUTH_SERVICE_URL` / `AUTH_INTERNAL_BASE_URL` - Base URL for auth-service validation
 - `JWT_SECRET_KEY` - JWT signing key
 - `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` - Token expiration time (default: 15)
 - `CORS_ORIGINS` - Allowed CORS origins
@@ -135,7 +138,8 @@ Configuration is managed through environment variables:
 ```
 user-service/
 ├── app/
-│   ├── __init__.py          # Flask app factory
+│   ├── __init__.py          # Package init (legacy compatibility)
+│   ├── main.py              # FastAPI application setup
 │   ├── config.py            # Configuration
 │   ├── api/                 # API endpoints
 │   │   ├── users.py         # User management endpoints
@@ -188,4 +192,3 @@ Users have the following fields:
 ## License
 
 Proprietary - All rights reserved
-
