@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Any, Sequence
 
 from pydantic import AnyUrl, Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from shared_data_layer.config import (
     EMBEDDING_DIMENSION,
     DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
@@ -16,6 +16,12 @@ ALLOWED_VOYAGE_OUTPUT_DIMENSIONS: tuple[int, ...] = (256, 512, 1024, 2048)
 
 class Settings(BaseSettings):
     """Runtime configuration for the ingestion service."""
+
+    model_config = SettingsConfigDict(
+        env_file=os.getenv("ENV_FILE", ".env.local"),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
     app_name: str = "ingestion-service"
     app_port: int = Field(default=8085, description="Port for uvicorn")
@@ -55,11 +61,6 @@ class Settings(BaseSettings):
         description="pgvector storage dimension derived from shared data layer config",
     )
     worker_name: str = "ingestion-service"
-
-    class Config:
-        env_file = os.getenv("ENV_FILE", ".env.local")
-        env_file_encoding = "utf-8"
-        case_sensitive = False
 
     def model_post_init(self, __context: Any) -> None:  # type: ignore[override]
         if self.signing_secret is None and self.jwt_secret_key:
