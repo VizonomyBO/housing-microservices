@@ -1,6 +1,7 @@
 import pytest
 
 from agent_api.services.retrieval import RetrievalService, RetrievedChunk
+from agent_api.http.errors import GatewayError
 
 
 class _FakeScopeRepo:
@@ -48,6 +49,24 @@ class _FakeScopeRepo:
     async def hybrid_chunk_search(self, *, query, document_ids, embedding, top_k, hybrid_weight, chunk_types):
         return {"doc1": self._chunks}
 
+    async def list_conversation_documents(self, conversation_id: str):
+        return [
+            type(
+                "Att",
+                (),
+                {
+                    "document_id": "doc1",
+                    "attach_source": "test",
+                    "role": "primary",
+                    "visibility": "visible",
+                    "canonical_name": "doc1",
+                    "access_scope": "user_private",
+                    "country_code": "USA",
+                    "metadata": {},
+                },
+            )()
+        ]
+
 
 class _FakeEmbed:
     async def embed(self, texts):
@@ -89,3 +108,22 @@ async def test_retrieval_builds_citations_without_network():
     assert ctx.citations[0]["doc_id"] == "doc1"
     assert "hello world" in ctx.context_text
     assert ctx.citations[0]["text"] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_retrieval_raises_without_attachments():
+    class EmptyScope(_FakeScopeRepo):
+        async def list_conversation_documents(self, conversation_id: str):
+            return []
+
+    service = RetrievalService(
+        scope_repo=EmptyScope([]),
+        embedding_client=_FakeEmbed(),
+        rerank_client=_FakeRerank(),
+        chat_client=_FakeChat(),
+        top_k=3,
+    )
+
+    with pytest.raises(GatewayError) as excinfo:
+        await service.retrieve(user_query="hi", conversation_id="conv1")
+    assert excinfo.value.code == "ATTACHMENTS_REQUIRED"

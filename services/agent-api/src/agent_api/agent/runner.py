@@ -139,6 +139,22 @@ class LangGraphRunner(ChatRunnerProtocol):
             )
 
         scope_repo = ConversationScopeRepository(db_session)
+        attachments = await scope_repo.list_conversation_documents(request.conversation_id)
+        if not attachments:
+            raise GatewayError(
+                code="ATTACHMENTS_REQUIRED",
+                message="No documents attached to this conversation. Please attach documents first.",
+                status_code=400,
+            )
+        summaries = await scope_repo.hydrate_documents([att.document_id for att in attachments])
+        active_ids = [doc_id for doc_id, summary in summaries.items() if summary.status == "active"]
+        if not active_ids:
+            raise GatewayError(
+                code="DOCUMENTS_INACTIVE",
+                message="Attached documents are not active yet; wait for ingestion to complete.",
+                status_code=409,
+            )
+
         retrieval_service = RetrievalService(
             scope_repo=scope_repo,
             embedding_client=self._embedding_client,
