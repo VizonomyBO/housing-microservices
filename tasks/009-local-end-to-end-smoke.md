@@ -1,4 +1,4 @@
-# Task: Local End-to-End Smoke Script (ingestion → chat)
+# Task: [COMPLETED] Local End-to-End Smoke Script (ingestion → chat)
 
 Follow `.kilocode/rules/memory-bank-instructions.md` and `AGENTS.md`; create/update a plan + tracker in the repo root. Use service-specific AGENTS when touching those packages. The agent must commit the changes before terminating the task. Once the task is done, mark this as completed in the title.
 
