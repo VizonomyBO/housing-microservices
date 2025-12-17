@@ -54,7 +54,6 @@ def build_agent_graph(
     graph.add_edge("tools", "agent")
 
     compiled = graph.compile(checkpointer=MemorySaver())
-    compiled.settings["system_prompt"] = system_prompt
     return compiled
 
 
