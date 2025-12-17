@@ -13,7 +13,7 @@ env_file=$(scripts/use_env.sh prod)
 set -a && source "$env_file" && set +a
 
 # Deploy infra + services (opens ports)
-ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports
+ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode full-redeploy
 
 # Verify health
 curl -fsS "$AUTH_BASE_URL/health"
@@ -26,7 +26,7 @@ ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date 
 ```
 
 ## CORS posture
-- `.env.prod` sets `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` for testing. To allowlist, edit the env file, then redeploy (`deploy_ec2_services.sh --env-file .env.prod ...`).
+- `.env.prod` sets `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` for testing. To allowlist, edit the env file, then redeploy (`scripts/deploy_stack.sh --mode services-only --env-file .env.prod ...`).
 
 ## More detail
 - See `docs/runbooks/prod_setup.md` for the full curl walkthrough, Terraform flags, and reset/cleanup steps.

@@ -6,7 +6,7 @@ FastAPI Agent API + auth/user services with a FastAPI-based ingestion service. P
 - Pick env: `env_file=$(scripts/use_env.sh local|dev|prod); set -a && source "$env_file" && set +a`
 - Dev stack (LocalStack required): `docker compose --env-file "$env_file" up -d --build`
 - Hybrid/EC2 compose (optional): `docker compose --env-file "$env_file" -f docker-compose.ec2.yml up -d --build agent-api auth-service user-service ingestion-service`
-- Prod deploy (AWS/EC2): `ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports`
+- Prod deploy (AWS/EC2): `ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode full-redeploy`
 - Prod smoke: `ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`
 
 Stop: `docker compose --env-file "$env_file" down [-v]`
@@ -45,7 +45,7 @@ See `docs/setup/prod.md` for the quick path and `docs/runbooks/prod_setup.md` fo
 ```bash
 env_file=$(scripts/use_env.sh prod)
 set -a && source "$env_file" && set +a
-ENV_FILE="$env_file" ./scripts/deploy_prod_stack.sh --open-ports
+ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode full-redeploy
 ENV_FILE="$env_file" ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log
 ```
 

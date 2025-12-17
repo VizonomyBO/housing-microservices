@@ -1,2 +1,0 @@
-markitdown==0.0.1
-boto3>=1.34.0

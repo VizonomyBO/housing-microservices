@@ -93,33 +93,11 @@ resource "aws_s3_bucket_cors_configuration" "raw_documents" {
 
   cors_rule {
     allowed_headers = ["*"]
-    allowed_methods = ["PUT", "POST"]
+    allowed_methods = ["GET", "PUT", "POST"]
     allowed_origins = var.allowed_origins
     expose_headers  = ["ETag", "x-amz-meta-content-hash"]
     max_age_seconds = 3600
   }
-}
-
-# S3 notification to trigger preflight Lambda on new uploads
-resource "aws_s3_bucket_notification" "raw_documents" {
-  bucket = aws_s3_bucket.raw_documents.id
-
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.preflight_validator.arn
-    events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = "raw/"
-  }
-
-  depends_on = [aws_lambda_permission.s3_preflight_trigger]
-}
-
-# Permission for S3 to invoke preflight Lambda
-resource "aws_lambda_permission" "s3_preflight_trigger" {
-  statement_id  = "AllowS3Invoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.preflight_validator.function_name
-  principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.raw_documents.arn
 }
 
 # Output bucket details
@@ -132,4 +110,3 @@ output "raw_documents_bucket_arn" {
   description = "ARN of the raw documents S3 bucket"
   value       = aws_s3_bucket.raw_documents.arn
 }
-

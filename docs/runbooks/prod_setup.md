@@ -26,7 +26,7 @@ Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && 
 - During the current testing phase, `.env.prod` (and `.env.dev` if you use it) set both `AGENT_API_CORS_ORIGINS=*` and `CORS_ORIGINS=*` to allow any origin. Wildcards automatically disable credentials to satisfy FastAPI/Starlette rules.
 - Verify headers any time with `ORIGIN=https://my-frontend.example ./scripts/test_cors.sh` (hits local + AWS endpoints).
 - To allowlist specific origins/IPs instead, edit the env file(s) before redeploy:  
-  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.prod ./scripts/deploy_ec2_services.sh ...`) so containers reload the values.
+  `AGENT_API_CORS_ORIGINS=http://12.34.56.78:3000,https://partner.example` and mirror the list in `CORS_ORIGINS` for auth/user-service. Then redeploy (`ENV_FILE=.env.prod ./scripts/deploy_stack.sh --mode services-only ...`) so containers reload the values.
 - Revert to `*` if you need fully open CORS again during testing.
 
 ## 3) Frontend integration quick reference
@@ -62,17 +62,19 @@ Run `env_file=$(scripts/use_env.sh prod)` then `set -a && source "$env_file" && 
     Requires `Authorization: Bearer $TOKEN` (and `x-api-key` if configured). Response includes `document_id`, `upload.url`, and `upload.fields` (SigV4 POST fields per AWS docs: `policy`, `x-amz-credential`, `x-amz-algorithm`, `x-amz-signature`, `Content-Type`, etc.).
   - Upload to S3: `curl -X POST "$UPLOAD_URL" -F "key=..." ... -F "file=@/path/to.pdf;type=$CONTENT_TYPE"`.
 
-## 4) Idempotent prod deploy (infra + EC2 services)
-Use the new entrypoint to apply Terraform and restart the EC2 compose stack in one go:
+## 4) Deploy (infra + EC2 services)
+Use the unified deploy entrypoint for the cache-free stack:
 ```bash
-ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_prod_stack.sh --open-ports
+# terraform apply + docker compose rollout (defaults: .env.prod, terraform.v2.tfvars, workspace=prod)
+ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_stack.sh --mode full-redeploy
+
+# If infra is already up and you just want to push code/config changes
+ENV_FILE=${ENV_FILE:-.env.prod} ./scripts/deploy_stack.sh --mode services-only
 ```
-What it does:
-- Sources the selected env (defaults to `.env.prod`).
-- Runs `scripts/provision_remote_stack.sh` (Terraform `-chdir=ArchaaS apply -var-file=terraform.v2.tfvars` in workspace `prod`, optional `--destroy-first` if passed).
-- Updates `POSTGRES_HOST` in the env with the latest EC2 IP, reruns `scripts/setup_remote_databases.sh`.
-- Calls `scripts/deploy_ec2_services.sh` to rsync code, use `.env.prod` on the host, open ports (if `--open-ports`), and start `agent-api`, `auth-service`, `user-service` via `docker-compose.ec2.yml`.
-Flags: `--skip-terraform`, `--skip-deploy`, `--no-build`, `--no-sync`, `--tfvars <file>`, `--workspace <name>`.
+Notes:
+- `--destroy-first` forces a terraform destroy before apply (confirmation required). Avoid unless you explicitly intend to recreate infra; DB data is otherwise preserved.
+- Compose is scoped to `agent-api`, `ingestion-service`, `auth-service`, and `user-service` (no Lambda/Step Functions/Valkey/telemetry/nginx/swagger).
+- Old helpers (`deploy_prod_stack.sh`, `deploy_ec2_services.sh`, `provision_remote_stack.sh`) are deprecated stubs that point to `deploy_stack.sh`.
 
 ## 5) AWS curl walkthrough (manual)
 The commands below run entirely against the live AWS endpoints and the new ingestion FastAPI service on EC2. Use fresh copies of the sample PDFs to bypass content-hash dedupe.
@@ -172,11 +174,6 @@ ENV_FILE=.env.prod bash scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date
 ## 7) Troubleshooting & cleanup
 - `DOCUMENT_NOT_READY` on attach → keep polling `/v1/documents` until `status=active`.
 - `status=failed` with `ingestion_failure` → conversion error is fatal (fail-on-parse); do not re-attach until a new upload succeeds.
-- Step Functions visibility:
-  ```bash
-  AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1} aws stepfunctions list-executions --state-machine-arn <state_machine_arn>
-  AWS_DEFAULT_REGION=${AWS_REGION:-us-east-1} aws stepfunctions describe-execution --execution-arn <arn>
-  ```
 - S3 dedupe: each run must upload a unique binary (copy with `$(date +%s)` as above) to avoid the ingestion API short-circuiting with `status: "DEDUPED"`.
 - Cleanup:
   ```bash

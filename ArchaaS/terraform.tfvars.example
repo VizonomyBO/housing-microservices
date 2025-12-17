@@ -69,23 +69,7 @@ database_port      = 5432
 # Store credentials in AWS Secrets Manager (recommended)
 create_database_secret = true
 
-# =============================================================================
-# Lambda Configuration
-# =============================================================================
-log_level                = "INFO"
-log_retention_days       = 30
-presigned_url_expiry_sec = 900          # 15 minutes
-max_file_size_bytes      = 104857600    # 100MB
-
-# =============================================================================
-# API Gateway Configuration
-# =============================================================================
-api_throttle_burst_limit = 100
-api_throttle_rate_limit  = 50
-
-# JWT Authorization (from your auth service running on EC2)
-jwt_audience = ["vizonomy-api"]
-jwt_issuer   = "http://EC2_PUBLIC_IP:5001"  # Update after deployment
+log_retention_days = 30
 
 # =============================================================================
 # Git Repository (for EC2 deployment)
@@ -99,10 +83,3 @@ git_branch = "master"
 # 2. Generate new token with 'repo' scope
 # 3. Paste here (keep secret!)
 git_token  = ""  # Leave empty for public repos
-
-# =============================================================================
-# Custom Domain (optional)
-# =============================================================================
-custom_domain_name = ""
-certificate_arn    = ""
-openai_api_key

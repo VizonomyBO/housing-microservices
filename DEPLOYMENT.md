@@ -2,6 +2,35 @@
 
 Complete guide for deploying the Microservices Platform in various environments.
 
+## Cache-Free Stack Deployment (EC2)
+
+Use the unified deploy script (`scripts/deploy_stack.sh`) for the simplified stack (agent-api, ingestion-service, auth-service, user-service, Postgres on host/EC2).
+
+Modes:
+- `full-redeploy`: terraform apply (optional destroy) + docker compose rollout on EC2. Default: preserves DB; pass `--destroy-first` only if you explicitly want a tear-down.
+- `services-only`: sync code/env to EC2 and rebuild/restart services without touching Terraform.
+- `hot-patch`: copy a local file into a running container and restart the target service.
+
+Examples:
+```bash
+# Full infra + app redeploy (uses .env.prod and terraform.v2.tfvars by default)
+scripts/deploy_stack.sh --mode full-redeploy
+
+# Services-only refresh with existing infra
+scripts/deploy_stack.sh --mode services-only --host 52.207.140.87
+
+# Hot patch agent-api main.py
+scripts/deploy_stack.sh --mode hot-patch \
+  --service agent-api \
+  --patch-file services/agent-api/src/main.py \
+  --target-path /app/services/agent-api/src/main.py
+```
+
+Notes:
+- Old deploy helpers (`deploy_prod_stack.sh`, `provision_remote_stack.sh`, `deploy_ec2_services.sh`) are deprecated and stubbed to point to `deploy_stack.sh`.
+- `docker-compose.ec2.yml` now contains only the target services (no Lambda/Step Functions/Valkey/telemetry/nginx/swagger).
+- Terraform stack retains EC2 + Postgres + S3; Lambda/Step Functions artifacts have been removed. When running `full-redeploy`, confirm before using `--destroy-first` to avoid dropping data.
+
 ## Table of Contents
 
 1. [Local Development](#local-development)
@@ -793,4 +822,3 @@ kill -9 <PID>
 ---
 
 For more details, see the main [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
-

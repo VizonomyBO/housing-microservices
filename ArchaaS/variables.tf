@@ -18,20 +18,20 @@ variable "environment" {
 
 # VPC Configuration
 variable "vpc_id" {
-  description = "VPC ID for Lambda deployment"
+  description = "VPC ID for EC2 deployment"
   type        = string
   default     = ""
 }
 
 variable "private_subnet_ids" {
-  description = "List of private subnet IDs for Lambda VPC configuration"
+  description = "List of private subnet IDs for EC2 networking (used for security groups/EIP)"
   type        = list(string)
   default     = []
 }
 
 # S3 Configuration
 variable "allowed_origins" {
-  description = "Allowed origins for CORS (S3 and API Gateway)"
+  description = "Allowed origins for CORS (S3/object storage)"
   type        = list(string)
   default     = ["https://*.vizonomy.com", "http://localhost:3000"]
 }
@@ -54,36 +54,10 @@ variable "ses_configuration_set_name" {
   default     = ""
 }
 
-# Lambda Configuration
-variable "log_level" {
-  description = "Lambda log level"
-  type        = string
-  default     = "INFO"
-}
-
 variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
   default     = 30
-}
-
-# Marker converter container image tag (for container-based Lambda)
-variable "marker_converter_image_tag" {
-  description = "ECR image tag to deploy for the marker-converter Lambda"
-  type        = string
-  default     = "markitdown-r4"
-}
-
-variable "presigned_url_expiry_sec" {
-  description = "Presigned URL expiration time in seconds"
-  type        = number
-  default     = 900
-}
-
-variable "max_file_size_bytes" {
-  description = "Maximum file size for uploads in bytes (default: 100MB)"
-  type        = number
-  default     = 104857600
 }
 
 # Database Configuration
@@ -148,45 +122,6 @@ variable "auth_database_name" {
   description = "Database name for auth-service (users, tokens) - separate from shared_data_layer"
   type        = string
   default     = "auth_db"
-}
-
-# API Gateway Configuration
-variable "api_throttle_burst_limit" {
-  description = "API Gateway throttling burst limit"
-  type        = number
-  default     = 100
-}
-
-variable "api_throttle_rate_limit" {
-  description = "API Gateway throttling rate limit (requests per second)"
-  type        = number
-  default     = 50
-}
-
-# JWT Authorization Configuration
-variable "jwt_audience" {
-  description = "JWT audience for API Gateway authorizer"
-  type        = list(string)
-  default     = []
-}
-
-variable "jwt_issuer" {
-  description = "JWT issuer URL for API Gateway authorizer"
-  type        = string
-  default     = ""
-}
-
-# Custom Domain Configuration
-variable "custom_domain_name" {
-  description = "Custom domain name for API Gateway (optional)"
-  type        = string
-  default     = ""
-}
-
-variable "certificate_arn" {
-  description = "ACM certificate ARN for custom domain (required if custom_domain_name is set)"
-  type        = string
-  default     = ""
 }
 
 # =============================================================================
@@ -259,24 +194,6 @@ variable "git_branch" {
 
 variable "git_token" {
   description = "GitHub Personal Access Token for private repos (stored in Secrets Manager)"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-# =============================================================================
-# AI/LLM API Keys
-# =============================================================================
-
-variable "openai_api_key" {
-  description = "OpenAI API key for AI-powered footnote generation in document conversion"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "voyage_api_key" {
-  description = "Voyage AI API key for embeddings (Task 2.3)"
   type        = string
   default     = ""
   sensitive   = true

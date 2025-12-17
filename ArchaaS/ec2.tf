@@ -80,10 +80,7 @@ resource "aws_instance" "microservices" {
     git_token         = var.git_token
   }))
 
-  depends_on = [
-    aws_s3_object.nginx_config,
-    aws_s3_object.docker_compose
-  ]
+  depends_on = [aws_s3_object.docker_compose]
 
   tags = {
     Name        = "${var.project_name}-microservices-${var.environment}"
@@ -118,31 +115,13 @@ resource "aws_security_group" "ec2_microservices" {
     description = "SSH access"
   }
 
-  # HTTP (Nginx reverse proxy)
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP - Nginx reverse proxy"
-  }
-
-  # HTTPS (for future SSL)
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTPS"
-  }
-
-  # PostgreSQL from Lambda (Lambda not in VPC, so needs public access)
+  # PostgreSQL access for services
   ingress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "PostgreSQL access from Lambda and VPC"
+    description = "PostgreSQL access for microservices"
   }
 
   # Auth Service
@@ -170,15 +149,6 @@ resource "aws_security_group" "ec2_microservices" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "Agent API (public access)"
-  }
-
-  # Swagger Service
-  ingress {
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Swagger service (public access)"
   }
 
   # Ingestion service (FastAPI on EC2)

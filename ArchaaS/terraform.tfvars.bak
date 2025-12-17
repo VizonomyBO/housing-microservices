@@ -64,23 +64,7 @@ database_port      = 5432
 # Store credentials in AWS Secrets Manager
 create_database_secret = true
 
-# =============================================================================
-# Lambda Configuration
-# =============================================================================
-log_level                = "INFO"
-log_retention_days       = 30
-presigned_url_expiry_sec = 900
-max_file_size_bytes      = 104857600
-
-# =============================================================================
-# API Gateway Configuration
-# =============================================================================
-api_throttle_burst_limit = 100
-api_throttle_rate_limit  = 50
-
-# JWT Authorization - Will be configured after EC2 is deployed
-jwt_audience = []
-jwt_issuer   = ""
+log_retention_days = 30
 
 # =============================================================================
 # Git Repository (for EC2 deployment)
@@ -88,10 +72,3 @@ jwt_issuer   = ""
 git_repo   = "https://github.com/VizonomyBO/housing-microservices.git"
 git_branch = "master"
 git_token  = "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"
-
-# =============================================================================
-# Custom Domain (optional)
-# =============================================================================
-custom_domain_name = ""
-certificate_arn    = ""
-openai_api_key = "sk-proj-REsotha2BzTTd-..."  # Your key (sensitive)

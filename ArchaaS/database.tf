@@ -1,7 +1,7 @@
 # Database Configuration for EC2-hosted PostgreSQL
 # This file configures database access and migrations
 
-# Store database credentials in Secrets Manager (for Lambda access)
+# Store database credentials in Secrets Manager (optional)
 resource "aws_secretsmanager_secret" "database" {
   count       = var.create_database_secret ? 1 : 0
   name        = "${var.project_name}/database/${var.environment}"
@@ -44,20 +44,12 @@ resource "aws_s3_object" "database_migration" {
 # EC2 CONFIG FILES (uploaded to S3)
 # =============================================================================
 
-resource "aws_s3_object" "nginx_config" {
-  bucket       = aws_s3_bucket.raw_documents.id
-  key          = "configs/nginx.conf"
-  source       = "${path.module}/configs/nginx.conf"
-  content_type = "text/plain"
-  etag         = filemd5("${path.module}/configs/nginx.conf")
-}
-
 resource "aws_s3_object" "docker_compose" {
   bucket       = aws_s3_bucket.raw_documents.id
   key          = "configs/docker-compose.yml"
-  source       = "${path.module}/../docker-compose.yml"
+  source       = "${path.module}/../docker-compose.ec2.yml"
   content_type = "text/yaml"
-  etag         = filemd5("${path.module}/../docker-compose.yml")
+  etag         = filemd5("${path.module}/../docker-compose.ec2.yml")
 }
 
 # Output database connection info
