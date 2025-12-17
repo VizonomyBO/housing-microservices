@@ -10,6 +10,7 @@ Validate the AWS path after the FastAPI ingestion replacement while keeping LLM 
 
 ## Recent Changes
 - **FastAPI ingestion on EC2** replaced Lambda/S3; envs/scripts point `INGEST_BASE_URL` to `http://52.207.140.87:8085`, and Agent API upload now proxies to this service (no inline ingestion).
+- **Ingestion pipeline tightened**: text-only, synchronous MarkItDown → contextual/proposition chunking → voyage-context-3 embeddings (default 1024-dim; supports 256/512/2048 when pgvector dimension matches), with form field `output_dimension` and trimmed source types (`pdf`, `docx`, `doc`, `txt`, `md`, `html`, `json`).
 - **Shared Data Layer** centralized models/repos in `packages/shared_data_layer`; Agent API relies on it for persistence (Postgres 16, pgvector).
 - **Tooling** standardized on `uv` + Python 3.13; quality gates run via `uv run` (ruff format/check, ty, pytest); defaults are AWS-first (no LocalStack unless explicitly enabled).
 - **Retrieval & Eval Hardening**: Hybrid BM25 + vector with Voyage embeddings + rerank (`voyage-3-large` + `rerank-2.5`) is required (no optional fallback), HyDE-style rewrites, numeric-aware citation scoring, structured `[c#]` footnotes, and raised eval thresholds. `reembed-chunks` CLI refreshes embeddings.

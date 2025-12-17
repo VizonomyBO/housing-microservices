@@ -25,8 +25,13 @@ from ingestion_service.schemas import (
     UploadInitResponse,
     UploadInfo,
 )
-from ingestion_service.settings import Settings, get_settings
+from ingestion_service.settings import (
+    ALLOWED_VOYAGE_OUTPUT_DIMENSIONS,
+    Settings,
+    get_settings,
+)
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,15 @@ async def request_upload(
             status_code=413,
             detail="file_size_bytes exceeds configured maximum",
         )
+    output_dimension = payload.output_dimension or settings.voyage_output_dimension
+    if output_dimension != settings.vector_store_dimension:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"output_dimension {output_dimension} must match configured vector_store_dimension "
+                f"{settings.vector_store_dimension}"
+            ),
+        )
     expires_at = now_seconds() + settings.upload_ttl_seconds
     document_id = uuid4()
     ingestion_id = uuid4()
@@ -103,6 +117,7 @@ async def request_upload(
         "metadata": json.dumps(payload.metadata or {}),
         "document_name": payload.document_name,
         "source_type": payload.source_type,
+        "output_dimension": str(output_dimension),
         "callback_url": str(payload.callback_url) if payload.callback_url else "",
         "trace_id": payload.trace_id or "",
         "expires_at": str(expires_at),
@@ -136,6 +151,19 @@ def _parse_json_field(raw: str | None, default: Any) -> Any:
         return default
 
 
+def _parse_owner(raw_owner: str) -> UUID | None:
+    candidate = (raw_owner or "").strip()
+    if not candidate:
+        return None
+    try:
+        owner_uuid = UUID(candidate)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid owner_user_id") from exc
+    if owner_uuid == SYSTEM_OWNER_SENTINEL:
+        return SYSTEM_OWNER_SENTINEL
+    return owner_uuid
+
+
 @app.post(
     "/v1/documents/upload/complete",
     response_model=UploadCompleteResponse,
@@ -155,6 +183,7 @@ async def complete_upload(
     metadata: str | None = Form(None),
     document_name: str = Form(...),
     source_type: str = Form(...),
+    output_dimension: str | None = Form(None),
     callback_url: str | None = Form(None),
     trace_id: str | None = Form(None),
     expires_at: str = Form(...),
@@ -175,6 +204,7 @@ async def complete_upload(
         "metadata": metadata or "{}",
         "document_name": document_name,
         "source_type": source_type,
+        "output_dimension": output_dimension or "",
         "callback_url": callback_url or "",
         "trace_id": trace_id or "",
         "expires_at": expires_at,
@@ -196,7 +226,8 @@ async def complete_upload(
         raise HTTPException(
             status_code=400, detail=f"Unsupported source_type '{source_type}'"
         )
-    if access_scope != "base" and not owner_user_id:
+    owner_uuid = _parse_owner(owner_user_id)
+    if access_scope != "base" and owner_uuid is None:
         raise HTTPException(
             status_code=400, detail="owner_user_id required for non-base uploads"
         )
@@ -207,6 +238,25 @@ async def complete_upload(
         declared_size = int(file_size_bytes)
     except ValueError:
         declared_size = 0
+    try:
+        resolved_dimension = (
+            int(output_dimension)
+            if output_dimension
+            else settings.voyage_output_dimension
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid output_dimension") from exc
+    if resolved_dimension not in ALLOWED_VOYAGE_OUTPUT_DIMENSIONS:
+        raise HTTPException(status_code=400, detail="Invalid output_dimension")
+    if resolved_dimension != settings.vector_store_dimension:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"output_dimension {resolved_dimension} must match configured vector_store_dimension "
+                f"{settings.vector_store_dimension}"
+            ),
+        )
+
     payload = UploadInitRequest(
         document_name=document_name,
         source_type=source_type,
@@ -218,6 +268,7 @@ async def complete_upload(
         callback_url=None if not callback_url else callback_url,
         metadata=metadata_obj,
         trace_id=trace_id or None,
+        output_dimension=resolved_dimension,
     )
 
     body = await file.read()
@@ -234,7 +285,6 @@ async def complete_upload(
 
     try:
         pipeline: IngestionPipeline = request.app.state.pipeline
-        owner_uuid = UUID(owner_user_id) if owner_user_id else None
         document, job = await pipeline.ingest_file(
             session=db,
             request=payload,

@@ -20,7 +20,13 @@ logger = logging.getLogger(__name__)
 class VoyageEmbeddingClientProtocol(Protocol):
     """Protocol for embedding clients used by ingestion."""
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        output_dimension: int,
+        input_type: str = "document",
+    ) -> list[list[float]]: ...
 
 
 @dataclass(slots=True)
@@ -37,7 +43,13 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
             api_key=self.api_key, timeout=self.timeout_seconds
         )
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        output_dimension: int,
+        input_type: str = "document",
+    ) -> list[list[float]]:
         if not texts:
             return []
         embeddings: list[list[float]] = []
@@ -52,7 +64,12 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
                 ),
             ):
                 with attempt:
-                    response = await self._client.embed(batch, model=self.model)
+                    response = await self._client.embed(
+                        batch,
+                        model=self.model,
+                        output_dimension=output_dimension,
+                        input_type=input_type,
+                    )
                     vectors = [
                         list(map(float, embedding)) for embedding in response.embeddings
                     ]

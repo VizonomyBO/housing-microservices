@@ -4,8 +4,14 @@ import os
 from functools import lru_cache
 from typing import Any, Sequence
 
-from pydantic import AnyUrl, Field
+from pydantic import AnyUrl, Field, field_validator
 from pydantic_settings import BaseSettings
+from shared_data_layer.config import (
+    EMBEDDING_DIMENSION,
+    DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
+)
+
+ALLOWED_VOYAGE_OUTPUT_DIMENSIONS: tuple[int, ...] = (256, 512, 1024, 2048)
 
 
 class Settings(BaseSettings):
@@ -36,20 +42,18 @@ class Settings(BaseSettings):
 
     # Ingestion
     allowed_source_types: Sequence[str] = Field(
-        default=(
-            "pdf",
-            "docx",
-            "doc",
-            "txt",
-            "md",
-            "html",
-            "csv",
-            "xlsx",
-            "json",
-        )
+        default=("pdf", "docx", "doc", "txt", "md", "html", "json")
     )
     voyage_api_key: str | None = None
-    voyage_model: str = "voyage-3"
+    voyage_model: str = "voyage-context-3"
+    voyage_output_dimension: int = Field(
+        default=DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
+        description="voyage-context-3 output dimension; must align with pgvector column dimension",
+    )
+    vector_store_dimension: int = Field(
+        default=EMBEDDING_DIMENSION,
+        description="pgvector storage dimension derived from shared data layer config",
+    )
     worker_name: str = "ingestion-service"
 
     class Config:
@@ -64,6 +68,35 @@ class Settings(BaseSettings):
             import secrets
 
             object.__setattr__(self, "signing_secret", secrets.token_urlsafe(32))
+
+    @field_validator("voyage_output_dimension", mode="before")
+    @classmethod
+    def _validate_output_dimension(cls, value: Any) -> int:
+        if value is None:
+            return DEFAULT_VOYAGE_EMBEDDING_DIMENSION
+        try:
+            dimension = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("voyage_output_dimension must be an integer") from exc
+        if dimension not in ALLOWED_VOYAGE_OUTPUT_DIMENSIONS:
+            raise ValueError(
+                f"voyage_output_dimension must be one of {ALLOWED_VOYAGE_OUTPUT_DIMENSIONS}, "
+                f"got {dimension}"
+            )
+        return dimension
+
+    @field_validator("vector_store_dimension", mode="before")
+    @classmethod
+    def _validate_vector_dimension(cls, value: Any) -> int:
+        if value is None:
+            return EMBEDDING_DIMENSION
+        try:
+            dimension = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("vector_store_dimension must be an integer") from exc
+        if dimension <= 0:
+            raise ValueError("vector_store_dimension must be positive")
+        return dimension
 
 
 @lru_cache(maxsize=1)

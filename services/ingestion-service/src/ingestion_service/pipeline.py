@@ -11,6 +11,7 @@ from typing import Any, Sequence
 from uuid import UUID, uuid4
 
 from markitdown import FileConversionException, MarkItDown, UnsupportedFormatException
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.maintenance import (
     refresh_active_chunks_view,
     refresh_base_documents_cache_for_country,
@@ -25,7 +26,7 @@ from ingestion_service.embeddings import (
     VoyageEmbeddingClient,
     VoyageEmbeddingClientProtocol,
 )
-from ingestion_service.settings import Settings
+from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 from ingestion_service.schemas import UploadInitRequest
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ class ChunkPayload:
     page_number: int | None
     section_title: str | None
     content_hash: str
+    contextual_text: str
+    propositions: list[str]
 
 
 class MarkdownChunker:
@@ -55,13 +58,14 @@ class MarkdownChunker:
     OVERLAP_TOKENS = 50
     CHARS_PER_TOKEN = 4
 
-    PAGE_PATTERN = re.compile(r"^##?\\s+Page\\s+(?P<page>\\d+)", re.IGNORECASE)
-    HEADER_PATTERN = re.compile(r"^#{1,3}\\s+(?P<header>.+)")
+    PAGE_PATTERN = re.compile(r"^##?\s+Page\s+(?P<page>\d+)", re.IGNORECASE)
+    HEADER_PATTERN = re.compile(r"^#{1,3}\s+(?P<header>.+)")
+    SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+")
 
     def chunk(self, document_id: str, content: str) -> list[ChunkPayload]:
         if not content.strip():
             return []
-        segments = re.split(r"(\\n##?\\s+Page\\s+\\d+|\\n#{1,3}\\s+[^\\n]+)", content)
+        segments = re.split(r"(\n##?\s+Page\s+\d+|\n#{1,3}\s+[^\n]+)", content)
         current_text = ""
         current_page = 1
         current_header: str | None = None
@@ -124,6 +128,7 @@ class MarkdownChunker:
         content_hash = hashlib.sha256(
             f"{document_id}:{chunk_index}:{normalized}".encode()
         ).hexdigest()
+        propositions = self._propositionize(normalized)
         return ChunkPayload(
             content=normalized,
             chunk_index=chunk_index,
@@ -131,7 +136,56 @@ class MarkdownChunker:
             page_number=page_number,
             section_title=header,
             content_hash=content_hash,
+            contextual_text=self._build_contextual_text(
+                normalized,
+                header=header,
+                page_number=page_number,
+                propositions=propositions,
+            ),
+            propositions=propositions,
         )
+
+    def _build_contextual_text(
+        self,
+        text: str,
+        *,
+        header: str | None,
+        page_number: int | None,
+        propositions: list[str],
+    ) -> str:
+        """
+        Create a contextualized chunk string with lightweight HyPE/HyDE-style rewrites.
+        Uses deterministic heuristics (no LLM calls) to keep ingestion synchronous.
+        """
+        parts: list[str] = []
+        if header:
+            parts.append(f"Section: {header.strip()}")
+        if page_number:
+            parts.append(f"Page: {page_number}")
+        if propositions:
+            parts.append("Propositions:")
+            parts.extend(f"- {p}" for p in propositions[:3])
+            parts.append(f"Hypothesis: {propositions[0]}")
+        parts.append("Content:")
+        parts.append(text)
+        return "\n".join(parts)
+
+    def _propositionize(self, text: str) -> list[str]:
+        sentences = [
+            s.strip()
+            for s in self.SENTENCE_PATTERN.split(text)
+            if s and len(s.strip()) > 12
+        ]
+        if not sentences and text:
+            return [text[:200].strip()]
+        propositions: list[str] = []
+        for sentence in sentences:
+            clean = re.sub(r"\s+", " ", sentence).strip().rstrip(".")
+            if clean:
+                propositions.append(clean)
+            if len(propositions) >= 4:
+                break
+        return propositions
 
 
 class MarkdownConverter:
@@ -171,6 +225,14 @@ class IngestionPipeline:
         self._settings = settings
         self._chunker = MarkdownChunker()
         self._converter = MarkdownConverter()
+        self._storage_dimension = settings.vector_store_dimension
+        self._default_output_dimension = settings.voyage_output_dimension
+        if self._default_output_dimension != self._storage_dimension:
+            raise ValueError(
+                "voyage_output_dimension must align with vector_store_dimension/EMBEDDING_DIMENSION "
+                f"({self._storage_dimension}). Set VOYAGE_OUTPUT_DIMENSION/VOYAGE_EMBEDDING_DIM "
+                "to the pgvector column dimension (256/512/1024/2048)."
+            )
         self._voyage: VoyageEmbeddingClientProtocol | None = None
         if settings.voyage_api_key:
             self._voyage = VoyageEmbeddingClient(
@@ -188,6 +250,8 @@ class IngestionPipeline:
         ingestion_id: UUID | None,
         file_bytes: bytes,
     ) -> tuple[Document, IngestionJob]:
+        output_dimension = self._resolve_output_dimension(request.output_dimension)
+        request.output_dimension = output_dimension  # ensure downstream consistency
         content_hash = hashlib.sha256(file_bytes).hexdigest()
 
         existing = await self._find_duplicate(
@@ -221,6 +285,7 @@ class IngestionPipeline:
             byte_size=len(file_bytes),
             document_id=document_id,
             ingestion_id=ingestion_id,
+            output_dimension=output_dimension,
         )
 
         try:
@@ -279,10 +344,11 @@ class IngestionPipeline:
         stmt = stmt.where(Document.deleted_at.is_(None))
         if access_scope == "base":
             stmt = stmt.where(Document.access_scope == "base")
-            stmt = stmt.where(Document.owner_user_id.is_(None))
+            stmt = stmt.where(Document.owner_user_id.in_([None, SYSTEM_OWNER_SENTINEL]))
             if country_code:
                 stmt = stmt.where(Document.country_code == country_code)
         else:
+            stmt = stmt.where(Document.access_scope == access_scope)
             stmt = stmt.where(Document.owner_user_id == owner_user_id)
         result = await session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
@@ -297,23 +363,33 @@ class IngestionPipeline:
         byte_size: int,
         document_id: UUID,
         ingestion_id: UUID | None,
+        output_dimension: int,
     ) -> Document:
         now = datetime.now(UTC)
-        if request.access_scope != "base" and owner_user_id is None:
-            raise IngestionError("owner_user_id is required for non-base documents")
-        if request.access_scope == "base" and owner_user_id is not None:
-            raise IngestionError("Base documents cannot set owner_user_id")
+        if request.access_scope == "user_private" and owner_user_id is None:
+            raise IngestionError("owner_user_id is required for user-private documents")
+        if request.access_scope == "base" and owner_user_id not in (
+            None,
+            SYSTEM_OWNER_SENTINEL,
+        ):
+            raise IngestionError(
+                "Base documents cannot set owner_user_id (except shared sentinel)"
+            )
 
         metadata = dict(request.metadata)
         ingestion_meta = metadata.setdefault("ingestion", {})  # type: ignore[assignment]
         if isinstance(ingestion_meta, dict):
-            ingestion_meta.setdefault("mode", "markitdown_sync")
+            ingestion_meta.setdefault("mode", "text_sync_contextual")
+            ingestion_meta.setdefault("model", self._settings.voyage_model)
+            ingestion_meta.setdefault("output_dimension", output_dimension)
             ingestion_meta.setdefault("source_type", request.source_type)
             if ingestion_id:
                 ingestion_meta.setdefault("ingestion_id", str(ingestion_id))
         else:
             metadata["ingestion"] = {
-                "mode": "markitdown_sync",
+                "mode": "text_sync_contextual",
+                "model": self._settings.voyage_model,
+                "output_dimension": output_dimension,
                 "source_type": request.source_type,
                 "ingestion_id": str(ingestion_id) if ingestion_id else None,
             }
@@ -371,19 +447,54 @@ class IngestionPipeline:
         if not chunks:
             raise IngestionError("No chunks produced from markdown")
 
+        output_dimension = self._resolve_output_dimension(request.output_dimension)
+        embedding_meta = {
+            "model": self._settings.voyage_model,
+            "output_dimension": output_dimension,
+            "input_type": "document",
+            "contextualized": True,
+            "normalized": True,
+        }
+        await self._update_stage(
+            session=session,
+            document=document,
+            stage="embed",
+            metadata={"embedding": embedding_meta},
+        )
         embeddings: Sequence[Sequence[float]] | None = None
         if self._voyage:
-            embeddings = await self._voyage.embed([chunk.content for chunk in chunks])
+            embeddings = await self._voyage.embed(
+                [chunk.contextual_text for chunk in chunks],
+                output_dimension=output_dimension,
+                input_type="document",
+            )
             if len(embeddings) != len(chunks):
                 raise IngestionError("Embedding count mismatch")
 
         owner_id = document.owner_user_id
         country_code = (document.country_code or request.country_code or "UNK").upper()
-        metadata = self._chunk_metadata(request.metadata)
+        base_metadata = self._chunk_metadata(
+            document.metadata_
+            if isinstance(document.metadata_, dict)
+            else request.metadata,
+            embedding_meta=embedding_meta,
+            chunk_strategy={
+                "method": "markdown_headers_with_overlap",
+                "target_tokens": self._chunker.TARGET_TOKENS,
+                "overlap_tokens": self._chunker.OVERLAP_TOKENS,
+                "max_tokens": self._chunker.MAX_TOKENS,
+            },
+        )
 
         for idx, chunk in enumerate(chunks):
             chunk_id = uuid4()
             embedding = embeddings[idx] if embeddings else None
+            chunk_metadata = dict(base_metadata)
+            chunk_chunking = chunk_metadata.setdefault("chunking", {})  # type: ignore[assignment]
+            if isinstance(chunk_chunking, dict):
+                chunk_chunking.setdefault("section_title", chunk.section_title)
+                chunk_chunking.setdefault("page_number", chunk.page_number)
+                chunk_chunking.setdefault("propositions", chunk.propositions)
             chunk_row = Chunk(
                 id=chunk_id,
                 document_id=document.id,
@@ -396,7 +507,7 @@ class IngestionPipeline:
                 content_hash=chunk.content_hash,
                 owner_user_id=owner_id,
                 country_code=country_code,
-                metadata_=metadata,
+                metadata_=chunk_metadata,
                 embedding=list(map(float, embedding)) if embedding else None,
             )
             session.add(chunk_row)
@@ -420,7 +531,7 @@ class IngestionPipeline:
             document_id=document.id,
             stage="activate",
             status="succeeded",
-            metadata={"source": "markitdown_sync"},
+            metadata={"source": "text_sync_contextual", "embedding": embedding_meta},
             job_id=ingestion_id,
         )
         return job
@@ -482,16 +593,25 @@ class IngestionPipeline:
         )
 
     @staticmethod
-    def _chunk_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    def _chunk_metadata(
+        metadata: dict[str, Any] | None,
+        *,
+        embedding_meta: dict[str, Any],
+        chunk_strategy: dict[str, Any],
+    ) -> dict[str, Any]:
         payload = dict(metadata or {})
         ingestion_meta = payload.setdefault("ingestion", {})  # type: ignore[assignment]
         if isinstance(ingestion_meta, dict):
-            ingestion_meta.setdefault("mode", "markitdown_sync")
+            ingestion_meta.setdefault("mode", "text_sync_contextual")
             ingestion_meta.setdefault("source", "document_upload")
+            ingestion_meta.setdefault("embedding", embedding_meta)
+            ingestion_meta.setdefault("chunking", chunk_strategy)
         else:
             payload["ingestion"] = {
-                "mode": "markitdown_sync",
+                "mode": "text_sync_contextual",
                 "source": "document_upload",
+                "embedding": embedding_meta,
+                "chunking": chunk_strategy,
             }
         return payload
 
@@ -502,3 +622,18 @@ class IngestionPipeline:
         if access_scope == "base":
             return "base_admin"
         return "private"
+
+    def _resolve_output_dimension(self, requested: int | None) -> int:
+        """
+        Ensure the requested output dimension is supported and matches the vector store shape.
+        """
+        dimension = requested or self._default_output_dimension
+        if dimension not in ALLOWED_VOYAGE_OUTPUT_DIMENSIONS:
+            raise IngestionError(
+                f"output_dimension must be one of {ALLOWED_VOYAGE_OUTPUT_DIMENSIONS}"
+            )
+        if dimension != self._storage_dimension:
+            raise IngestionError(
+                f"output_dimension {dimension} must match vector_store_dimension {self._storage_dimension}"
+            )
+        return dimension

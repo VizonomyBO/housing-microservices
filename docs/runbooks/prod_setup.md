@@ -96,6 +96,8 @@ The commands below run entirely against the live AWS endpoints and the new inges
    FILE_HASH=$(sha256sum "$FILE" | awk '{print $1}')
    ```
 3. **Request presigned upload via ingestion service** (FastAPI on EC2; no S3 POST required)
+   - Ingestion is text-only and synchronous (MarkItDown → contextual chunking → voyage-context-3 embeddings → activate). Allowed `source_type` values: `pdf`, `docx`, `doc`, `txt`, `md`, `html`, `json`.
+   - Default embeddings use `voyage-context-3` at `VOYAGE_OUTPUT_DIMENSION` (1024 by default; must match pgvector dimension). Optionally include `output_dimension` in the POST body to pick 256/512/1024/2048 when the DB is configured for that shape.
    ```bash
    UPLOAD_RESP=$(jq -n \
      --arg name "Prod Smoke $(date +%s)" \

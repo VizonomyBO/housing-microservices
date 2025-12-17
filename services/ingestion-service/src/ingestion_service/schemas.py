@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
+from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS
+
 
 class UploadInitRequest(BaseModel):
     document_name: str = Field(..., min_length=1, max_length=255)
@@ -19,6 +21,10 @@ class UploadInitRequest(BaseModel):
     callback_url: HttpUrl | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
     trace_id: str | None = None
+    output_dimension: int | None = Field(
+        default=None,
+        description="Requested voyage-context-3 output dimension (256/512/1024/2048). Defaults to server config.",
+    )
 
     @field_validator("source_type")
     @classmethod
@@ -32,6 +38,17 @@ class UploadInitRequest(BaseModel):
         if value not in allowed:
             raise ValueError(
                 f"Invalid access_scope '{value}', expected one of {sorted(allowed)}"
+            )
+        return value
+
+    @field_validator("output_dimension")
+    @classmethod
+    def validate_output_dimension(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        if value not in ALLOWED_VOYAGE_OUTPUT_DIMENSIONS:
+            raise ValueError(
+                f"output_dimension must be one of {ALLOWED_VOYAGE_OUTPUT_DIMENSIONS}"
             )
         return value
 

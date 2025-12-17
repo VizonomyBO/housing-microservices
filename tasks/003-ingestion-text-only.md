@@ -1,4 +1,4 @@
-# Task: Rework Ingestion Service for Synchronous Text-Only voyage-context-3
+# Task (Completed): Rework Ingestion Service for Synchronous Text-Only voyage-context-3
 
 Follow `.kilocode/rules/memory-bank-instructions.md` and `AGENTS.md`; create/update a plan + tracker in the repo root.
 The agent must commit the changes before terminating the task.
