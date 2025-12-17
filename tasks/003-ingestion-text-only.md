@@ -13,6 +13,7 @@ Once the task is done, mark this as completed in the title
   - Enforce text-only inputs (remove multimodal/MarkItDown variants, trim allowed source types accordingly) and apply contextual/proposition chunking (headers, HyPE/HyDE-style rewrites) before embed/index.
   - Keep synchronous upload → chunk → embed → persist → activate flow; remove/clean any async/polling hooks or legacy ingestion modes.
   - Ensure owner_id handling matches requirements (nullable/“0000” shared), dedupe semantics preserved, and metadata reflects new ingestion mode.
+  - Agent API remains the upload front door: `/v1/documents/upload` proxies to ingestion, so keep the ingestion upload contract stable, enforce auth/owner semantics, and return the metadata agent-api uses for gating (document_id, ingestion_id, content_hash, status).
 - Update tests/fixtures/config docs for the new model/dimension settings and text-only constraints.
 
 ## Deliverables
