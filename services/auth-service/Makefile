@@ -1,69 +1,44 @@
-.PHONY: help install install-dev test test-unit test-integration test-coverage lint format format-check type-check clean run db-init db-migrate db-upgrade
+UV ?= uv
+PYTHON_VERSION ?= 3.13
+VENV ?= .venv
+PYTHON := $(VENV)/bin/python
 
-help:
-	@echo "Available commands:"
-	@echo "  install          Install production dependencies"
-	@echo "  install-dev      Install development dependencies"
-	@echo "  test             Run all tests"
-	@echo "  test-unit        Run unit tests only"
-	@echo "  test-integration Run integration tests only"
-	@echo "  test-coverage    Run tests with coverage report"
-	@echo "  lint             Run linting checks (ruff)"
-	@echo "  format           Format code with ruff"
-	@echo "  format-check     Check code formatting without modifying"
-	@echo "  type-check       Run type checking with mypy"
-	@echo "  clean            Clean up temporary files and caches"
-	@echo "  run              Run the development server"
+.PHONY: help venv format lint type-check test quality clean run
 
-install:
-	pip install -r requirements.txt
+.DEFAULT_GOAL := help
 
-install-dev:
-	pip install -r requirements/dev.txt
-	pip install -r requirements/test.txt
+help: ## Show service commands
+	@echo "Auth service quality gates (uv-first, text-only stack)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
 
-test:
-	pytest
+venv: ## Create/refresh the uv-managed virtualenv with dev/test deps
+	$(UV) venv --python $(PYTHON_VERSION) $(VENV)
+	$(UV) pip sync -p $(PYTHON) requirements.txt
+	$(UV) pip sync -p $(PYTHON) requirements/dev.txt
+	$(UV) pip sync -p $(PYTHON) requirements/test.txt
 
-test-unit:
-	pytest -m unit
+format: venv ## Apply ruff formatting + autofix
+	$(UV) run --python $(PYTHON) ruff format .
+	$(UV) run --python $(PYTHON) ruff check --fix .
 
-test-integration:
-	pytest -m integration
+lint: venv ## Lint with ruff (no formatting)
+	$(UV) run --python $(PYTHON) ruff check .
 
-test-coverage:
-	pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml
+type-check: venv ## Type check with mypy
+	$(UV) run --python $(PYTHON) mypy app
 
-lint:
-	ruff check .
+test: venv ## Run pytest (parallel where supported)
+	$(UV) run --python $(PYTHON) pytest -n auto
 
-format:
-	ruff format .
-	ruff check --fix .
+quality: format lint type-check test ## Full quality gate
 
-format-check:
-	ruff format --check .
-	ruff check .
+clean: ## Drop caches and coverage artifacts
+	find . -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".pytest_cache" -prune -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".ruff_cache" -prune -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".mypy_cache" -prune -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "htmlcov" -prune -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name ".coverage" -delete
 
-type-check:
-	mypy app
-
-clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find . -type f -name "*.coverage" -delete
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-
-run:
-	python run.py
-
-# Quality check - run all checks
-quality: format-check lint type-check
-	@echo "All quality checks passed!"
-
-
+run: venv ## Run the development server
+	$(UV) run --python $(PYTHON) python run.py

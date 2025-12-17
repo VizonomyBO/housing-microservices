@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from shared_data_layer.config import DEFAULT_VOYAGE_EMBEDDING_DIMENSION
 # ruff: noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -23,8 +24,8 @@ def _make_settings(**overrides) -> Settings:
         jwt_secret_key="secret",
         signing_secret="secret",
         voyage_api_key="dummy",
-        voyage_output_dimension=1024,
-        vector_store_dimension=1024,
+        voyage_output_dimension=DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
+        vector_store_dimension=DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
         **overrides,
     )
 

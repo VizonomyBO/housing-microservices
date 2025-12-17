@@ -1,442 +1,91 @@
-# Makefile for Microservices Platform
+UV ?= uv
+PYTHON_VERSION ?= 3.13
 
-.PHONY: help build up down logs clean restart ps health test reduced-e2e-smoke
+UV_PROJECTS = services/agent-api services/ingestion-service packages/shared_data_layer
+FLASK_PROJECTS = services/auth-service services/user-service
 
-help: ## Show this help message
-	@echo 'Usage: make [target]'
-	@echo ''
-	@echo 'Available targets:'
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+.PHONY: help sync format lint type-check test quality smoke-local clean
 
-build: ## Build all Docker containers
-	docker-compose build
+.DEFAULT_GOAL := help
 
-up: ## Start all services
-	docker-compose up -d
+help: ## Show available targets
+	@echo "Quality gates for the text-only FastAPI/Flask stack (uv-first)"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
-down: ## Stop all services
-	docker-compose down
+sync: ## Create/refresh .venv and install deps for all services (uv-first)
+	@set -e; \
+	for dir in $(UV_PROJECTS); do \
+		echo ">>> Syncing $$dir"; \
+		(cd "$$dir" && $(UV) venv --python $(PYTHON_VERSION) .venv && $(UV) sync --all-extras); \
+	done; \
+	for dir in $(FLASK_PROJECTS); do \
+		echo ">>> Syncing $$dir"; \
+		(cd "$$dir" && $(UV) venv --python $(PYTHON_VERSION) .venv && \
+			$(UV) pip sync -p .venv/bin/python requirements.txt && \
+			$(UV) pip sync -p .venv/bin/python requirements/dev.txt && \
+			$(UV) pip sync -p .venv/bin/python requirements/test.txt); \
+	done
 
-logs: ## View logs from all services
-	docker-compose logs -f
+format: ## Run ruff format + autofix across services
+	@set -e; \
+	for dir in $(UV_PROJECTS); do \
+		echo ">>> Formatting $$dir"; \
+		(cd "$$dir" && $(UV) run ruff format . && $(UV) run ruff check --fix .); \
+	done; \
+	for dir in $(FLASK_PROJECTS); do \
+		echo ">>> Formatting $$dir"; \
+		PY_BIN=$$(cd "$$dir" && if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi); \
+		(cd "$$dir" && $(UV) run --python "$$PY_BIN" ruff format . && $(UV) run --python "$$PY_BIN" ruff check --fix .); \
+	done
 
-logs-account: ## View logs from account service
-	docker-compose logs -f auth-service
+lint: ## Run lint checks (ruff) across services
+	@set -e; \
+	for dir in $(UV_PROJECTS); do \
+		echo ">>> Linting $$dir"; \
+		(cd "$$dir" && $(UV) run ruff check .); \
+	done; \
+	for dir in $(FLASK_PROJECTS); do \
+		echo ">>> Linting $$dir"; \
+		PY_BIN=$$(cd "$$dir" && if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi); \
+		(cd "$$dir" && $(UV) run --python "$$PY_BIN" ruff check .); \
+	done
 
-logs-user: ## View logs from user service
-	docker-compose logs -f user-service
+type-check: ## Run type checks (ty for uv projects, mypy for Flask services)
+	@set -e; \
+	for dir in $(UV_PROJECTS); do \
+		echo ">>> Type checking $$dir"; \
+		(cd "$$dir" && $(UV) run ty check .); \
+	done; \
+	for dir in $(FLASK_PROJECTS); do \
+		echo ">>> Type checking $$dir"; \
+		PY_BIN=$$(cd "$$dir" && if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi); \
+		(cd "$$dir" && $(UV) run --python "$$PY_BIN" mypy app); \
+	done
 
-logs-db: ## View logs from database
-	docker-compose logs -f postgres
+test: ## Run pytest across services (parallel where enabled)
+	@set -e; \
+	for dir in $(UV_PROJECTS); do \
+		echo ">>> Testing $$dir"; \
+		(cd "$$dir" && $(UV) run pytest -n auto); \
+	done; \
+	for dir in $(FLASK_PROJECTS); do \
+		echo ">>> Testing $$dir"; \
+		PY_BIN=$$(cd "$$dir" && if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python; fi); \
+		(cd "$$dir" && $(UV) run --python "$$PY_BIN" pytest -n auto); \
+	done
 
-clean: ## Stop all services and remove volumes
-	docker-compose down -v
+quality: format lint type-check test ## Run full quality gate (format → lint → type → tests)
 
-restart: ## Restart all services
-	docker-compose restart
+smoke-local: ## Run the lightweight smoke script against local stack (requires env + APIs)
+	@set -e; \
+	env_file=$$(scripts/use_env.sh local); \
+	set -a && source "$$env_file" && set +a; \
+	./test-api.sh
 
-ps: ## Show running containers
-	docker-compose ps
-
-health: ## Check health of key services
-	@echo "Checking Account Service..."
-	@curl -s http://localhost:5000/health | python -m json.tool || echo "Account service not responding"
-
-reduced-e2e-smoke: ## Launch reduced stack and run the E2E smoke CLI
-	./services/agent-api/scripts/run_reduced_e2e_compose.sh $(ARGS)
-
-status: ## Show detailed system status
-	@curl -s http://localhost:3000/api/status | python -m json.tool
-
-dev-account: ## Run account service in development mode (local)
-	cd services/auth-service && python run.py
-
-dev-user: ## Run user service in development mode (local)
-	cd services/user-service && python run.py
-
-install-account: ## Install account service dependencies (local)
-	cd services/auth-service && pip install -r requirements.txt
-
-install-user: ## Install user service dependencies (local)
-	cd services/user-service && pip install -r requirements.txt
-
-test-register: ## Test user registration
-	@curl -X POST http://localhost:5000/auth/register \
-		-H "Content-Type: application/json" \
-		-d '{"email":"test@example.com","username":"testuser","password":"TestPass123!","first_name":"Test","last_name":"User"}' \
-		| python -m json.tool
-
-test-login: ## Test user login
-	@curl -X POST http://localhost:5000/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"login":"test@example.com","password":"TestPass123!"}' \
-		| python -m json.tool
-
-open-app: ## Open application landing page in browser
-	@open http://localhost:3000 || xdg-open http://localhost:3000 || echo "Open http://localhost:3000 in your browser"
-
-# ============================================
-# Testing and Quality Commands
-# ============================================
-
-test: test-account test-user ## Run all tests locally
-
-test-account: ## Run account service tests locally
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/ -v; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/ -v; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-user: ## Run user service tests locally
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-user-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/ -v; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/ -v; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-account-unit: ## Run account service unit tests only
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/unit/ -v -m unit; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/unit/ -v -m unit; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-account-integration: ## Run account service integration tests only
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/integration/ -v -m integration; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/integration/ -v -m integration; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-user-unit: ## Run user service unit tests only
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-user-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/unit/ -v -m unit; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/unit/ -v -m unit; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-user-integration: ## Run user service integration tests only
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-user-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/integration/ -v -m integration; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/integration/ -v -m integration; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-
-test-coverage: ## Run tests with coverage reports
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-	@if [ -d "services/user-service/.venv" ]; then \
-		cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pytest tests/ --cov=app --cov-report=html --cov-report=term; \
-		fi; \
-	fi
-	@echo "\n==> Coverage reports generated:"
-	@echo "    Account Service: services/auth-service/htmlcov/index.html"
-	@echo "    User Service: services/user-service/htmlcov/index.html"
-
-test-docker: ## Run tests in Docker containers
-	docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from auth-service-test
-
-test-docker-account: ## Run account service tests in Docker
-	docker-compose -f docker-compose.test.yml up --build auth-service-test test-postgres --abort-on-container-exit
-
-lint: lint-account lint-user ## Run all linting
-
-lint-account: ## Lint account service
-	@echo "==> Linting Account Service..."
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format --check . && \
-		$$PYTHON_CMD -m ruff check . && \
-		$$PYTHON_CMD -m mypy app/
-
-lint-user: ## Lint user service
-	@echo "==> Linting User Service..."
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-user-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format --check . && \
-		$$PYTHON_CMD -m ruff check . && \
-		$$PYTHON_CMD -m mypy app/
-
-lint-fix: lint-fix-account lint-fix-user ## Fix linting issues
-
-lint-fix-account: ## Fix account service linting issues
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format . && \
-		$$PYTHON_CMD -m ruff check --fix .
-
-lint-fix-user: ## Fix user service linting issues
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-user-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format . && \
-		$$PYTHON_CMD -m ruff check --fix .
-
-# Format code
-format: ## Auto-format all code
-	@echo "==> Formatting Account Service..."
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format . && \
-		$$PYTHON_CMD -m ruff check --fix .
-	@echo "==> Formatting User Service..."
-	@if [ -d "services/user-service/.venv" ]; then \
-		cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			PYTHON_CMD=".venv/bin/python"; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			PYTHON_CMD=".venv/Scripts/python.exe"; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi && \
-		$$PYTHON_CMD -m ruff format . && \
-		$$PYTHON_CMD -m ruff check --fix .; \
-	fi
-
-# Type checking
-type-check: ## Run type checking
-	@echo "==> Type checking Account Service..."
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		echo "Error: Virtual environment not found. Run 'make install-account-dev' first."; \
-		exit 1; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m mypy app/; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m mypy app/; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-	@echo "==> Type checking User Service..."
-	@if [ -d "services/user-service/.venv" ]; then \
-		cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m mypy app/; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m mypy app/; \
-		fi; \
-	fi
-
-# Quality gates
-quality: lint type-check test-coverage ## Run all quality checks
-
-install-account-dev: ## Install account service development dependencies
-	@echo "==> Setting up Account Service virtual environment..."
-	@if [ ! -d "services/auth-service/.venv" ]; then \
-		cd services/auth-service && python -m venv .venv 2>/dev/null || python3 -m venv .venv; \
-	fi
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install --upgrade pip; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install --upgrade pip; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-	@echo "==> Installing base dependencies (excluding psycopg2-binary for now)..."
-	@cd services/auth-service && \
-		TMPFILE=$$(mktemp 2>/dev/null || echo ".base_no_pg.tmp") && \
-		grep -v "psycopg2-binary" requirements/base.txt > $$TMPFILE && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r $$TMPFILE && \
-			rm -f $$TMPFILE; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r $$TMPFILE && \
-			rm -f $$TMPFILE; \
-		fi
-	@echo "==> Installing psycopg2-binary (requires PostgreSQL if building from source)..."
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install psycopg2-binary || \
-			(echo "Warning: psycopg2-binary installation failed."; \
-			 echo "This is OK for development/testing with SQLite."); \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install psycopg2-binary || \
-			(echo "Warning: psycopg2-binary installation failed."; \
-			 echo "This is OK for development/testing with SQLite."); \
-		fi
-	@echo "==> Installing dev dependencies..."
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r requirements/dev.txt || true; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r requirements/dev.txt || true; \
-		fi
-	@echo "==> Installing test dependencies..."
-	@cd services/auth-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r requirements/test.txt || true; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r requirements/test.txt || true; \
-		fi
-	@echo "==> Account Service dependencies installed!"
-
-install-user-dev: ## Install user service development dependencies
-	@echo "==> Setting up User Service virtual environment..."
-	@if [ ! -d "services/user-service/.venv" ]; then \
-		cd services/user-service && python -m venv .venv 2>/dev/null || python3 -m venv .venv; \
-	fi
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install --upgrade pip; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install --upgrade pip; \
-		else \
-			echo "Error: Could not find Python in virtual environment"; exit 1; \
-		fi
-	@echo "==> Installing base dependencies (excluding psycopg2-binary for now)..."
-	@cd services/user-service && \
-		TMPFILE=$$(mktemp 2>/dev/null || echo ".base_no_pg.tmp") && \
-		grep -v "psycopg2-binary" requirements/base.txt > $$TMPFILE && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r $$TMPFILE && \
-			rm -f $$TMPFILE; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r $$TMPFILE && \
-			rm -f $$TMPFILE; \
-		fi
-	@echo "==> Installing psycopg2-binary (requires PostgreSQL if building from source)..."
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install psycopg2-binary || \
-			(echo "Warning: psycopg2-binary installation failed."; \
-			 echo "This is OK for development/testing with SQLite."); \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install psycopg2-binary || \
-			(echo "Warning: psycopg2-binary installation failed."; \
-			 echo "This is OK for development/testing with SQLite."); \
-		fi
-	@echo "==> Installing dev dependencies..."
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r requirements/dev.txt || true; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r requirements/dev.txt || true; \
-		fi
-	@echo "==> Installing test dependencies..."
-	@cd services/user-service && \
-		if [ -f ".venv/bin/python" ]; then \
-			.venv/bin/python -m pip install -r requirements/test.txt || true; \
-		elif [ -f ".venv/Scripts/python.exe" ]; then \
-			.venv/Scripts/python.exe -m pip install -r requirements/test.txt || true; \
-		fi
-	@echo "==> User Service dependencies installed!"
-
-# Clean test artifacts
-clean-test: ## Clean test artifacts and coverage reports
-	rm -rf services/auth-service/htmlcov
-	rm -rf services/auth-service/.coverage
-	rm -rf services/auth-service/.pytest_cache
-	rm -rf services/user-service/htmlcov
-	rm -rf services/user-service/.coverage
-	rm -rf services/user-service/.pytest_cache
-	@echo "==> Test artifacts cleaned"
-
-clean-all: clean clean-test ## Clean everything including test artifacts
+clean: ## Remove common caches and coverage artifacts
+	@set -e; \
+	find services packages -type d -name ".pytest_cache" -prune -exec rm -rf {} +; \
+	find services packages -type d -name ".ruff_cache" -prune -exec rm -rf {} +; \
+	find services packages -type f -name ".coverage" -delete; \
+	find services packages -type d -name "htmlcov" -prune -exec rm -rf {} +

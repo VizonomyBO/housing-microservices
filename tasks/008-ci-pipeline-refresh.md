@@ -1,4 +1,4 @@
-# Task: Refresh Tests/CI for the Revamped Stack
+# Task (Completed): Refresh Tests/CI for the Revamped Stack
 
 Follow `.kilocode/rules/memory-bank-instructions.md` and `AGENTS.md`; create/update a plan + tracker in the repo root. Use service-specific AGENTS when touching those packages.
 The agent must commit the changes before terminating the task.
