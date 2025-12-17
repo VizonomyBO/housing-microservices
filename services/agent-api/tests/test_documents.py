@@ -41,6 +41,24 @@ class FakeAsyncClient:
         return FakeResponse(201, data)
 
 
+class FailingAsyncClient:
+    def __init__(self, status_code: int = 500, message: str = "upstream unavailable"):
+        self._status_code = status_code
+        self._message = message
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url: str, json: dict | None = None, headers=None):
+        return FakeResponse(
+            self._status_code,
+            {"status": "FAILED", "message": self._message},
+        )
+
+
 async def test_document_upload_proxies_and_tracks_upload(
     client: AsyncClient, db_session, monkeypatch, test_user_id: str
 ):
@@ -81,3 +99,23 @@ async def test_document_upload_proxies_and_tracks_upload(
     upload = uploads[0]
     assert str(upload.document_id) == response_data["document_id"]
     assert upload.content_hash == response_data["content_hash"]
+
+
+async def test_document_upload_failure_bubbles_up(client: AsyncClient, db_session, monkeypatch):
+    monkeypatch.setattr(
+        "agent_api.http.routes.documents.httpx.AsyncClient",
+        lambda *_args, **_kwargs: FailingAsyncClient(status_code=503),
+    )
+
+    payload = {
+        "document_name": "sample.txt",
+        "content": "hello world",
+        "chunk_type": "text",
+        "country_code": "USA",
+    }
+    resp = await client.post("/v1/documents/upload", json=payload)
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["error"]["code"] == "INGESTION_FAILED"
+    uploads = (await db_session.execute(select(UploadedFile))).scalars().all()
+    assert uploads == []

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.prebuilt import create_react_agent
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a retrieval QA agent. Use the provided tools to gather evidence from attached "
@@ -24,11 +24,8 @@ def build_react_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ):
     checkpointer = MemorySaver()
-    agent = create_react_agent(
-        model=llm,
-        tools=list(tools),
-        prompt=system_prompt,
-        checkpointer=checkpointer,
+    agent = create_agent(
+        model=llm, tools=list(tools), system_prompt=system_prompt, checkpointer=checkpointer
     )
     return agent
 

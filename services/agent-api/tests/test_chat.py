@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from httpx import AsyncClient
 from shared_data_layer.db.models.conversations import Message
@@ -67,3 +69,46 @@ async def test_chat_uses_runner_and_persists_messages(
     roles = [m.role for m in messages]
     assert "user" in roles
     assert "assistant" in roles
+
+
+def _parse_sse_events(lines: list[str]) -> list[dict]:
+    events: list[dict] = []
+    current: dict[str, object] = {}
+    for line in lines:
+        if not line:
+            if current:
+                events.append(current)
+                current = {}
+            continue
+        if line.startswith("event: "):
+            current["event"] = line.split("event: ", 1)[1]
+        if line.startswith("data: "):
+            payload = line.split("data: ", 1)[1]
+            try:
+                current["data"] = json.loads(payload)
+            except json.JSONDecodeError:
+                current["data_raw"] = payload
+    if current:
+        events.append(current)
+    return events
+
+
+async def test_chat_streaming_emits_meta_and_done(client: AsyncClient, db_session):
+    payload = {
+        "message": {"type": "user", "content": "stream please", "attachments": []},
+        "constraints": {"country_code": "USA"},
+        "response_mode": "stream",
+    }
+    async with client.stream("POST", "/v1/chat", json=payload) as response:
+        assert response.status_code == 200
+        lines = [line async for line in response.aiter_lines()]
+
+    events = _parse_sse_events(lines)
+    event_types = [e.get("event") for e in events]
+    assert "meta" in event_types
+    assert "done" in event_types
+    done_event = next(e for e in events if e.get("event") == "done")
+    done_payload = done_event["data"]["payload"]
+    assert done_payload["status"] == "COMPLETED"
+    assert done_payload["thread_id"]
+
