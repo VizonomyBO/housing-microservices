@@ -31,7 +31,8 @@ def _serialize_attachment(record: ConversationDocumentRecord) -> dict[str, Any]:
 async def retrieve_documents(query: str) -> str:
     """
     Retrieve text chunks from attached documents using hybrid BM25+vector search and rerank.
-    Returns formatted context blocks with [c#] headers and citations metadata.
+    Returns formatted context blocks with [c#] headers and citations metadata. If context looks
+    weak, you may call this multiple times with refined queries to strengthen evidence.
     """
 
     runtime = get_runtime()
@@ -97,4 +98,54 @@ async def pyodide_sandbox(code: str, packages: list[str] | None = None) -> str:
     return json.dumps(result)
 
 
-__all__ = ["document_status", "list_attachments", "pyodide_sandbox", "retrieve_documents"]
+@tool("compute_over_chunks", return_direct=False)
+async def compute_over_chunks(python_code: str) -> str:
+    """
+    Run Python code over the most recent retrieved chunks. The variable `chunks` will be available
+    and contains a list of dicts: [{text, score, page_number, position, doc_id, canonical_name}].
+    Set a variable named `result` in your code; it will be returned as JSON.
+    """
+
+    runtime = get_runtime()
+    ctx = runtime.last_retrieval
+    if ctx is None or not ctx.chunks:
+        return json.dumps({"error": "no_chunks"})
+
+    chunk_payload = []
+    for chunk in ctx.chunks[:12]:
+        chunk_payload.append(
+            {
+                "text": chunk.text,
+                "score": chunk.score,
+                "page_number": chunk.page_number,
+                "position": chunk.position,
+                "doc_id": chunk.document_id,
+                "canonical_name": chunk.canonical_name,
+            }
+        )
+
+    code = (
+        "import json\n"
+        f"chunks = {json.dumps(chunk_payload)}\n"
+        "result = None\n"
+        f"{python_code}\n"
+        "out = {'result': result}\n"
+        "print(json.dumps(out))\n"
+    )
+
+    result = await execute_in_pyodide(
+        code=code,
+        packages=[],
+        request_id=runtime.request_id,
+        config=runtime.pyodide,
+    )
+    return json.dumps(result)
+
+
+__all__ = [
+    "document_status",
+    "list_attachments",
+    "pyodide_sandbox",
+    "retrieve_documents",
+    "compute_over_chunks",
+]

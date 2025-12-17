@@ -80,11 +80,7 @@ class RetrievalService:
                 status_code=409,
             )
 
-        expanded_queries = [user_query]
-        synthetic = await self._build_hyde_query(user_query)
-        if synthetic:
-            expanded_queries.append(synthetic)
-
+        expanded_queries = await self._build_query_set(user_query)
         embeddings = await self._embedding_client.embed(expanded_queries)
         retrieved = await self._run_retrieval(
             queries=expanded_queries,
@@ -100,15 +96,38 @@ class RetrievalService:
                 "doc_id": chunk.document_id,
                 "chunk_id": chunk.chunk_id,
                 "score": chunk.score,
+                "canonical_name": chunk.canonical_name,
+                "page_number": chunk.page_number,
+                "position": chunk.position,
             }
             for chunk in context_blocks
         ]
+        if not citations:
+            raise GatewayError(
+                code="NO_RESULTS",
+                message="Retrieval returned no citations.",
+                status_code=502,
+            )
         return RetrievalContext(
             attachments=attachments,
             chunks=context_blocks,
             citations=citations,
             context_text=context_text,
         )
+
+    async def _build_query_set(self, user_query: str) -> list[str]:
+        """Expand the user query with HyDE-style and rewrite variants."""
+
+        queries = [user_query]
+        synthetic = await self._build_hyde_query(user_query)
+        if synthetic:
+            queries.append(synthetic)
+
+        rewrites = await self._rewrite_queries(user_query)
+        for q in rewrites:
+            if q and q not in queries:
+                queries.append(q)
+        return queries[:4]
 
     async def _run_retrieval(
         self,
@@ -195,6 +214,25 @@ class RetrievalService:
         except Exception:
             logger.warning("HyDE generation failed; continuing without synthetic query")
             return None
+
+    async def _rewrite_queries(self, user_query: str) -> list[str]:
+        prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite the question into 2 concise variants that may retrieve different evidence. "
+                    "Return each variant on its own line without numbering."
+                ),
+            },
+            {"role": "user", "content": user_query},
+        ]
+        try:
+            text = await self._chat_client.complete(prompt, temperature=0.5, max_tokens=160)
+        except Exception:
+            logger.warning("Query rewrite failed; continuing without rewrites")
+            return []
+        lines = [line.strip(" -\t") for line in text.splitlines() if line.strip()]
+        return [line for line in lines if line]
 
     def _format_context(self, chunks: list[RetrievedChunk]) -> str:
         lines: list[str] = []

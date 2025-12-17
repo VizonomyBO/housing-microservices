@@ -6,13 +6,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_api.agent.graph import build_react_agent
+from agent_api.agent.graph import DEFAULT_SYSTEM_PROMPT, build_agent_graph
 from agent_api.agent.tool_runtime import ToolRuntime, set_runtime
 from agent_api.agent.tools import (
+    compute_over_chunks,
     document_status,
     list_attachments,
     pyodide_sandbox,
@@ -77,7 +78,7 @@ class LangGraphRunner(ChatRunnerProtocol):
     def __init__(self, *, settings: Settings):
         self._settings = settings
         llm_factory: Any = cast(Any, ChatOpenAI)
-        self._llm = llm_factory(
+        self._llm: ChatOpenAI = llm_factory(
             api_key=settings.openai_api_key,
             model=settings.openai_chat_model,
             temperature=0.1,
@@ -93,9 +94,17 @@ class LangGraphRunner(ChatRunnerProtocol):
             api_key=settings.voyage_api_key or "",
             model=settings.voyage_rerank_model,
         )
-        self._agent = build_react_agent(
+        self._system_prompt = DEFAULT_SYSTEM_PROMPT
+        self._agent = build_agent_graph(
             llm=self._llm,
-            tools=[retrieve_documents, document_status, list_attachments, pyodide_sandbox],
+            tools=[
+                retrieve_documents,
+                document_status,
+                list_attachments,
+                pyodide_sandbox,
+                compute_over_chunks,
+            ],
+            system_prompt=self._system_prompt,
         )
 
     async def run_chat(
@@ -156,8 +165,9 @@ class LangGraphRunner(ChatRunnerProtocol):
         )
 
         human = HumanMessage(content=request.message.content)
+        system = SystemMessage(content=self._system_prompt)
         config = {"configurable": {"thread_id": request.thread_id}}
-        result = await self._agent.ainvoke({"messages": [human]}, config=config)
+        result = await self._agent.ainvoke({"messages": [system, human]}, config=config)
 
         ai_content = ""
         if isinstance(result, dict):
@@ -171,13 +181,18 @@ class LangGraphRunner(ChatRunnerProtocol):
         if not ai_content:
             ai_content = "I'm sorry, I couldn't produce a response."
 
+        citations = runtime.last_retrieval.citations if runtime.last_retrieval else []
+        if not citations:
+            raise GatewayError(
+                code="MISSING_CITATIONS",
+                message="Unable to produce cited answer; retrieval did not yield citations.",
+                status_code=502,
+            )
+
         await convo_service.append_message(
             conversation_id=request.conversation_id,
             role="assistant",
-            content={
-                "content": ai_content,
-                "citations": (runtime.last_retrieval.citations if runtime.last_retrieval else []),
-            },
+            content={"content": ai_content, "citations": citations},
         )
 
         if sse_emitter:
@@ -191,7 +206,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             "answer": ai_content,
             "thread_id": request.thread_id,
             "route": "react",
-            "citations": runtime.last_retrieval.citations if runtime.last_retrieval else [],
+            "citations": citations,
             "requires_sql": False,
         }
         messages = [{"role": "assistant", "content": ai_content}]
