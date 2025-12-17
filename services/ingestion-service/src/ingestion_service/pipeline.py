@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import logging
 import os
 import re
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
-from markitdown import FileConversionException, MarkItDown, UnsupportedFormatException
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.maintenance import (
     refresh_active_chunks_view,
@@ -30,6 +31,37 @@ from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Setting
 from ingestion_service.schemas import UploadInitRequest
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _disable_speech_recognition_import() -> Any:
+    """Temporarily block speech_recognition to avoid deprecated aifc shim."""
+
+    original_import = builtins.__import__
+
+    def _guard(name: str, globals=None, locals=None, fromlist=(), level: int = 0):
+        if name == "speech_recognition":
+            raise ModuleNotFoundError(
+                "speech_recognition disabled for text-only ingestion"
+            )
+        return original_import(name, globals, locals, fromlist, level)
+
+    builtins.__import__ = _guard
+    try:
+        yield
+    finally:
+        builtins.__import__ = original_import
+
+
+def _load_markitdown():
+    with _disable_speech_recognition_import():
+        from markitdown import (
+            FileConversionException,
+            MarkItDown,
+            UnsupportedFormatException,
+        )
+
+    return FileConversionException, MarkItDown, UnsupportedFormatException
 
 
 class IngestionError(RuntimeError):
@@ -192,7 +224,12 @@ class MarkdownConverter:
     """Wraps MarkItDown with a conversion convenience helper."""
 
     def __init__(self) -> None:
-        self._converter = MarkItDown()
+        (
+            self._FileConversionException,
+            self._MarkItDown,
+            self._UnsupportedFormatException,
+        ) = _load_markitdown()
+        self._converter = self._MarkItDown()
 
     def convert(self, *, data: bytes, suffix: str) -> tuple[str, dict[str, Any]]:
         with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
@@ -201,7 +238,10 @@ class MarkdownConverter:
             path = tmp.name
         try:
             result = self._converter.convert(path)
-        except (UnsupportedFormatException, FileConversionException) as exc:
+        except (
+            self._UnsupportedFormatException,
+            self._FileConversionException,
+        ) as exc:
             raise IngestionError(f"Conversion failed: {exc}") from exc
         finally:
             try:
