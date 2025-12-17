@@ -31,7 +31,6 @@ COPY --from=builder /app/services/user-service/app ./app
 COPY --from=builder /app/services/user-service/run.py ./run.py
 COPY --from=builder /app/services/user-service/pyproject.toml ./pyproject.toml
 COPY --from=builder /app/services/user-service/requirements ./requirements
-COPY --from=builder /app/services/user-service/README.md ./README.md
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app/services/user-service
 USER appuser
 EXPOSE 5001

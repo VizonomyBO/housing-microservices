@@ -15,12 +15,7 @@ from app.utils.validators import (
     validate_username,
 )
 
-AUTO_ACTIVATE_USERS = os.getenv("AUTO_ACTIVATE_USERS", "1").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+AUTO_ACTIVATE_USERS = os.getenv("AUTO_ACTIVATE_USERS", "0").lower() in {"1", "true", "yes", "on"}
 
 
 class UserService:
@@ -71,24 +66,6 @@ class UserService:
         # Check if email already exists
         existing_user = session.query(User).filter_by(email=normalized_email).first()
         if existing_user:
-            if AUTO_ACTIVATE_USERS:
-                try:
-                    existing_user.status = "active"  # type: ignore[assignment]
-                    existing_user.email_verified = True  # type: ignore[assignment]
-                    existing_user.password_hash = hash_password(password)  # type: ignore[assignment]
-                    existing_user.first_name = (
-                        sanitize_string(first_name, 100) if first_name else existing_user.first_name
-                    )  # type: ignore[assignment]
-                    existing_user.last_name = (
-                        sanitize_string(last_name, 100) if last_name else existing_user.last_name
-                    )  # type: ignore[assignment]
-                    existing_user.country_code = country_code  # type: ignore[assignment]
-                    existing_user.role = role  # type: ignore[assignment]
-                    session.commit()
-                    return existing_user, None
-                except Exception as exc:  # pragma: no cover - defensive
-                    session.rollback()
-                    return None, f"Failed to update existing user: {exc!s}"
             return None, "Email already registered"
 
         # Check if username already exists (by checking email prefix)

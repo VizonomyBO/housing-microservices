@@ -36,5 +36,5 @@ class GUID(TypeDecorator):
         if value is None:
             return value
         if isinstance(value, uuid.UUID):
-            return value
-        return uuid.UUID(str(value))
+            return str(value)
+        return str(uuid.UUID(str(value)))

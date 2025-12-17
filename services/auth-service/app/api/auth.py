@@ -532,7 +532,6 @@ async def forgot_password(
                             to_email=payload.email,
                             reset_url=reset_url,
                             token=reset_token,
-                            user_name=user.first_name or "",
                         )
                     except Exception:
                         logger.exception(

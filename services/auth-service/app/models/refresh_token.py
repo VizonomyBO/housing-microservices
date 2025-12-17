@@ -46,10 +46,9 @@ class RefreshToken(Base):  # type: ignore[misc,valid-type]
 
     def to_dict(self):
         """Convert token to dictionary"""
-        user_id = str(self.user_id) if self.user_id is not None else None
         return {
             "id": self.id,
-            "user_id": user_id,
+            "user_id": str(self.user_id) if self.user_id is not None else None,
             "is_revoked": self.is_revoked,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,

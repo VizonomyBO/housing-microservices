@@ -77,7 +77,7 @@ def create_api_app(config_class: type[Config] = Config) -> FastAPI:
     fastapi_app.add_middleware(
         AuthMiddleware,
         auth_service_url=_resolve_auth_base_url(),
-        mock_validation=getattr(config_obj, "TESTING", False),
+        mock_validation=os.getenv("MOCK_AUTH_VALIDATION", "false").lower() == "true",
         use_direct_validation=True,  # Use direct validation since we're in the same service
     )
 
