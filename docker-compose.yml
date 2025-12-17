@@ -26,19 +26,22 @@ services:
       timeout: 5s
       retries: 10
 
-  db-init:
+  init-migrations:
     <<: *service-defaults
     build:
       context: .
-      dockerfile: services/agent-api/Dockerfile.reduced
-    container_name: db-init
+      dockerfile: docker/init-migrations/Dockerfile
+    container_name: init-migrations
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
-    command: >-
-      bash -c "uv run python /app/packages/shared_data_layer/src/shared_data_layer/manage.py migrate"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
+      DB_HOST: ${DB_HOST_INTERNAL:-postgres}
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-housing}
+      DB_USER: ${POSTGRES_USER:-vizonomy_user}
+      REVISION: ${ALEMBIC_REVISION:-head}
     restart: "no"
 
   localstack:
@@ -130,12 +133,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      init-migrations:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
     ports:
       - "${INGESTION_SERVICE_PORT:-8085}:8085"
     environment:
-      DATABASE_URL: ${HOUSING_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret}
       AUTH_BASE_URL: ${AUTH_INTERNAL_BASE_URL:-${AUTH_BASE_URL:-http://auth-service:5000}}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
@@ -163,7 +168,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      db-init:
+      init-migrations:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy
@@ -176,7 +181,7 @@ services:
     environment:
       STACK_PROFILE: ${STACK_PROFILE:-dev}
       SERVICE_MODE: ${SERVICE_MODE:-dev}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-housing}}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
       INGEST_BASE_URL: ${AGENT_INGEST_BASE_URL:-http://ingestion-service:8085}
       INGEST_UPLOAD_API_KEY: ${INGEST_UPLOAD_API_KEY:-}
       METRICS_NAMESPACE: ${METRICS_NAMESPACE:-agent-api}

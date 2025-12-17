@@ -28,6 +28,12 @@ ENV_FILE="$env_file" ./scripts/deploy_stack.sh --mode services-only
 ```
 Options: `--destroy-first` (confirmation required), `--no-sync`, `--no-build`, `--host`, `--ssh-key`, `--patch-file` (hot-patch path).
 
+### DB + migrations
+- Postgres runs from `pgvector/pgvector:pg16` with `scripts/init-databases.sh` creating `housing` + `auth_db`.
+- A one-shot `init-migrations` service (built from `docker/init-migrations/Dockerfile`) waits for Postgres and runs `shared_data_layer.manage migrate --revision head` before Agent API/ingestion start (`depends_on: condition: service_completed_successfully`).
+- For a clean slate, drop the compose volume before redeploy:  
+  `sudo docker compose --env-file .env.prod -f docker-compose.ec2.yml down --remove-orphans --volumes && sudo docker volume rm vizonomy-prod_repo_postgres_data repo_postgres_data || true`
+
 ### One-shot deploy + smoke
 Deploy the ingestion-first stack (services-only by default) and immediately run the prod smoke with the FSAP PDF:
 ```bash

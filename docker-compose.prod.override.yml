@@ -1,20 +1,25 @@
 services:
   auth-service:
     environment:
-      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL}
+      AUTH_DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${AUTH_DB:-auth_db}
 
   user-service:
     environment:
-      AUTH_DATABASE_URL: ${AUTH_DATABASE_URL}
+      AUTH_DATABASE_URL: postgresql://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${AUTH_DB:-auth_db}
 
   ingestion-service:
     environment:
-      DATABASE_URL: ${HOUSING_DATABASE_URL:-${DATABASE_URL}}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
 
   agent-api:
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
 
-  db-init:
+  init-migrations:
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vizonomy_user}:${POSTGRES_PASSWORD:-postgres}@${DB_HOST_INTERNAL:-postgres}:5432/${POSTGRES_DB:-housing}
+      DB_HOST: ${DB_HOST_INTERNAL:-postgres}
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-housing}
+      DB_USER: ${POSTGRES_USER:-vizonomy_user}
+      REVISION: ${ALEMBIC_REVISION:-head}
