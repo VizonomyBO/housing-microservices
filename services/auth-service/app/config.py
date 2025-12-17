@@ -34,6 +34,8 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         seconds=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES", 2592000))
     )
+    JWT_ISSUER = os.getenv("AUTH_JWT_ISSUER")
+    JWT_AUDIENCE = os.getenv("AUTH_JWT_AUDIENCE")
 
     # Security
     SECRET_KEY = os.getenv("SECRET_KEY", os.urandom(32))

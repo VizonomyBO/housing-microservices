@@ -13,7 +13,7 @@ dependencies = [
   "alembic>=1.13.2",
   "shared-data-layer",
   "openai>=1.42.0",
-  "voyageai>=0.3.5",
+  "voyageai>=0.3.7",
   "langgraph>=1.0.5",
   "langchain>=1.2.0",
   "langchain-openai>=1.1.4",
@@ -25,6 +25,7 @@ dependencies = [
   "pgvector>=0.2.5",
   "testcontainers>=4.7.2",
   "polyfactory>=2.0.0",
+  "langchain-voyageai>=0.3.0",
 ]
 
 [project.optional-dependencies]

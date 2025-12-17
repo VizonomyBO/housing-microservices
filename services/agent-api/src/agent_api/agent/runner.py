@@ -80,7 +80,7 @@ class LangGraphRunner(ChatRunnerProtocol):
         self._llm = llm_factory(
             api_key=settings.openai_api_key,
             model=settings.openai_chat_model,
-            temperature=0.2,
+            temperature=0.1,
         )
         self._chat_client = OpenAIChatClient(
             api_key=settings.openai_api_key or "", model=settings.openai_chat_model

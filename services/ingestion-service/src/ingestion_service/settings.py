@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     jwt_secret_key: str | None = Field(
         default=None, description="JWT secret for access tokens"
     )
+    jwt_audience: str | None = Field(
+        default=None, alias="AUTH_JWT_AUDIENCE", description="Expected JWT audience"
+    )
+    jwt_issuer: str | None = Field(
+        default=None, alias="AUTH_JWT_ISSUER", description="Expected JWT issuer"
+    )
     auth_base_url: AnyUrl | None = Field(
         default=None,
         description="Auth service base URL for token verification fallback",

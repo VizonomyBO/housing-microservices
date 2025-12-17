@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.maintenance import (
     refresh_active_chunks_view,
@@ -81,7 +82,7 @@ class ChunkPayload:
 
 
 class MarkdownChunker:
-    """Simple markdown chunker mirroring the agent-api embedding writer."""
+    """Markdown chunker using LangChain's RecursiveCharacterTextSplitter."""
 
     TARGET_TOKENS = 500
     # Keep max at or below DB constraint ck_chunks_token_limit (800)
@@ -89,93 +90,68 @@ class MarkdownChunker:
     MIN_TOKENS = 50
     OVERLAP_TOKENS = 50
     CHARS_PER_TOKEN = 4
+    CHUNK_SIZE_CHARS = 1200
+    CHUNK_OVERLAP_CHARS = 200
 
-    PAGE_PATTERN = re.compile(r"^##?\s+Page\s+(?P<page>\d+)", re.IGNORECASE)
-    HEADER_PATTERN = re.compile(r"^#{1,3}\s+(?P<header>.+)")
+    PAGE_PATTERN = re.compile(r"Page\s+(?P<page>\d+)", re.IGNORECASE)
+    HEADER_PATTERN = re.compile(r"^#{1,3}\s+(?P<header>.+)", re.MULTILINE)
     SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+")
+
+    def __init__(self) -> None:
+        self._splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.CHUNK_SIZE_CHARS,
+            chunk_overlap=self.CHUNK_OVERLAP_CHARS,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
 
     def chunk(self, document_id: str, content: str) -> list[ChunkPayload]:
         if not content.strip():
             return []
-        segments = re.split(r"(\n##?\s+Page\s+\d+|\n#{1,3}\s+[^\n]+)", content)
-        current_text = ""
-        current_page = 1
-        current_header: str | None = None
-        chunk_index = 0
+
+        raw_chunks = self._splitter.split_text(content)
         chunks: list[ChunkPayload] = []
 
-        for segment in segments:
-            if not segment:
+        for idx, raw in enumerate(raw_chunks):
+            normalized = raw.strip()
+            if not normalized:
                 continue
-            page_match = self.PAGE_PATTERN.match(segment.strip())
-            if page_match:
-                current_page = int(page_match.group("page"))
-                continue
-            header_match = self.HEADER_PATTERN.match(segment.strip())
-            if header_match:
-                current_header = header_match.group("header").strip()
-            current_text += segment
-            if self._token_estimate(current_text) >= self.TARGET_TOKENS:
-                chunks.append(
-                    self._build_chunk(
-                        document_id,
-                        chunk_index,
-                        current_text,
-                        current_page,
-                        current_header,
-                    )
-                )
-                chunk_index += 1
-                overlap_chars = self.OVERLAP_TOKENS * self.CHARS_PER_TOKEN
-                current_text = current_text[-overlap_chars:]
 
-        if (
-            current_text.strip()
-            and self._token_estimate(current_text) >= self.MIN_TOKENS
-        ):
+            header, page_number = self._extract_metadata(normalized)
+            propositions = self._propositionize(normalized)
+            token_count = min(self._token_estimate(normalized), self.MAX_TOKENS)
+            content_hash = hashlib.sha256(
+                f"{document_id}:{idx}:{normalized}".encode()
+            ).hexdigest()
+
             chunks.append(
-                self._build_chunk(
-                    document_id,
-                    chunk_index,
-                    current_text,
-                    current_page,
-                    current_header,
+                ChunkPayload(
+                    content=normalized,
+                    chunk_index=idx,
+                    token_count=token_count,
+                    page_number=page_number,
+                    section_title=header,
+                    content_hash=content_hash,
+                    contextual_text=self._build_contextual_text(
+                        normalized,
+                        header=header,
+                        page_number=page_number,
+                        propositions=propositions,
+                    ),
+                    propositions=propositions,
                 )
             )
+
         return chunks
 
     def _token_estimate(self, text: str) -> int:
         return max(1, len(text) // self.CHARS_PER_TOKEN)
 
-    def _build_chunk(
-        self,
-        document_id: str,
-        chunk_index: int,
-        text: str,
-        page_number: int | None,
-        header: str | None,
-    ) -> ChunkPayload:
-        normalized = text.strip()
-        token_count = min(self._token_estimate(normalized), self.MAX_TOKENS)
-        content_hash = hashlib.sha256(
-            f"{document_id}:{chunk_index}:{normalized}".encode()
-        ).hexdigest()
-        propositions = self._propositionize(normalized)
-        return ChunkPayload(
-            content=normalized,
-            chunk_index=chunk_index,
-            token_count=token_count,
-            page_number=page_number,
-            section_title=header,
-            content_hash=content_hash,
-            contextual_text=self._build_contextual_text(
-                normalized,
-                header=header,
-                page_number=page_number,
-                propositions=propositions,
-            ),
-            propositions=propositions,
-        )
+    def _extract_metadata(self, text: str) -> tuple[str | None, int | None]:
+        header_match = self.HEADER_PATTERN.search(text)
+        page_match = self.PAGE_PATTERN.search(text)
+        header = header_match.group("header").strip() if header_match else None
+        page_number = int(page_match.group("page")) if page_match else None
+        return header, page_number
 
     def _build_contextual_text(
         self,
@@ -198,25 +174,21 @@ class MarkdownChunker:
             parts.append("Propositions:")
             parts.extend(f"- {p}" for p in propositions[:3])
             parts.append(f"Hypothesis: {propositions[0]}")
-        parts.append("Content:")
-        parts.append(text)
+            parts.append("Content:")
+        parts.append(text.strip())
         return "\n".join(parts)
 
     def _propositionize(self, text: str) -> list[str]:
-        sentences = [
-            s.strip()
-            for s in self.SENTENCE_PATTERN.split(text)
-            if s and len(s.strip()) > 12
-        ]
-        if not sentences and text:
-            return [text[:200].strip()]
+        sentences = [s.strip() for s in self.SENTENCE_PATTERN.split(text) if s.strip()]
         propositions: list[str] = []
-        for sentence in sentences:
-            clean = re.sub(r"\s+", " ", sentence).strip().rstrip(".")
-            if clean:
-                propositions.append(clean)
-            if len(propositions) >= 4:
-                break
+        for sentence in sentences[:5]:
+            if len(sentence) < 12:
+                continue
+            if not sentence.endswith((".", "?", "!")):
+                sentence = sentence + "."
+            propositions.append(sentence)
+        if not propositions and text:
+            propositions = [text.strip()[:200]]
         return propositions
 
 
@@ -278,6 +250,7 @@ class IngestionPipeline:
         self._voyage: VoyageEmbeddingClientProtocol | None = VoyageEmbeddingClient(
             api_key=settings.voyage_api_key,
             model=settings.voyage_model,
+            output_dimension=self._default_output_dimension,
         )
 
     async def ingest_file(
@@ -503,11 +476,14 @@ class IngestionPipeline:
         )
         embeddings: Sequence[Sequence[float]] | None = None
         if self._voyage:
-            embeddings = await self._voyage.embed(
-                [chunk.contextual_text for chunk in chunks],
-                output_dimension=output_dimension,
-                input_type="document",
-            )
+            try:
+                embeddings = await self._voyage.embed(
+                    [chunk.contextual_text for chunk in chunks],
+                    output_dimension=output_dimension,
+                    input_type="document",
+                )
+            except ValueError as exc:
+                raise IngestionError(str(exc)) from exc
         if not embeddings:
             raise IngestionError("Voyage embeddings could not be generated")
         if len(embeddings) != len(chunks):

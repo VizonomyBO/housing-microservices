@@ -29,6 +29,26 @@ curl -fsS http://localhost:${LOCALSTACK_EDGE_PORT:-4566}/_localstack/health
 See `QUICKSTART.md` for the inline upload/attach/chat snippet or run the prod-mode helper against AWS:  
 `ENV_FILE=.env.prod ./scripts/prod_smoke_check.sh | tee /tmp/prod_smoke_$(date +%s).log`
 
+## Local end-to-end smoke script
+- Prereqs: compose stack up with `.env.local`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`.
+- Run:  
+  ```bash
+  env_file=$(scripts/use_env.sh local)
+  ENV_FILE="$env_file" ./scripts/local_smoke.sh
+  ```
+  (or `uv run bash scripts/local_smoke.sh`).
+- Flow: registers a throwaway user, logs in, ingests docs from `services/agent-api/evals/data`, polls for activation, creates a conversation, bulk-attaches docs, asks grounded questions, and fails fast if answers are empty or lack citations.
+- Output: JSON report at `local_smoke_report.json` with document IDs and Q/A details.
+
+## Dev live-reload (faster local loops)
+- Use the dev override to bind-mount code and enable reload:  
+  ```bash
+  env_file=$(scripts/use_env.sh local)
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file "$env_file" up -d
+  ```
+- Mounts: agent-api, ingestion-service, auth-service, and user-service source directories (plus shared_data_layer) are live-mounted into containers; uvicorn reloads on save.
+- Rebuild images only when deps change (`pyproject.toml`/`uv.lock`); otherwise edits reload automatically.
+
 ## Stop/Clean
 ```bash
 docker compose --env-file "$env_file" down              # keep volumes

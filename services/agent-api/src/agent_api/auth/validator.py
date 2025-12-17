@@ -42,15 +42,27 @@ class AuthTokenValidator:
 
     async def validate(self, token: str) -> AuthContext:
         options = {"verify_aud": bool(self._settings.audience)}
+        algorithms = list(self._settings.algorithms)
+        shared_secret = (self._settings.shared_secret or "").strip()
         try:
-            claims = jwt.decode(
-                token,
-                key=self._get_key,
-                algorithms=list(self._settings.algorithms),
-                audience=self._settings.audience,
-                issuer=self._settings.issuer,
-                options=options,
-            )
+            if shared_secret:
+                claims = jwt.decode(
+                    token,
+                    key=shared_secret,
+                    algorithms=algorithms,
+                    audience=self._settings.audience,
+                    issuer=self._settings.issuer,
+                    options=options,
+                )
+            else:
+                claims = jwt.decode(
+                    token,
+                    key=self._get_key,
+                    algorithms=algorithms,
+                    audience=self._settings.audience,
+                    issuer=self._settings.issuer,
+                    options=options,
+                )
         except ExpiredSignatureError as exc:
             raise AuthValidationError("Token expired", status_code=401) from exc
         except JWTError as exc:

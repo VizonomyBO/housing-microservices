@@ -171,6 +171,8 @@ class AuthService:
 
             expires = _get_jwt_access_token_expires(config)
             secret_key = _get_jwt_secret_key(config)
+            issuer = getattr(config, "JWT_ISSUER", None) if config else os.getenv("AUTH_JWT_ISSUER")
+            audience = getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
 
             payload = {
                 "user_id": user_id_str,
@@ -180,6 +182,10 @@ class AuthService:
                 "iat": datetime.now(UTC),
                 "type": "access",
             }
+            if issuer:
+                payload["iss"] = issuer
+            if audience:
+                payload["aud"] = audience
 
             encoded = jwt.encode(payload, secret_key, algorithm="HS256")
             # jwt.encode can return str or bytes depending on version
@@ -215,6 +221,7 @@ class AuthService:
 
             expires = _get_jwt_refresh_token_expires(config)
             secret_key = _get_jwt_secret_key(config)
+            issuer = getattr(config, "JWT_ISSUER", None) if config else os.getenv("AUTH_JWT_ISSUER")
 
             payload = {
                 "user_id": user_id_str,
@@ -223,6 +230,8 @@ class AuthService:
                 "type": "refresh",
                 "jti": secrets.token_urlsafe(16),  # Unique token ID to prevent duplicates
             }
+            if issuer:
+                payload["iss"] = issuer
 
             encoded = jwt.encode(payload, secret_key, algorithm="HS256")
             # jwt.encode can return str or bytes depending on version

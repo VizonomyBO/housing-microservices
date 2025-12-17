@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  agent-api:
+    volumes:
+      - ./services/agent-api/src:/app/services/agent-api/src
+      - ./packages/shared_data_layer:/app/packages/shared_data_layer
+    command:
+      - /bin/sh
+      - -c
+      - |
+        . /app/.venv/bin/activate && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  ingestion-service:
+    volumes:
+      - ./services/ingestion-service/src:/app/services/ingestion-service/src
+      - ./packages/shared_data_layer:/app/packages/shared_data_layer
+    command:
+      - uvicorn
+      - ingestion_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8085"
+      - --reload
+
+  auth-service:
+    volumes:
+      - ./services/auth-service/app:/app/services/auth-service/app
+    environment:
+      DEBUG: "true"
+
+  user-service:
+    volumes:
+      - ./services/user-service/app:/app/services/user-service/app
+    environment:
+      RELOAD: "true"

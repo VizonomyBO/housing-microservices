@@ -68,8 +68,17 @@ def verify_token_direct(token: str, config: "Config | None" = None) -> Validatio
             return None, "Token verification configuration error"
 
         # Decode and verify token
+        audience = getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
+        issuer = getattr(config, "JWT_ISSUER", None) if config else os.getenv("AUTH_JWT_ISSUER")
         try:
-            payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+            payload = jwt.decode(
+                token,
+                secret_key,
+                algorithms=["HS256"],
+                audience=audience,
+                issuer=issuer,
+                options={"verify_aud": bool(audience)},
+            )
         except jwt.ExpiredSignatureError:
             logger.warning("Token verification failed: token expired")
             return None, "Token has expired"

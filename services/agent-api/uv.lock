@@ -14,6 +14,7 @@ dependencies = [
     { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-openai" },
+    { name = "langchain-voyageai" },
     { name = "langgraph" },
     { name = "numpy" },
     { name = "openai" },
@@ -63,6 +64,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "langchain", specifier = ">=1.2.0" },
     { name = "langchain-openai", specifier = ">=1.1.4" },
+    { name = "langchain-voyageai", specifier = ">=0.3.0" },
     { name = "langgraph", specifier = ">=1.0.5" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "openai", specifier = ">=1.42.0" },
@@ -83,7 +85,7 @@ requires-dist = [
     { name = "testcontainers", marker = "extra == 'dev'", specifier = ">=4.7.2" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a28" },
     { name = "uvicorn", specifier = ">=0.30.0" },
-    { name = "voyageai", specifier = ">=0.3.5" },
+    { name = "voyageai", specifier = ">=0.3.7" },
 ]
 provides-extras = ["dev"]
 
@@ -913,6 +915,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/41/42/c178dcdc157b473330eb7cc30883ea69b8ec60078c7b85e2d521054c4831/langchain_text_splitters-1.1.0.tar.gz", hash = "sha256:75e58acb7585dc9508f3cd9d9809cb14751283226c2d6e21fb3a9ae57582ca22", size = 272230 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/1a/a84ed1c046deecf271356b0179c1b9fba95bfdaa6f934e1849dee26fad7b/langchain_text_splitters-1.1.0-py3-none-any.whl", hash = "sha256:f00341fe883358786104a5f881375ac830a4dd40253ecd42b4c10536c6e4693f", size = 34182 },
+]
+
+[[package]]
+name = "langchain-voyageai"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langchain-core" },
+    { name = "pydantic" },
+    { name = "voyageai" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/83/64d10bf650280f99b687bf313f24c9851a1b21c14dd32e523ac900e3c3fd/langchain_voyageai-0.3.0.tar.gz", hash = "sha256:b3d4c2944eee3b71478bb1ed224b192bde79f7fb027ed7ed5419c09cf0516fbf", size = 11625 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/24/4775126d96217598fc2e950915e2e71f696dd1c2ace4be81d9bba84b27fd/langchain_voyageai-0.3.0-py3-none-any.whl", hash = "sha256:f0de520359f3aaef7c3a74fa5fa2de92649f4d29342bd2454c11f30332471748", size = 6610 },
 ]
 
 [[package]]

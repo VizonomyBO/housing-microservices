@@ -31,7 +31,14 @@ def _decode_locally(token: str, settings: Settings) -> UserContext:
     if not secret:
         raise AuthError("JWT secret not configured")
     try:
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience=settings.jwt_audience,
+            issuer=settings.jwt_issuer,
+            options={"verify_aud": bool(settings.jwt_audience)},
+        )
     except jwt.ExpiredSignatureError as exc:
         raise AuthError("Token expired") from exc
     except jwt.InvalidTokenError as exc:

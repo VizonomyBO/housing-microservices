@@ -40,12 +40,13 @@ async def retrieve_documents(query: str) -> str:
         conversation_id=runtime.conversation_id,
     )
     runtime.last_retrieval = ctx
-    payload = {
-        "context": ctx.context_text,
-        "citations": ctx.citations,
-        "attachments": [_serialize_attachment(att) for att in ctx.attachments],
-    }
-    return json.dumps(payload)
+    attachments = [_serialize_attachment(att) for att in ctx.attachments]
+    return (
+        "Context blocks labeled [c#] (use these citations in the final answer):\n"
+        f"{ctx.context_text}\n\n"
+        f"Citations: {json.dumps(ctx.citations)}\n"
+        f"Attachments: {json.dumps(attachments)}"
+    )
 
 
 @tool("document_status", return_direct=False)
