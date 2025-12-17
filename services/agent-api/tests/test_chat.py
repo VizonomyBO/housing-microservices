@@ -1,13 +1,15 @@
 import json
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from shared_data_layer.db.models.conversations import Message
 from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from sqlalchemy import select
 
 from agent_api.services.conversations import ConversationService
+from agent_api.agent.runner import LangGraphRunner
+from agent_api.http.deps import get_runner
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -71,6 +73,44 @@ async def test_chat_uses_runner_and_persists_messages(
     assert "assistant" in roles
 
 
+@pytest.fixture
+async def client_real_runner(app):
+    transport = ASGITransport(app=app, raise_app_exceptions=True)
+    # Override runner to use real LangGraphRunner so attachment checks apply.
+    app.dependency_overrides[get_runner] = lambda: LangGraphRunner(settings=app.state.settings)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+async def test_chat_requires_attachments(
+    client_real_runner: AsyncClient,
+    db_session,
+    test_user_id: str,
+):
+    conversation = await ConversationService(db_session).ensure_conversation(
+        owner_user_id=test_user_id,
+        country_code="USA",
+        title="chat-no-docs",
+        namespace="default",
+        tags=[],
+        metadata=None,
+    )
+    await db_session.commit()
+
+    resp = await client_real_runner.post(
+        "/v1/chat",
+        json={
+            "thread_id": str(conversation.id),
+            "message": {"type": "user", "content": "hi", "attachments": []},
+            "constraints": {"country_code": "USA"},
+            "response_mode": "blocking",
+        },
+    )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body.get("error", {}).get("code") == "ATTACHMENTS_REQUIRED"
+
+
 def _parse_sse_events(lines: list[str]) -> list[dict]:
     events: list[dict] = []
     current: dict[str, object] = {}
@@ -111,4 +151,3 @@ async def test_chat_streaming_emits_meta_and_done(client: AsyncClient, db_sessio
     done_payload = done_event["data"]["payload"]
     assert done_payload["status"] == "COMPLETED"
     assert done_payload["thread_id"]
-
