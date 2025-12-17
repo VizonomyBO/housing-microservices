@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -36,11 +37,9 @@ from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Ingestion Service", version="0.1.0")
 
-
-@app.on_event("startup")
-async def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.basicConfig(
         level=logging.INFO,
@@ -49,11 +48,13 @@ async def _startup() -> None:
     await init_engine(settings)
     app.state.pipeline = IngestionPipeline(settings)
     logger.info("Ingestion service initialized")
+    try:
+        yield
+    finally:
+        await dispose_engine()
 
 
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await dispose_engine()
+app = FastAPI(title="Ingestion Service", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health", include_in_schema=False)
