@@ -16,6 +16,8 @@ Validate the AWS path after the FastAPI ingestion replacement while keeping LLM 
 - **Retrieval & Eval Hardening**: Hybrid BM25 + vector with Voyage embeddings + rerank (`voyage-3-large` + `rerank-2.5`) is required (no optional fallback), HyDE-style rewrites, numeric-aware citation scoring, structured `[c#]` footnotes, and raised eval thresholds. `reembed-chunks` CLI refreshes embeddings.
 - **Fail-fast dependencies**: OPENAI/Voyage/Valkey/rate limiter are required by default; bypass flags (`ALLOW_IN_MEMORY_VALKEY`, `ALLOW_RATE_LIMITER_BYPASS`, etc.) are test-only.
 - **Attachment safety**: Documents stay blocked until ingestion is active; `/v1/chat` enforces UUID ownership for `thread_id`, with optional stateless mode.
+- **LangChain integrations**: Agent and ingestion now use LangChain Voyage integrations (embeddings/rerank) and LangChain text splitters (RecursiveCharacterTextSplitter) instead of bespoke clients/splitters.
+- **Dev reload compose**: `docker-compose.dev.yml` bind-mounts code for agent-api/ingestion/auth/user/shared_data_layer and runs services with reload; rebuild is only needed when dependencies change.
 
 ## Next Steps
 1. Run `scripts/prod_smoke_check.sh` in AWS mode and capture command/output.

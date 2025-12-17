@@ -5,6 +5,7 @@
 - Before coding, create a task-specific plan file in the repo root (e.g., `TASK_PLAN_<slug>.md`) with summary, impacted files, risks, ordered steps, and sources; plans are auto-approved. Create a matching tracker file to check off steps. Delete both when the task is done unless the task explicitly says to retain them.
 - Start research with Context7 or web sources; cite URLs/doc IDs in the plan. Avoid guessing—quote the reference when behavior is non-obvious.
 - Keep the tracker in sync as you work; run verification (tests/linters) before calling a task review-ready.
+- Prefer existing libraries/integrations over bespoke code (e.g., langchain-voyageai, LangChain splitters) whenever available; do not reimplement client/splitter logic already provided by maintained packages.
 
 ## 2) Project Overview (check memory bank)
 - Services: FastAPI Agent API (ReAct with tools), FastAPI ingestion service (text-only sync), Flask auth-service, Flask user-service; optional Swagger is deprecated.

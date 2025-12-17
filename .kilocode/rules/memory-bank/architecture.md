@@ -23,13 +23,13 @@ flowchart LR
 ## Component Details
 
 ### Agent API
-- **Tech**: FastAPI, LangGraph, Pydantic v2, SQLAlchemy 2.x, Voyage embeddings/rerankers (required).
+- **Tech**: FastAPI, LangGraph, Pydantic v2, SQLAlchemy 2.x, langchain-voyageai embeddings/rerankers (required).
 - **Responsibilities**: Chat/SSE, attachments, hybrid retrieval (BM25 + vector + rerank), citation-rich responses, conversation ownership (UUID `thread_id`). `/v1/documents/upload` is a proxy to the ingestion service; no inline ingestion path remains.
 - **Persistence**: Uses shared data layer models/repos against `housing` DB.
 
 ### Ingestion Service
-- **Tech**: FastAPI (Python 3.13 via `uv`), MarkItDown, Voyage embeddings (required).
-- **Flow**: Upload → MarkItDown extraction → chunk → embed → pgvector index → activate document.
+- **Tech**: FastAPI (Python 3.13 via `uv`), MarkItDown, langchain-voyageai embeddings, LangChain text splitter (RecursiveCharacterTextSplitter).
+- **Flow**: Upload → MarkItDown extraction → chunk (LangChain) → embed (Voyage) → pgvector index → activate document.
 - **Deployment**: EC2 service at `INGEST_BASE_URL` (default `http://52.207.140.87:8085`); replaces Lambda/S3 path and is the only supported ingestion path.
 
 ### Auth Service
@@ -50,6 +50,6 @@ flowchart LR
 - **Databases**: `housing` (Agent API/shared) and `auth_db` (auth/user); keep schemas separate.
 
 ## Deployment Model
-- **Local reduced**: Agent API + Postgres (LocalStack optional/deferred) via Compose profiles; defaults are AWS-first.
+- **Local reduced**: Agent API + Postgres (LocalStack optional/deferred) via Compose profiles; defaults are AWS-first. Dev reload available via `docker-compose.dev.yml` with bind mounts; rebuild only for dependency changes.
 - **Hybrid dev**: Local services pointing at cloud Postgres/S3 using `.env.dev` and `docker-compose.ec2.yml`.
 - **Prod/AWS**: EC2-hosted services via `ENV_FILE=.env.prod ./scripts/deploy_prod_stack.sh`; smoke with `./scripts/prod_smoke_check.sh`.

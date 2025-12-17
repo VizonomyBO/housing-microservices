@@ -8,7 +8,7 @@
 - **ORM**: SQLAlchemy 2.x (async support for Agent API/ingestion).
 - **Validation**: Pydantic v2.
 - **Auth**: Argon2-cffi for hashing, PyJWT for tokens, Flask-Limiter for rate limits.
-- **LLM/Retrieval**: LangChain v1 `create_agent` ReAct loop running on LangGraph runtime + MemorySaver checkpointing; Voyage embeddings (`voyage-3-large`) + `rerank-2.5` (required); MarkItDown for extraction; hybrid BM25+vector via shared data layer repos.
+- **LLM/Retrieval**: LangChain v1 `create_agent` ReAct loop running on LangGraph runtime + MemorySaver checkpointing; Voyage embeddings (`voyage-context-3`/`voyage-3-large`) and `rerank-2.5` via langchain-voyageai; LangChain RecursiveCharacterTextSplitter for chunking; MarkItDown for extraction; hybrid BM25+vector via shared data layer repos.
 
 ### Shared Data Layer
 - **Path**: `packages/shared_data_layer`
@@ -23,7 +23,7 @@
 - **Logical DBs**: `housing` (Agent/shared data layer) and `auth_db` (auth/user).
 
 ## Infrastructure & DevOps
-- **Docker Compose** for local, hybrid dev (`docker-compose.ec2.yml`), and prod profiles (defaults AWS-first; LocalStack opt-in).
+- **Docker Compose** for local, dev-reload, hybrid (`docker-compose.ec2.yml`), and prod profiles (defaults AWS-first; LocalStack opt-in). `docker-compose.dev.yml` bind-mounts code and runs uvicorn reload so rebuilds are only needed on dependency changes.
 - **AWS**: EC2-hosted services; S3 used in prod (LocalStack mocked locally when available).
 - **Patch deploys**: Hot-patch via `scp` + `docker cp` + compose restart (see AGENTS.md §7).
 - **Fail-fast defaults**: OPENAI + Voyage, Valkey, and rate limiting are required unless explicit test-only bypass flags are set.
