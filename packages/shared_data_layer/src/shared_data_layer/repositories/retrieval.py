@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.db.models.retrieval import PillarAnswer
 from shared_data_layer.repositories.base import BaseRepository
@@ -63,10 +64,13 @@ class PillarAnswerRepository(BaseRepository[PillarAnswer]):
         if document.access_scope == "base":
             return
 
+        if document.owner_user_id in (None, SYSTEM_OWNER_SENTINEL):
+            return
+
         if owner_user_id is None:
             raise ValueError("owner_user_id is required for non-base pillar answers")
 
-        if document.owner_user_id != owner_user_id:
+        if document.owner_user_id not in (owner_user_id, SYSTEM_OWNER_SENTINEL):
             raise ValueError(
                 "owner_user_id must match the document owner for non-base answers"
             )

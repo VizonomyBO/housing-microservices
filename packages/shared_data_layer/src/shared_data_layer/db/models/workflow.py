@@ -22,6 +22,11 @@ from shared_data_layer.db.ltree import LtreeType
 
 
 class WorkflowGraph(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated workflow graph storage. Retained for backward compatibility; text-only
+    RAG should not create new workflow graphs.
+    """
+
     __tablename__ = "workflow_graphs"
 
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -45,10 +50,16 @@ class WorkflowGraph(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint(
             "domain", "country_code", "version", name="uq_workflow_graphs_scope_version"
         ),
+        {"comment": "Deprecated workflow graph storage; not used in text-only RAG"},
     )
 
 
 class WorkflowVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated workflow version storage. Retained for backward compatibility; text-only
+    RAG should not create new workflow versions.
+    """
+
     __tablename__ = "workflow_versions"
 
     graph_id: Mapped[UUID] = mapped_column(
@@ -73,8 +84,17 @@ class WorkflowVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "WorkflowEdge", back_populates="version", cascade="all, delete-orphan"
     )
 
+    __table_args__ = (
+        {"comment": "Deprecated workflow version storage; not used in text-only RAG"},
+    )
+
 
 class WorkflowNode(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated workflow node storage. Retained for backward compatibility; text-only
+    RAG should not create new workflow nodes.
+    """
+
     __tablename__ = "workflow_nodes"
 
     version_id: Mapped[UUID] = mapped_column(
@@ -102,10 +122,16 @@ class WorkflowNode(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "node_key",
             name="uq_workflow_nodes_version_node_key",
         ),
+        {"comment": "Deprecated workflow node storage; not used in text-only RAG"},
     )
 
 
 class WorkflowEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated workflow edge storage. Retained for backward compatibility; text-only
+    RAG should not create new workflow edges.
+    """
+
     __tablename__ = "workflow_edges"
 
     version_id: Mapped[UUID] = mapped_column(
@@ -132,6 +158,10 @@ class WorkflowEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     target: Mapped["WorkflowNode"] = relationship(
         "WorkflowNode", foreign_keys=[target_node_id]
+    )
+
+    __table_args__ = (
+        {"comment": "Deprecated workflow edge storage; not used in text-only RAG"},
     )
 
 

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared_data_layer.config import EMBEDDING_DIMENSION
 from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.knowledge_graph import GraphEdge, GraphEntity
 from shared_data_layer.db.models.retrieval import (
@@ -127,7 +128,7 @@ async def test_pillar_answer_repository_enforces_owner_identity(
 async def test_graph_entity_embedding(db_session: AsyncSession):
     # Create entity with embedding
     entity = await GraphEntityFactory.create_async(
-        session=db_session, embedding=[0.1] * 512
+        session=db_session, embedding=[0.1] * EMBEDDING_DIMENSION
     )
 
     stmt = select(GraphEntity).where(GraphEntity.id == entity.id)
@@ -135,7 +136,7 @@ async def test_graph_entity_embedding(db_session: AsyncSession):
     fetched_entity = result.scalar_one()
     # Ensure the embedding round-trips from the database
     assert fetched_entity.embedding is not None
-    # assert len(fetched_entity.embedding) == 512 # Might need to cast to list if Vector
+    assert len(fetched_entity.embedding) == EMBEDDING_DIMENSION
 
 
 @pytest.mark.asyncio

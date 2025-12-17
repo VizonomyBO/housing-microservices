@@ -1,5 +1,6 @@
 from polyfactory import Ignore, Use
 
+from shared_data_layer.config import EMBEDDING_DIMENSION
 from shared_data_layer.db.models.retrieval import (
     Chunk,
     ChunkMetrics,
@@ -19,19 +20,19 @@ class ChunkFactory(AsyncSQLAlchemyFactory[Chunk]):
         except Exception:
             return str
 
-    embedding = Use(lambda: [0.0] * 1024)
+    embedding = Use(lambda: [0.0] * EMBEDDING_DIMENSION)
     content_hash = Use(lambda: "hash")
     position = Use(lambda: 0)
     chunk_type = Use(lambda: "text")
     text_content = Use(lambda: "chunk text")
     page_number = Use(lambda: 1)
-    schema_summary = Use(lambda: "summary")
+    schema_summary = Use(lambda: None)
     country_code = Use(lambda: "USA")
     section_path = Use(lambda: ["Section 1"])
-    bbox = Use(lambda: {"x1": 0, "y1": 0, "x2": 100, "y2": 100})
+    bbox = Use(lambda: None)
     token_count = Use(lambda: 200)
     text_tsv = Ignore()  # Generated column
-    table_payload = Use(lambda: {"data": "test"})
+    table_payload = Use(lambda: None)
     document = Use(
         lambda: _document_stub(),
     )

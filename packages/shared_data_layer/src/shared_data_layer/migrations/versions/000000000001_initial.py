@@ -20,12 +20,15 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects import postgresql
 
+from shared_data_layer.config import EMBEDDING_DIMENSION, SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.ltree import LtreeType
 
 revision: str = "000000000001"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+SYSTEM_OWNER_SENTINEL_STR = str(SYSTEM_OWNER_SENTINEL)
 
 
 # ISO 3166-1 alpha-3 codes sourced from
@@ -375,17 +378,14 @@ def create_documents_domain() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "access_scope <> 'base' OR owner_user_id IS NULL",
-            name="ck_documents_base_owner_null",
+            "access_scope <> 'base' "
+            "OR owner_user_id IS NULL "
+            f"OR owner_user_id = '{SYSTEM_OWNER_SENTINEL_STR}'::uuid",
+            name="ck_documents_base_owner_nullable",
         ),
         sa.CheckConstraint(
             "access_scope <> 'base' OR country_code IS NOT NULL",
             name="ck_documents_base_country_required",
-        ),
-        sa.CheckConstraint(
-            "(access_scope = 'base' AND owner_user_id IS NULL)"
-            " OR (access_scope <> 'base' AND owner_user_id IS NOT NULL)",
-            name="ck_documents_owner_required_for_non_base",
         ),
         sa.CheckConstraint(
             "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
@@ -432,7 +432,9 @@ def create_documents_domain() -> None:
         ["country_code", "content_hash"],
         unique=True,
         postgresql_where=sa.text(
-            "owner_user_id IS NULL AND access_scope = 'base' AND deleted_at IS NULL"
+            " (owner_user_id IS NULL "
+            f"OR owner_user_id = '{SYSTEM_OWNER_SENTINEL_STR}'::uuid) "
+            "AND access_scope = 'base' AND deleted_at IS NULL"
         ),
     )
     op.create_index(
@@ -1032,16 +1034,34 @@ def create_retrieval_domain() -> None:
         ),
         sa.Column("page_number", sa.Integer(), nullable=True),
         sa.Column("text_content", sa.Text(), nullable=True),
-        sa.Column("image_caption", sa.Text(), nullable=True),
-        sa.Column("schema_summary", sa.Text(), nullable=True),
         sa.Column(
-            "table_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+            "image_caption",
+            sa.Text(),
+            nullable=True,
+            comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+        ),
+        sa.Column(
+            "schema_summary",
+            sa.Text(),
+            nullable=True,
+            comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+        ),
+        sa.Column(
+            "table_payload",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=True,
+            comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
         ),
         sa.Column("section_path", postgresql.ARRAY(sa.String()), nullable=True),
-        sa.Column("bbox", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "bbox",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=True,
+            comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+        ),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("token_count", sa.Integer(), nullable=True),
-        sa.Column("embedding", Vector(dim=1024), nullable=True),
+        sa.Column("embedding", Vector(dim=EMBEDDING_DIMENSION), nullable=True),
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("owner_user_id", sa.UUID(), nullable=True),
         sa.Column(
@@ -1253,7 +1273,7 @@ def create_retrieval_domain() -> None:
 
     op.create_table(
         "pillar_answers",
-        sa.Column("owner_user_id", sa.UUID(), nullable=False),
+        sa.Column("owner_user_id", sa.UUID(), nullable=True),
         sa.Column("country_code", sa.String(length=3), nullable=False),
         sa.Column("pillar_name", sa.String(), nullable=False),
         sa.Column("document_id", sa.UUID(), nullable=False),
@@ -1294,7 +1314,11 @@ def create_retrieval_domain() -> None:
     op.create_index(
         "uq_pillar_answers_owner_country_pillar",
         "pillar_answers",
-        ["owner_user_id", "country_code", "pillar_name"],
+        [
+            sa.text(f"coalesce(owner_user_id, '{SYSTEM_OWNER_SENTINEL_STR}'::uuid)"),
+            "country_code",
+            "pillar_name",
+        ],
         unique=True,
         postgresql_where=sa.text("status = 'published'"),
     )
@@ -1358,7 +1382,7 @@ def create_knowledge_graph_domain() -> None:
         sa.Column("entity_type", sa.String(), nullable=False),
         sa.Column("entity_key", sa.String(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("embedding", Vector(dim=512), nullable=True),
+        sa.Column("embedding", Vector(dim=EMBEDDING_DIMENSION), nullable=True),
         sa.Column("document_id", sa.UUID(), nullable=True),
         sa.Column("chunk_id", sa.UUID(), nullable=True),
         sa.Column("chunk_country_code", sa.String(length=3), nullable=True),
@@ -1409,7 +1433,7 @@ def create_knowledge_graph_domain() -> None:
             name="fk_graph_entities_chunk",
         ),
         sa.CheckConstraint(
-            "(owner_user_id IS NOT NULL) OR (owner_user_id IS NULL AND country_code IS NOT NULL)",
+            "(owner_user_id IS NULL) OR (owner_user_id IS NOT NULL)",
             name="ck_graph_entities_base_country",
         ),
         sa.CheckConstraint(
@@ -1422,6 +1446,7 @@ def create_knowledge_graph_domain() -> None:
             name="ck_graph_entities_chunk_country_pair",
         ),
         postgresql_partition_by="LIST (country_code)",
+        comment="Deprecated graph RAG entity storage; retained for backward compatibility",
     )
     create_graph_entity_partitions()
     op.create_index("ix_graph_entities_name", "graph_entities", ["name"])
@@ -1518,6 +1543,7 @@ def create_knowledge_graph_domain() -> None:
             "edge_type",
             name="uq_graph_edges_source_target_type",
         ),
+        comment="Deprecated graph RAG edge storage; retained for backward compatibility",
     )
     op.create_index(
         "ix_graph_edges_source_type",
@@ -1575,6 +1601,7 @@ def create_knowledge_graph_domain() -> None:
             " OR (chunk_id IS NOT NULL AND chunk_country_code IS NOT NULL)",
             name="ck_graph_evidence_chunk_pair",
         ),
+        comment="Deprecated graph evidence storage; retained for backward compatibility",
     )
 
     op.create_table(
@@ -1603,6 +1630,7 @@ def create_knowledge_graph_domain() -> None:
         sa.UniqueConstraint(
             "community_key", "algo_version", name="uq_graph_communities_key_algo"
         ),
+        comment="Deprecated graph clustering storage; retained for backward compatibility",
     )
     op.create_index(
         "ix_graph_communities_country_level",
@@ -1682,6 +1710,7 @@ def create_workflow_domain() -> None:
         sa.UniqueConstraint(
             "domain", "country_code", "version", name="uq_workflow_graphs_scope_version"
         ),
+        comment="Deprecated workflow graph storage; retained for backward compatibility",
     )
     op.create_table(
         "workflow_versions",
@@ -1714,6 +1743,7 @@ def create_workflow_domain() -> None:
             ondelete="CASCADE",
             name="fk_workflow_versions_graph",
         ),
+        comment="Deprecated workflow version storage; retained for backward compatibility",
     )
 
     op.create_table(
@@ -1755,6 +1785,7 @@ def create_workflow_domain() -> None:
         sa.UniqueConstraint(
             "version_id", "node_key", name="uq_workflow_nodes_version_node_key"
         ),
+        comment="Deprecated workflow node storage; retained for backward compatibility",
     )
     op.create_index(
         "ix_workflow_nodes_version_path",
@@ -1846,6 +1877,7 @@ def create_workflow_domain() -> None:
             ondelete="CASCADE",
             name="fk_workflow_edges_target",
         ),
+        comment="Deprecated workflow edge storage; retained for backward compatibility",
     )
     op.create_index(
         "ix_workflow_edges_version_source",

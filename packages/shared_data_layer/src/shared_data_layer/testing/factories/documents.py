@@ -38,7 +38,7 @@ class DocumentFactory(AsyncSQLAlchemyFactory[Document]):
     ):
         chunk_defs = kwargs.pop("chunks", None)
         access_scope = kwargs.get("access_scope")
-        if access_scope == "base":
+        if access_scope == "base" and "owner_user_id" not in kwargs:
             kwargs["owner_user_id"] = None
         document = await super().create_async(session=session, **kwargs)
 

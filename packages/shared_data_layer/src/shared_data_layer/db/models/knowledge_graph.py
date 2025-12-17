@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INT4RANGE, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from shared_data_layer.config import EMBEDDING_DIMENSION
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -28,11 +29,15 @@ if TYPE_CHECKING:
 
 
 class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated graph RAG storage. Retained for backward compatibility; text-only
+    retrieval should not insert new rows here.
+    """
+
     __tablename__ = "graph_entities"
     __table_args__ = (
         CheckConstraint(
-            "(owner_user_id IS NOT NULL) OR "
-            "(owner_user_id IS NULL AND country_code IS NOT NULL)",
+            "(owner_user_id IS NULL) OR (owner_user_id IS NOT NULL)",
             name="ck_graph_entities_base_country",
         ),
         CheckConstraint(
@@ -50,13 +55,18 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ondelete="SET NULL",
             name="fk_graph_entities_chunk",
         ),
+        {
+            "comment": "Deprecated graph RAG storage; unused by text-only RAG"
+        },
     )
 
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(String, nullable=False)
     entity_key: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(512), nullable=True)
+    embedding: Mapped[Optional[Vector]] = mapped_column(
+        Vector(EMBEDDING_DIMENSION), nullable=True
+    )
     document_id: Mapped[Optional[PyUUID]] = mapped_column(
         ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
     )
@@ -100,6 +110,11 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 
 class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated graph RAG edge storage. Retained for backward compatibility; text-only
+    retrieval should not insert new rows here.
+    """
+
     __tablename__ = "graph_edges"
     __table_args__ = (
         UniqueConstraint(
@@ -120,6 +135,7 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ondelete="CASCADE",
             name="fk_graph_edges_target",
         ),
+        {"comment": "Deprecated graph RAG edge storage; do not use for text-only RAG"},
     )
 
     source_entity_id: Mapped[PyUUID] = mapped_column(
@@ -169,6 +185,11 @@ class GraphEdge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 
 class GraphEvidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated graph evidence storage. Retained for backward compatibility; text-only
+    retrieval should not insert new rows here.
+    """
+
     __tablename__ = "graph_evidence"
 
     edge_id: Mapped[PyUUID] = mapped_column(
@@ -195,10 +216,16 @@ class GraphEvidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             " OR (chunk_id IS NOT NULL AND chunk_country_code IS NOT NULL)",
             name="ck_graph_evidence_chunk_pair",
         ),
+        {"comment": "Deprecated graph evidence storage; do not use for text-only RAG"},
     )
 
 
 class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Deprecated graph clustering storage. Retained for backward compatibility; text-only
+    retrieval should not insert new rows here.
+    """
+
     __tablename__ = "graph_communities"
 
     community_key: Mapped[str] = mapped_column(String, nullable=False)
@@ -217,6 +244,9 @@ class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "algo_version",
             name="uq_graph_communities_key_algo",
         ),
+        {
+            "comment": "Deprecated graph clustering storage; unused by text-only RAG"
+        },
     )
 
 

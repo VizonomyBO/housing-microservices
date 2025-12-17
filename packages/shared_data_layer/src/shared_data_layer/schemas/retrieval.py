@@ -64,7 +64,7 @@ class PillarAnswerSourceRead(ORMBaseSchema):
 
 class PillarAnswerRead(ORMBaseSchema):
     id: UUID
-    owner_user_id: UUID
+    owner_user_id: Optional[UUID] = None
     country_code: CountryISOAlpha3
     pillar_name: str
     document_id: UUID

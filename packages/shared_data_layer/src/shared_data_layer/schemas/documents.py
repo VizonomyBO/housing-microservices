@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import model_validator
 
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
+
 from .common import ORMBaseSchema
 from .countries import CountryISOAlpha3
 from .retrieval import ChunkRead
@@ -56,10 +58,12 @@ class DocumentRead(ORMBaseSchema):
 
     @model_validator(mode="after")
     def validate_scope_identity(self) -> "DocumentRead":
-        if self.access_scope != "base" and self.owner_user_id is None:
-            raise ValueError("owner_user_id is required for non-base documents")
-        if self.access_scope == "base" and self.owner_user_id is not None:
-            raise ValueError("base documents cannot define owner_user_id")
+        if self.access_scope == "base":
+            if self.owner_user_id not in (None, SYSTEM_OWNER_SENTINEL):
+                raise ValueError(
+                    "Base documents must omit owner_user_id or use the system owner "
+                    "sentinel."
+                )
         return self
 
 

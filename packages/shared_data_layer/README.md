@@ -185,19 +185,25 @@ The flag can also be combined with a regular run (e.g., `.venv/bin/pytest --end-
 
 ## Identity & Ownership Contract
 
-- `owner_user_id` is **mandatory** for every document whose `access_scope` is not `base`. The database enforces this constraint and the `DocumentRead` schema validates it as well.
-- Base documents must omit `owner_user_id` and provide an ISO-3 `country_code`. This value is propagated automatically to child rows (chunks, artifacts) through triggers.
-- **Conversation attachments**: Base-scope documents can only be attached to conversations that share the same ISO-3 `country_code`. `DocumentRepository.attach_to_conversation(...)` now enforces this guardrail and raises a `ValueError` if the conversation or document are missing a country or the values do not match. Service/API layers should surface that error to clients so users understand why the attachment failed.
-- Pydantic schemas expose these ISO codes via the `CountryISOAlpha3` enum (`shared_data_layer.schemas.countries`), so application code gets type-safe hints instead of free-form strings.
-- **Pillar answers**: Use `PillarAnswerRepository.create_pillar_answer(...)` (or replicate its guard) so tenant-scoped answers always carry the same `owner_user_id` as their source document unless the document is truly `base`. This protects the published-only unique index on `(owner_user_id, country_code, pillar_name)` and keeps the regional `(country_code, pillar_name)` partial index—which filters to `status='published'`—useful for lookups.
+- `owner_user_id` is now flexible: non-base documents may be ownerless or use the system sentinel `00000000-0000-0000-0000-000000000000`; base documents may also use the sentinel or stay `NULL` but still require an ISO-3 `country_code` that propagates to children.
+- **Conversation attachments**: Base-scope documents can only be attached to conversations that share the same ISO-3 `country_code`. `DocumentRepository.attach_to_conversation(...)` enforces this guardrail and raises a `ValueError` if the conversation or document are missing a country or the values do not match. Service/API layers should surface that error to clients so users understand why the attachment failed.
+- Pydantic schemas expose ISO codes via the `CountryISOAlpha3` enum (`shared_data_layer.schemas.countries`), so application code gets type-safe hints instead of free-form strings.
+- **Pillar answers**: Use `PillarAnswerRepository.create_pillar_answer(...)` (or replicate its guard) so tenant-scoped answers use the document owner (or the system sentinel) while still allowing ownerless/system-owned answers for shared documents. The published-only uniqueness leverages `coalesce(owner_user_id, sentinel)` to keep deduplication intact.
 
-Keep this contract in mind when writing ingestion logic or creating fixtures—factories now default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` when building base corpus rows.
+Keep this contract in mind when writing ingestion logic or creating fixtures—factories default to generating a tenant-scoped `owner_user_id`, so explicitly pass `owner_user_id=None` or the sentinel when building shared/system corpus rows.
 
 ## Access Control & Session Expectations
 
 PostgreSQL no longer enforces Row-Level Security or custom `POLICY` objects for the shared data layer. Instead:
 
 - Each environment provisions a dedicated database user/password; services authenticate using that credential and enforce per-tenant/base visibility in their own logic.
+
+## Embeddings, Deprecations, and Ownership Updates
+
+- **Embedding dimension**: voyage-context-3 embeddings default to **1024** dims, configurable via `VOYAGE_EMBEDDING_DIM`/`VOYAGE_OUTPUT_DIMENSION`. The `Vector` columns, factories, and indexes reuse this shared dimension.
+- **Non-text fields deprecated**: `chunks.image_caption`, `schema_summary`, `table_payload`, and `bbox` remain nullable but are unused in the text-only ingestion pipeline.
+- **Graph/workflow tables deprecated**: `graph_*` and `workflow_*` tables persist for backward compatibility and are marked as deprecated; new text-only RAG flows should not write to them.
+- **Ownership flexibility**: Documents may omit `owner_user_id` (even for non-base scopes) or use the system sentinel `00000000-0000-0000-0000-000000000000`. Base documents may set the sentinel or stay ownerless; pillar answers accept ownerless/system-owned records as well as matching tenant owners.
 - Repository helpers (e.g., `DocumentRepository.attach_to_conversation`, `PillarAnswerRepository.create_pillar_answer`) validate owner identity, country scope, and dedup rules before issuing writes.
 - Database constraints (unique indexes, check constraints, FK pairs, partitions) guarantee structural integrity, but they do **not** replace service-layer authorization.
 

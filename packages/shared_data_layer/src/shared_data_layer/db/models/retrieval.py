@@ -20,10 +20,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from shared_data_layer.config import EMBEDDING_DIMENSION, SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -45,16 +47,34 @@ class Chunk(Base, TimestampMixin):
     chunk_type: Mapped[str] = mapped_column(String, nullable=False, default="text")
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    image_caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    schema_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    table_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    image_caption: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+    )
+    schema_summary: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+    )
+    table_payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+    )
     section_path: Mapped[Optional[list[str]]] = mapped_column(
         ARRAY(String), nullable=True
     )
-    bbox: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    bbox: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Deprecated: legacy non-text capture; text-only ingestion ignores this",
+    )
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
     token_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024), nullable=True)
+    embedding: Mapped[Optional[Vector]] = mapped_column(
+        Vector(EMBEDDING_DIMENSION), nullable=True
+    )
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
     country_code: Mapped[str] = mapped_column(String(3), default="UNK", nullable=False)
@@ -138,7 +158,7 @@ class RetrievalRunItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class PillarAnswer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "pillar_answers"
 
-    owner_user_id: Mapped[PyUUID] = mapped_column(nullable=False)
+    owner_user_id: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
     country_code: Mapped[str] = mapped_column(String(3), nullable=False)
     pillar_name: Mapped[str] = mapped_column(String, nullable=False)
     document_id: Mapped[PyUUID] = mapped_column(
@@ -207,6 +227,7 @@ class PillarAnswerSource(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class ActiveChunk(Base):
     """
     Read-only view representing chunks whose documents are active and not deleted.
+    Non-text fields are legacy/deprecated and retained for compatibility only.
     """
 
     __tablename__ = "active_chunks"
@@ -221,7 +242,7 @@ class ActiveChunk(Base):
     image_caption: Mapped[Optional[str]] = mapped_column(Text)
     section_path: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String))
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
-    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1024))
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIMENSION))
     content_hash: Mapped[str] = mapped_column(String)
 
 
@@ -266,7 +287,7 @@ Index(
 
 Index(
     "uq_pillar_answers_owner_country_pillar",
-    PillarAnswer.owner_user_id,
+    func.coalesce(PillarAnswer.owner_user_id, SYSTEM_OWNER_SENTINEL),
     PillarAnswer.country_code,
     PillarAnswer.pillar_name,
     unique=True,

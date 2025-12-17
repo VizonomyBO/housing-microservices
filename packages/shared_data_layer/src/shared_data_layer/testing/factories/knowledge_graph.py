@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from polyfactory import Ignore, Use
 
+from shared_data_layer.config import EMBEDDING_DIMENSION
 from shared_data_layer.db.maintenance import refresh_graph_materializations
 from shared_data_layer.db.models.knowledge_graph import (
     GraphCommunity,
@@ -16,7 +17,7 @@ from shared_data_layer.testing.factories.retrieval import ChunkFactory
 
 class GraphEntityFactory(AsyncSQLAlchemyFactory[GraphEntity]):
     __model__ = GraphEntity
-    embedding = Use(lambda: [0.0] * 512)
+    embedding = Use(lambda: [0.0] * EMBEDDING_DIMENSION)
     edges_out = Ignore()
     edges_in = Ignore()
     name = Use(lambda: f"Entity-{uuid4().hex[:8]}")
@@ -32,10 +33,7 @@ class GraphEntityFactory(AsyncSQLAlchemyFactory[GraphEntity]):
 
     @classmethod
     def build(cls, **kwargs):  # type: ignore[override]
-        entity = super().build(**kwargs)
-        if entity.owner_user_id is None and entity.country_code is None:
-            raise ValueError("Base graph entities require a country_code")
-        return entity
+        return super().build(**kwargs)
 
 
 def _chunk_with_document():

@@ -15,10 +15,12 @@ from sqlalchemy import (
     UniqueConstraint,
     and_,
     func,
+    or_,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, INT4RANGE, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -72,17 +74,14 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "access_scope <> 'base' OR owner_user_id IS NULL",
-            name="ck_documents_base_owner_null",
+            "access_scope <> 'base' "
+            "OR owner_user_id IS NULL "
+            f"OR owner_user_id = '{SYSTEM_OWNER_SENTINEL}'::uuid",
+            name="ck_documents_base_owner_nullable",
         ),
         CheckConstraint(
             "access_scope <> 'base' OR country_code IS NOT NULL",
             name="ck_documents_base_country_required",
-        ),
-        CheckConstraint(
-            "(access_scope = 'base' AND owner_user_id IS NULL)"
-            " OR (access_scope <> 'base' AND owner_user_id IS NOT NULL)",
-            name="ck_documents_owner_required_for_non_base",
         ),
         CheckConstraint(
             "country_code IS NULL OR country_code ~ '^[A-Z]{3}$'",
@@ -293,7 +292,10 @@ Index(
     Document.content_hash,
     unique=True,
     postgresql_where=and_(
-        Document.owner_user_id.is_(None),
+        or_(
+            Document.owner_user_id.is_(None),
+            Document.owner_user_id == SYSTEM_OWNER_SENTINEL,
+        ),
         Document.access_scope == "base",
         Document.deleted_at.is_(None),
     ),
