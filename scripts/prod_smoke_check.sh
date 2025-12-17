@@ -294,16 +294,14 @@ for doc_id in "${doc_ids[@]}"; do
 done
 
 questions=(
-  "What two guardrails did the latest housing memo add for voucher expansion?"
-  "Suggest two interventions that combine the policy memo and ledger insights to help District 9 renters."
-  "Sum the total rental assistance disbursed this quarter and highlight the highest-funded city."
-  "While reviewing the KPI dashboard for our cities, point out anyone crossing the 80-point stability trigger and explain what action they need."
+  "Summarize the main housing finance vulnerabilities highlighted in the Mexico 2016 FSAP report and cite the evidence."
+  "List two policy recommendations from the report to strengthen Mexico's mortgage market and mention why each matters."
+  "What risks did the report note about housing-related funding sources, and how should they be mitigated?"
 )
 prompts=(
   "PROD_SIMPLE_RAG"
   "PROD_REASONING"
   "PROD_AGGREGATE"
-  "PROD_TABLE_SQL"
 )
 
 for i in "${!questions[@]}"; do
