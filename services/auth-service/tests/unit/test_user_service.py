@@ -32,9 +32,9 @@ class TestCreateUser:
         assert user.username == "newuser"
         assert user.first_name == "New"
         assert user.last_name == "User"
-        assert user.status == "pending"  # New users start as pending
-        assert user.is_active is False  # Pending users are not active
-        assert user.is_verified is False
+        assert user.status == "active"  # Auto activation enabled by default
+        assert user.is_active is True
+        assert user.is_verified is True
 
     def test_create_user_without_optional_fields(self, db_session):
         """Test user creation without optional fields"""

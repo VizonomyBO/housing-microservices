@@ -14,7 +14,6 @@ RUN uv venv "${UV_PROJECT_ENV}" && uv pip install --no-cache-dir -r requirements
 COPY app ./app
 COPY run.py .
 COPY pyproject.toml ./pyproject.toml
-COPY README.md ./README.md
 
 FROM python:3.13-slim AS runtime
 ENV PYTHONUNBUFFERED=1 \

@@ -42,3 +42,6 @@
 - Rate limiter must be real or explicitly bypassed via `ALLOW_RATE_LIMITER_BYPASS=1` (tests/dev only).
 - Lingua stub is allowed only with `ALLOW_STUB_LANGUAGE_DETECTOR=1` for tests; otherwise Lingua must load.
 - Reduced-scope runtime/CLI now refuse to run unless `REDUCED_SCOPE_ENABLED=1`; production paths should use real ingestion/exports.
+
+## Recent Updates
+- Auth/user services aligned to cache-free stack; images built locally via `docker compose build auth-service user-service` (not pushed to any registry yet).

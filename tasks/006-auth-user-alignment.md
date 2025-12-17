@@ -1,4 +1,4 @@
-# Task: Align Auth/User Services with Simplified Stack
+# [Completed] Task: Align Auth/User Services with Simplified Stack
 
 Follow `.kilocode/rules/memory-bank-instructions.md` and `AGENTS.md`; create/update a plan + tracker in the repo root.
 The agent must commit the changes before terminating the task.

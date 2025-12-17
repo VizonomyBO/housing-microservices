@@ -15,7 +15,7 @@ from app.utils.validators import (
     validate_username,
 )
 
-AUTO_ACTIVATE_USERS = os.getenv("AUTO_ACTIVATE_USERS", "0").lower() in {"1", "true", "yes", "on"}
+AUTO_ACTIVATE_USERS = os.getenv("AUTO_ACTIVATE_USERS", "1").lower() in {"1", "true", "yes", "on"}
 
 
 class UserService:
@@ -83,7 +83,7 @@ class UserService:
                 country_code=country_code,
                 role=role,
                 status=status,
-                email_verified=AUTO_ACTIVATE_USERS,
+                email_verified=True,
             )
 
             session.add(user)
