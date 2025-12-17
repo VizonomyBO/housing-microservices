@@ -29,10 +29,14 @@ resource "aws_sesv2_configuration_set" "default" {
 # =============================================================================
 
 resource "aws_sesv2_email_identity" "sender" {
+  count = local.ses_enabled ? 1 : 0
+
   email_identity = "addis@vizonomy.com"
 }
 
 resource "aws_sesv2_email_identity" "test_recipient" {
+  count = local.ses_enabled ? 1 : 0
+
   email_identity = "xdaddisxd@gmail.com"
 }
 

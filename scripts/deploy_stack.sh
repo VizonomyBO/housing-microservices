@@ -192,6 +192,16 @@ EOF
 sync_repo() {
   [[ "$NO_SYNC" -eq 0 ]] || { log "Skipping code sync (--no-sync)"; return; }
   log "Syncing repository to $SSH_USER@$HOST:$REMOTE_DIR"
+  ssh $(ssh_opts) "$SSH_USER@$HOST" bash -s <<EOF
+set -euo pipefail
+if [[ -z "$REMOTE_DIR" || "$REMOTE_DIR" == "/" ]]; then
+  echo "Refusing to clean unsafe REMOTE_DIR: '$REMOTE_DIR'" >&2
+  exit 1
+fi
+sudo rm -rf "$REMOTE_DIR"
+sudo mkdir -p "$REMOTE_DIR"
+sudo chown -R "$SSH_USER":"$SSH_USER" "$REMOTE_DIR"
+EOF
   local excludes=(
     --exclude ".git"
     --exclude ".venv"
@@ -207,7 +217,7 @@ sync_repo() {
     --exclude ".kilocode"
   )
   tar -czf - "${excludes[@]}" -C "$ROOT_DIR" . | \
-    ssh $(ssh_opts) "$SSH_USER@$HOST" "sudo mkdir -p '$REMOTE_DIR' && sudo chown -R '$SSH_USER':'$SSH_USER' '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
+    ssh $(ssh_opts) "$SSH_USER@$HOST" "tar -xzf - -C '$REMOTE_DIR'"
   scp $(scp_opts) "$ENV_FILE" "$SSH_USER@$HOST:$REMOTE_DIR/$REMOTE_ENV_FILE"
 }
 
