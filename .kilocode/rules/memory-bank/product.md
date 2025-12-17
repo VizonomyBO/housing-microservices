@@ -13,11 +13,11 @@ Teams need a ready-to-run retrieval+chat backend with consistent auth and data s
 
 ## Key Features
 
-### Agent API (FastAPI + LangGraph)
-- Chat/SSE endpoints with conversation persistence and UUID `thread_id` ownership.
+### Agent API (FastAPI + LangChain/LangGraph)
+- Chat/SSE endpoints with conversation persistence and UUID `thread_id` ownership, powered by LangChain v1 `create_agent` ReAct agent running on LangGraph with checkpointing.
 - Attachment-aware retrieval: documents stay blocked until ingestion completes; structured prompts with per-fact footnotes.
 - Hybrid retrieval (BM25 + pgvector) with Voyage `voyage-3-large` embeddings and `rerank-2.5` (required).
-- `/v1/documents/upload` proxies to the ingestion service; inline ingestion removed.
+- `/v1/documents/upload` proxies to the ingestion service and records uploads locally for attachment gating; inline ingestion removed.
 
 ### Ingestion Service (FastAPI, EC2)
 - MarkItDown → chunk → embed → index → activate pipeline; unique uploads to avoid dedupe shortcuts.

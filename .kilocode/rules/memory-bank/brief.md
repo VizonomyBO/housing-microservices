@@ -1,10 +1,10 @@
 # Project Brief: Housing Microservices Platform
 
 ## Overview
-A LangGraph-powered Agent API with a FastAPI ingestion service on EC2, Flask-based auth/user microservices, and an optional Swagger aggregator. Docker Compose drives local and hybrid workflows, with AWS EC2 + Postgres as the primary production target. The shared data layer lives in `packages/shared_data_layer`, and Python tooling is managed with `uv` on Python 3.13.
+A LangChain/LangGraph-powered Agent API (ReAct via `create_agent` + tool loop) with a FastAPI ingestion service on EC2, Flask-based auth/user microservices, and an optional Swagger aggregator. Docker Compose drives local and hybrid workflows, with AWS EC2 + Postgres as the primary production target. The shared data layer lives in `packages/shared_data_layer`, and Python tooling is managed with `uv` on Python 3.13.
 
 ## Key Components
-- **Agent API (FastAPI + LangGraph)**: Chat/SSE, attachments, hybrid retrieval, and citation-rich responses. `/v1/documents/upload` now proxies to the ingestion service (no inline ingestion).
+- **Agent API (FastAPI + LangChain/LangGraph)**: Chat/SSE, attachments, hybrid retrieval, and citation-rich responses powered by the LangChain v1 `create_agent` ReAct loop with LangGraph checkpointing. `/v1/documents/upload` proxies to the ingestion service (no inline ingestion) and records uploads for attachment gating.
 - **Ingestion Service (FastAPI on EC2)**: MarkItDown → chunk → embed (Voyage) → index (pgvector) and activate documents; replaces the old Lambda/S3 flow and is the only upload path.
 - **Auth Service (Flask)**: Issues and validates JWTs; backed by `auth_db`.
 - **User Service (Flask)**: User management; depends on auth-service.

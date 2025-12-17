@@ -8,7 +8,7 @@
 - **ORM**: SQLAlchemy 2.x (async support for Agent API/ingestion).
 - **Validation**: Pydantic v2.
 - **Auth**: Argon2-cffi for hashing, PyJWT for tokens, Flask-Limiter for rate limits.
-- **LLM/Retrieval**: LangGraph orchestration; Voyage embeddings (`voyage-3-large`) + `rerank-2.5` (required); MarkItDown for extraction.
+- **LLM/Retrieval**: LangChain v1 `create_agent` ReAct loop running on LangGraph runtime + MemorySaver checkpointing; Voyage embeddings (`voyage-3-large`) + `rerank-2.5` (required); MarkItDown for extraction; hybrid BM25+vector via shared data layer repos.
 
 ### Shared Data Layer
 - **Path**: `packages/shared_data_layer`
