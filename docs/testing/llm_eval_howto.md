@@ -3,12 +3,13 @@
 Use the eval harness under `services/agent-api/tests/evals` to exercise the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against prod using the preloaded MEX corpus and eval user.
 
 ## Prereqs
-- `.env.prod` in repo root with: `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, and the default prod base URLs/ports. The eval fixtures auto-load `.env.prod` and override templated URLs to `http://52.207.140.87:8000` and `http://52.207.140.87:5001`.
-- Network access to prod Agent API and OpenAI.
+- Prefer `.env.evals` for local agent + prod deps: includes `AGENT_BASE_URL=http://localhost:8000`, prod `AUTH_BASE_URL`, prod DB URLs, `AUTH_SHARED_SECRET`, `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`. `PYODIDE_BASE_URL` must be set to a reachable sandbox to enable code-tool evals.
+- `.env.prod` is the fallback if `.env.evals` is absent; fixtures auto-load and normalize templated URLs to `http://52.207.140.87:8000`/`5001`.
+- Network access to prod services (auth/doc metadata/DB) and OpenAI/Voyage.
 
 ## Commands
-- All evals: `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
-- Streaming focus: `uv run pytest tests/evals -m eval_sse --maxfail=1`
+- All evals (blocking; streaming disabled for now): `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
+- To run the code-tool scenario, ensure `PYODIDE_BASE_URL` is set; otherwise it is skipped.
 
 ## Data & Scenarios
 - Dataset lives in `services/agent-api/tests/evals/datasets/shared_mex_arg.yaml` and references the active MEX corpus doc IDs already owned by the eval user. Do **not** upload new copies; attach existing IDs.
@@ -22,5 +23,5 @@ Use the eval harness under `services/agent-api/tests/evals` to exercise the Agen
 - `core/telemetry.py`: Parses responses/citations, SSE streams; artifacts flatten to `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored).
 
 ## Notes
-- Eval runs fail fast if required env vars are missing. OPENAI is mandatory; no stubs or fallbacks.
+- Eval runs fail fast if required env vars are missing. OPENAI is mandatory; no stubs or fallbacks. Set `PYODIDE_BASE_URL` to exercise code-tool scenarios.
 - Artifacts include inputs, outputs, citations, and metric scores for auditability. Delete or rotate as needed (gitignored).

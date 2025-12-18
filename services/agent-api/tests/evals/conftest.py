@@ -16,11 +16,15 @@ from .core.scenarios import Dataset, ResolvedScenario, load_dataset, resolve_sce
 
 DATASET_PATH = pathlib.Path(__file__).parent / "datasets" / "shared_mex_arg.yaml"
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[4]
+EVAL_ENV_FILE = ".env.evals"
+PROD_ENV_FILE = ".env.prod"
 
 
 def _load_env_defaults() -> None:
-    """Load prod defaults from the repo .env.prod file and set prod URLs if templated."""
-    env_path = ROOT_DIR / ".env.prod"
+    """Load eval defaults preferring .env.evals, falling back to .env.prod."""
+    env_path = ROOT_DIR / EVAL_ENV_FILE
+    if not env_path.exists():
+        env_path = ROOT_DIR / PROD_ENV_FILE
     if not env_path.exists():
         return
     for line in env_path.read_text(encoding="utf-8").splitlines():
