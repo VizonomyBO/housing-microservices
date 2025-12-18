@@ -120,7 +120,7 @@ def metric_evaluator(llm_judge: LLMJudge | None) -> MetricEvaluator:
 
 @pytest.fixture(scope="session")
 def artifact_dir() -> pathlib.Path:
-    path = pathlib.Path(__file__).parent / "artifacts" / "evals"
+    path = pathlib.Path(__file__).parent / "artifacts"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
