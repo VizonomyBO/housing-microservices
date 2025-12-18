@@ -9,6 +9,7 @@
 - Run against the prod database, uploading the documents at `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` with no user assigned (shareable) and reuse them for all eval tests.
 - Use existing libraries for metrics; research web best practices for LLM-judge evals and use `gpt-5.1` with high reasoning effort for all metrics.
 - Keep the suite OOP-friendly so scenarios can be composed in code and executed with pytest.
+- Follow the proposal in `tasks/agent-eval-suite-proposal.md`.
 
 ## Test Account
 ```json
@@ -153,4 +154,6 @@ To run the evals, mount the local docker compose file pointing to the prod DB, r
 ## References
 - `.kilocode/rules/memory-bank/*.md`
 - `docs/requirements_revamp.md`
+- `docs/testing/llm_eval_suite_proposal.md`
+- `docs/testing/llm_eval_suite_task.md`
 - `AGENTS.md` and `services/agent-api/AGENTS.md`
