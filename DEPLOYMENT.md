@@ -27,7 +27,7 @@ scripts/deploy_stack.sh --mode hot-patch \
 ```
 
 Notes:
-- Old deploy helpers (`deploy_prod_stack.sh`, `provision_remote_stack.sh`, `deploy_ec2_services.sh`) are deprecated and stubbed to point to `deploy_stack.sh`.
+- Legacy deploy helper scripts have been removed; use `scripts/deploy_stack.sh` (full-redeploy/services-only/hot-patch) for all rollout modes.
 - `docker-compose.ec2.yml` now contains only the target services (no Lambda/Step Functions/Valkey/telemetry/nginx/swagger).
 - Terraform stack retains EC2 + Postgres + S3; Lambda/Step Functions artifacts have been removed. When running `full-redeploy`, confirm before using `--destroy-first` to avoid dropping data.
 

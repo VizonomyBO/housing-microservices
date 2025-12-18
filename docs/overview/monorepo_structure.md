@@ -13,8 +13,7 @@
 ├── docs/                   # Architecture, agents, runbooks, testing
 ├── scripts/                # use_env.sh, deploy_stack.sh, prod_smoke_check.sh, etc.
 ├── docker-compose.yml      # Local dev stack (Postgres, LocalStack, services)
-├── docker-compose.ec2.yml  # Hybrid/dev stack pointed at remote infra
-└── task_prompts/           # Archived task briefs (see deprecation notes)
+└── docker-compose.ec2.yml  # Hybrid/dev stack pointed at remote infra
 ```
 
 ## Shared data layer (authoritative schema)
