@@ -61,7 +61,7 @@
   - Promptfoo `llm-rubric` for rubric-based grading or multilingual checks.
 
 ## Data & Seeding
-- Use provided user credentials and doc IDs (Mexico/ARG corpus). Prefer attaching existing IDs; no re upload necessary.
+- Use provided user credentials and doc IDs (Mexico/ARG corpus) already uploaded on the eval user account; prefer attaching existing IDs and avoid re-uploading unless recovery is required.
 - Conversations: namespace `local-smoke` or `eval`; tag runs with `agent-eval`.
 - Keep content_hash uniqueness if new uploads are required; poll activation before tests.
 

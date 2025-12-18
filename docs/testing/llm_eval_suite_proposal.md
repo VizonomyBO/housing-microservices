@@ -1,17 +1,17 @@
 # LLM Agent Eval Suite Design (OOP pytest, API-driven)
 
-Design for a maintainable pytest harness that drives the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against the production stack. All evals ingest and use the `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` corpora as shared documents (no owner), and every metric is judged by `gpt-5.1` with `reasoning.effort=high`.
+Design for a maintainable pytest harness that drives the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against the production stack. All evals reuse the already uploaded `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` corpora tied to the provided eval user account (no new uploads), and every metric is judged by `gpt-5.1` with `reasoning.effort=high`.
 
 ## Goals & Guardrails
 - Real HTTP surface only: hit `/v1/conversations`, `/v1/conversations/{id}/attachments`, `/v1/chat` (blocking + SSE) with prod credentials; no DI overrides or stubs.
-- Text-only ingestion path: ingest MEX/ARG PDFs through ingestion-service (`/v1/documents/upload` → `/v1/documents/upload/complete`) with `owner_user_id=""`/`access_scope="base"` so docs are shareable; verify `status=active` before attaching.
+- Text-only ingestion path remains available, but the eval suite should reuse the already uploaded MEX/ARG documents on the provided eval user account; do not re-upload or flip ownership for these docs. Verify `status=active` for the known IDs before attaching.
 - Advanced retrieval expectations: BM25 + pgvector with Voyage `voyage-context-3` + `rerank-2.5`, HyDE/HyPE rewrites, contextual headers, fusion diversity, strict `[c#]` citations.
 - OOP-first pytest: scenario objects + thin client abstractions; fixtures manage env, auth, ingestion, and artifact sinks to minimize duplication.
 - Metrics use maintained libraries (DeepEval, Ragas) plus deterministic checks; judges default to `gpt-5.1` with `reasoning.effort=high` and a single override knob.
 
 ## Seed Corpus (MEX/ARG) and Document IDs
-- Reuse the prod-ingested PDFs under `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG`; upload once with `owner_user_id=""` and `access_scope="base"` so they remain shareable across evals.
-- Expected active document set (record in `datasets/shared_mex_arg.yaml` with content hashes):
+- Reuse the prod-ingested PDFs under `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` that are already uploaded on the provided eval user (`eval_user@example.com`, `TestPass123!`). Do not re-upload these files; rely on the existing IDs and verify they are `status="active"`.
+- Expected active document set on the eval user (record in `datasets/shared_mex_arg.yaml` with content hashes):
   - Mexico Low income housing (Main report): `0510b240-5b88-4ae4-8678-4a21ac2ed102`
   - Mexico Low income housing (Vol 2): `be7724a0-d8a9-4304-b203-857cb79dce2c`
   - Financial Sector Assessment Program: `4d18a758-371e-4991-8f0f-bc9545395f4a`
@@ -19,7 +19,7 @@ Design for a maintainable pytest harness that drives the Agent API end-to-end (c
   - Residential Energy Efficiency Programs: `bb8b657e-755d-46c5-a52f-e19d09145886`
   - Improving Housing Resilience Report: `09c2d186-35bf-44c4-9566-d71424587d0d`
   - FUNHAVIs housing microfinance program: `c729798f-d11c-4da8-b249-9d406d43ac19`
-- Attach these documents to conversations for every scenario; skip re-uploads unless activation fails. Treat ingestion as idempotent via `content_hash` and verify `status="active"` before running tests.
+- Attach these documents to conversations for every scenario; do not re-upload unless recovery is required because an ID is missing/archived. Verify `status="active"` before running tests.
 
 ## Harness Architecture (OOP)
 - **AgentApiClient**: wraps `httpx.AsyncClient` for prod base URL; methods to mint HS256 JWT (`AUTH_SHARED_SECRET`), create conversations, bulk-attach docs, send chat (blocking/SSE), and parse citations/latency from responses. SSE helper buffers events for metric use.
@@ -56,18 +56,13 @@ services/agent-api/tests/evals/
 - **Fixtures**:
   - `eval_env`: validates `AGENT_BASE_URL`, `AUTH_SHARED_SECRET`, `EVAL_USER_ID`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `INGEST_BASE_URL`; skips with clear reason if missing. Also checks that required doc IDs from `shared_mex_arg.yaml` are present/active.
   - `agent_client`: initialized `AgentApiClient` with signed JWT for `EVAL_USER_ID`; exposes helpers for blocking and SSE chat modes plus attachment helpers.
-  - `ingested_docs`: seeds/refreshes MEX/ARG via ingestion (see below), returns IDs + content hashes for scenarios; prefers existing IDs listed above to avoid re-upload churn.
+  - `ingested_docs`: verifies/loads the MEX/ARG doc metadata for the eval user and returns IDs + content hashes for scenarios; avoid re-upload and fail/skip if required docs are inactive or missing.
   - `scenario_catalog`: loads YAML scenarios into `EvalScenario` objects for parametrization; supports tagging (e.g., `eval_api`, `eval_sse`, `eval_pyodide`, `eval_heavy`).
   - `artifact_writer`: writes run artifacts to timestamped directory; respects `EVAL_ARTIFACTS_DIR` and annotates runs with scenario metadata and doc IDs.
 
-## MEX/ARG Corpora Ingestion (prod-only, shared)
-- Files: `/home/nubol23/Desktop/Codes/MEX/*.pdf`, `/home/nubol23/Desktop/Codes/ARG/*.pdf`.
-- Flow (per ingestion-service):
-  1. `POST /v1/documents/upload` with JSON: `document_name`, `source_type="pdf"`, `access_scope="base"`, `owner_user_id=""`, `file_size_bytes`, `country_code` (`MEX`/`ARG`), `language="en"`, optional `tags` (`["eval","shared"]`), `output_dimension` (match pgvector, default 1024). Auth via ingestion bearer (HS256, see `ingestion_service.auth`).
-  2. Receive `upload.url` + signed form fields; `owner_user_id` stays blank (maps to shared/system owner).
-  3. `POST upload.url` multipart with the PDF file and returned fields. On success, expect `status="active"` and `content_hash`.
-  4. Verify via Agent API `GET /v1/documents?content_hash=...` and record `document_id` + `content_hash` in `datasets/shared_mex_arg.yaml`.
-- Treat uploads as idempotent via `content_hash`; if deduped, reuse returned IDs. Ingest once, reuse for all eval scenarios.
+## MEX/ARG Corpora Usage (prod-only, no re-upload)
+- Files already reside in the eval user account; confirm availability via `/v1/documents` with the provided credentials before runs.
+- Treat the listed doc IDs as canonical; attach them to conversations using the eval user token. Do not trigger new uploads for these corpora. If a doc is missing/archived, prefer restoring access for the eval user rather than creating a new ownerless/base-scoped copy; only ingest new material when adding new scenarios outside the MEX/ARG set.
 
 ## Scenario Coverage (examples)
 - **Hybrid retrieval + HyDE/HyPE**: long-form policy questions spanning multiple MEX/ARG memos; assert rerank scores drop monotonically and Ragas recall passes threshold.
@@ -75,7 +70,7 @@ services/agent-api/tests/evals/
 - **SSE streaming**: run `response_mode=stream`, ensure tokens arrive in order and final `done` frame contains citations/latency.
 - **Citation strictness**: numeric questions (e.g., finance metrics) must include `[c#]` markers and DeepEval faithfulness > threshold.
 - **Pyodide tool**: dataset question requiring tabular calc; assert tool call present and answer relevancy >= threshold.
-- **Ownership/null owner**: shared docs (owner=None/`SYSTEM_OWNER_SENTINEL`) attach and answer; per-user doc should be skipped when thread owner differs.
+- **Ownership/access**: docs owned by the eval user attach and answer; docs owned by other users should be rejected or hidden when attempting attachment/chat.
 
 ## Metrics & Judge Configuration
 - **Judge**: default `model="gpt-5.1"` with `reasoning.effort="high"` on every metric call; override via `EVAL_JUDGE_MODEL` for experiments. Aligns with LLM-as-judge best practices from Evidently and Ragas (prompt clarity, role hints). Apply the same judge defaults to SSE and blocking paths to keep metrics comparable across transport modes.

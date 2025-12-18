@@ -6,7 +6,7 @@
 
 ## Prompt
 - Design a maintainable, object-oriented pytest evaluation suite for the Agent API that exercises the ReAct tool stack end-to-end via HTTP (chat/SSE, attachments, retrieval/rerank).
-- Run against the prod database, uploading the documents at `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` with no user assigned (shareable) and reuse them for all eval tests.
+- Run against the prod database using the provided eval user credentials and the already uploaded documents at `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG`; do not re-upload, just attach the existing doc IDs for all eval tests.
 - Use existing libraries for metrics; research web best practices for LLM-judge evals and use `gpt-5.1` with high reasoning effort for all metrics.
 - Keep the suite OOP-friendly so scenarios can be composed in code and executed with pytest.
 - Follow the proposal in `tasks/agent-eval-suite-proposal.md`.
