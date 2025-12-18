@@ -145,9 +145,17 @@ resolve_ssh_key() {
   if [[ -d "$TF_DIR" ]]; then
     local tf_key
     tf_key=$(terraform -chdir="$TF_DIR" output -raw ec2_private_key_path 2>/dev/null || true)
-    if [[ -n "$tf_key" && -f "$tf_key" ]]; then
-      SSH_KEY="$tf_key"
-      return
+    if [[ -n "$tf_key" ]]; then
+      # Resolve relative paths relative to TF_DIR
+      if [[ "$tf_key" == ./* ]]; then
+        tf_key="$TF_DIR/${tf_key#./}"
+      elif [[ "$tf_key" != /* ]]; then
+        tf_key="$TF_DIR/$tf_key"
+      fi
+      if [[ -f "$tf_key" ]]; then
+        SSH_KEY="$tf_key"
+        return
+      fi
     fi
   fi
 
@@ -216,8 +224,10 @@ EOF
     --exclude "terraform.tfstate*"
     --exclude ".kilocode"
   )
-  tar -czf - "${excludes[@]}" -C "$ROOT_DIR" . | \
-    ssh $(ssh_opts) "$SSH_USER@$HOST" "tar -xzf - -C '$REMOTE_DIR'"
+  # Suppress macOS extended attribute warnings (harmless - Linux tar ignores them)
+  # Filter LIBARCHIVE.xattr warnings on both local and remote sides
+  COPYFILE_DISABLE=1 tar -czf - "${excludes[@]}" -C "$ROOT_DIR" . 2> >(grep -v "LIBARCHIVE.xattr" >&2) | \
+    ssh $(ssh_opts) "$SSH_USER@$HOST" "tar --warning=no-unknown-keyword -xzf - -C '$REMOTE_DIR' 2>&1 | grep -v 'LIBARCHIVE.xattr' || tar -xzf - -C '$REMOTE_DIR' 2>&1 | grep -v 'LIBARCHIVE.xattr'"
   scp $(scp_opts) "$ENV_FILE" "$SSH_USER@$HOST:$REMOTE_DIR/$REMOTE_ENV_FILE"
 }
 
@@ -300,15 +310,26 @@ EOF
 }
 
 stop_conflicts() {
-  local ports=("5001" "5002" "8000" "8085" "5432")
-  log "Stopping containers bound to service ports (${ports[*]})"
+  local ports=("80" "5001" "5002" "8000" "8085" "3000" "5432")
+  log "Stopping containers and processes bound to service ports (${ports[*]})"
   ssh $(ssh_opts) "$SSH_USER@$HOST" bash -s <<EOF
 set -euo pipefail
 for port in ${ports[*]}; do
+  # Stop Docker containers using the port
   ids=\$(sudo docker ps --filter "publish=\${port}" --format '{{.ID}}')
   if [[ -n "\$ids" ]]; then
-    sudo docker stop \$ids >/dev/null
-    sudo docker rm \$ids >/dev/null || true
+    sudo docker stop \$ids >/dev/null 2>&1 || true
+    sudo docker rm \$ids >/dev/null 2>&1 || true
+  fi
+  # Also stop any stopped containers that might be holding the port
+  stopped_ids=\$(sudo docker ps -a --filter "publish=\${port}" --format '{{.ID}}')
+  if [[ -n "\$stopped_ids" ]]; then
+    sudo docker rm \$stopped_ids >/dev/null 2>&1 || true
+  fi
+  # Kill any processes directly using the port (fallback)
+  pids=\$(sudo lsof -ti:\${port} 2>/dev/null || true)
+  if [[ -n "\$pids" ]]; then
+    sudo kill -9 \$pids >/dev/null 2>&1 || true
   fi
 done
 EOF
@@ -321,18 +342,28 @@ deploy_services() {
   stop_conflicts
 
   local compose_cmd="sudo docker compose --env-file $REMOTE_ENV_FILE -f $REMOTE_COMPOSE_FILE"
-  local services="postgres init-migrations agent-api auth-service user-service ingestion-service"
-  local up_flags=("--remove-orphans" "-d")
-  [[ "$NO_BUILD" -eq 1 ]] || up_flags+=("--build" "--pull" "always")
+  local services="postgres init-migrations agent-api auth-service user-service ingestion-service frontend-service nginx"
+  local up_flags="--remove-orphans -d"
+  [[ "$NO_BUILD" -eq 1 ]] || up_flags="$up_flags --build --pull always"
 
   log "Rebuilding and restarting services on $HOST"
-  ssh $(ssh_opts) "$SSH_USER@$HOST" "cd '$REMOTE_DIR' && { $compose_cmd down --remove-orphans || true; $compose_cmd up ${up_flags[*]} $services; }"
+  ssh $(ssh_opts) "$SSH_USER@$HOST" bash -s <<EOF
+set -euo pipefail
+cd "$REMOTE_DIR"
+# Ensure compose is fully down and ports are released
+$compose_cmd down --remove-orphans || true
+sleep 2
+# Start services
+$compose_cmd up $up_flags $services
+EOF
 
   log "Health checks:"
+  log "  curl -fsS http://$HOST/health"
   log "  curl -fsS http://$HOST:5001/health"
   log "  curl -fsS http://$HOST:5002/v1/health"
   log "  curl -fsS http://$HOST:8000/health"
   log "  curl -fsS http://$HOST:8085/health"
+  log "  curl -fsS http://$HOST:3000/health"
   log "  psql -h $HOST -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-vizonomy_user} -c 'select 1'"
 }
 
