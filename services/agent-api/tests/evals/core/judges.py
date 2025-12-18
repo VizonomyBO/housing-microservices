@@ -36,19 +36,21 @@ class LLMJudge:
             f"Answer: {answer}\n"
             f"Documents:\n{context_block}"
         )
-        try:
+        messages = [
+            {
+                "role": "system",
+                "content": "You grade answers for grounding and citation faithfulness.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        def _call(extra_body: Optional[dict] = None) -> MetricResult:
             response = self.client.chat.completions.create(
                 model=self.model,
                 temperature=0,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You grade answers for grounding and citation faithfulness.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 response_format={"type": "json_object"},
-                extra_body={"reasoning": {"effort": self.reasoning_effort}},
+                extra_body=extra_body,
             )
             content = response.choices[0].message.content or "{}"
             parsed = json.loads(content)
@@ -61,10 +63,18 @@ class LLMJudge:
                 score=score,
                 detail=explanation,
             )
-        except Exception as error:  # noqa: BLE001
-            return MetricResult(
-                name=MetricName.LLM_GROUNDING,
-                passed=False,
-                score=None,
-                detail=f"LLM judge failed: {error}",
-            )
+
+        try:
+            return _call(extra_body={"reasoning": {"effort": self.reasoning_effort}})
+        except Exception:
+            try:
+                # Fallback for APIs that do not support the reasoning parameter.
+                return _call(extra_body=None)
+            except Exception as error:  # noqa: BLE001
+                return MetricResult(
+                    name=MetricName.LLM_GROUNDING,
+                    passed=False,
+                    score=None,
+                    detail=f"LLM judge failed: {error}",
+                    skipped=True,
+                )

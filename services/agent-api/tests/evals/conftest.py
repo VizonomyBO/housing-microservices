@@ -15,6 +15,30 @@ from .core.scenarios import Dataset, ResolvedScenario, load_dataset, resolve_sce
 
 
 DATASET_PATH = pathlib.Path(__file__).parent / "datasets" / "shared_mex_arg.yaml"
+ROOT_DIR = pathlib.Path(__file__).resolve().parents[4]
+
+
+def _load_env_defaults() -> None:
+    """Load prod defaults from the repo .env.prod file without overriding existing env."""
+    env_path = ROOT_DIR / ".env.prod"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    # Normalize templated URLs that rely on compose vars.
+    agent_url = os.environ.get("AGENT_BASE_URL")
+    if not agent_url or "${" in agent_url:
+        os.environ["AGENT_BASE_URL"] = "http://52.207.140.87:8000"
+    auth_url = os.environ.get("AUTH_BASE_URL")
+    if not auth_url or "${" in auth_url:
+        os.environ["AUTH_BASE_URL"] = "http://52.207.140.87:5001"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -28,6 +52,9 @@ def pytest_configure(config: pytest.Config) -> None:
     ]
     for marker in markers:
         config.addinivalue_line("markers", marker)
+
+
+_load_env_defaults()
 
 
 @pytest.fixture(scope="session")
