@@ -55,10 +55,10 @@ uv run pytest -n auto
 ```
 
 ## Agent evals (prod dataset)
-- Require `.env.evals` (no `.env.prod` fallback) with `AGENT_BASE_URL=http://localhost:8000`, prod `AUTH_BASE_URL`/DB URLs, `AUTH_SHARED_SECRET`, eval user creds (`eval_user@example.com` / `TestPass123!` / `52f96e69-2232-4215-878e-45041858ba30`), and OpenAI/Voyage keys. Set `PYODIDE_BASE_URL` to enable code-tool evals.
+- Require `.env.evals` (no `.env.prod` fallback) with `AGENT_BASE_URL=http://localhost:8000`, prod `AUTH_BASE_URL`/DB URLs, `AUTH_SHARED_SECRET`, eval user creds (`eval_user@example.com` / `TestPass123!` / `52f96e69-2232-4215-878e-45041858ba30`), and OpenAI/Voyage keys.
 - Install Deno via `curl -fsSL https://deno.land/install.sh | sh` (defaults to `$HOME/.deno/bin`) and ensure `export PATH="$HOME/.deno/bin:$PATH"` for non-login shells; do **not** add PATH overrides to env files. Verify with `deno --version`.
 - Run: `set -a && source .env.evals && set +a && cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1` (streaming evals are currently skipped).
-- Uses the prod MEX corpus and eval user; artifacts write to `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored).
+- Code-tool evals run locally via Deno (Pyodide sandbox) and do not require `PYODIDE_BASE_URL`. Artifacts write to `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored).
 
 ## Deprecations
 - Lambda/Step Functions ingestion, Valkey cache/rate limiter, reduced-scope modes, and telemetry extras are removed from active workflows.
