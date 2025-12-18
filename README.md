@@ -60,6 +60,18 @@ uv run pytest -n auto
 - Run: `set -a && source .env.evals && set +a && cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1` (streaming evals are currently skipped).
 - Code-tool evals run locally via Deno (Pyodide sandbox) and do not require `PYODIDE_BASE_URL`. Artifacts write to `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored).
 
+## Env files quick map
+- `.env.local`: local compose (Agent API + ingestion + auth/user + Postgres; LocalStack when used). Selected by `scripts/use_env.sh local` and used for local smoke/dev.
+- `.env.dev`: hybrid/dev against remote infra (e.g., EC2 Postgres/S3/ingestion) while running services locally with `docker-compose.ec2.yml`. Selected by `scripts/use_env.sh dev`.
+- `.env.prod`: production stack values for deploys and prod smokes.
+- `.env.evals`: required for the eval suite; mirrors prod creds/URLs but sets `AGENT_BASE_URL=http://localhost:8000` for a locally running Agent API.
+
+## Env files quick map
+- `.env.local`: local compose (Agent API + ingestion + auth/user + Postgres; LocalStack when used). Selected by `scripts/use_env.sh local` and used for local smoke/dev.
+- `.env.dev`: hybrid/dev against remote infra (e.g., EC2 Postgres/S3/ingestion) while running services locally with `docker-compose.ec2.yml`. Selected by `scripts/use_env.sh dev`.
+- `.env.prod`: production stack values for deploys and prod smokes.
+- `.env.evals`: required for the eval suite; mirrors prod creds/URLs but sets `AGENT_BASE_URL=http://localhost:8000` for a locally running Agent API.
+
 ## Deprecations
 - Lambda/Step Functions ingestion, Valkey cache/rate limiter, reduced-scope modes, and telemetry extras are removed from active workflows.
 - Graph RAG/workflow tables remain in the shared data layer for backward compatibility but are explicitly deprecated and nullable; do not build new features on them.
