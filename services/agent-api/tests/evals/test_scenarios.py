@@ -5,6 +5,7 @@ import pytest
 from .core.runner import EvalRunner
 from .core.scenarios import ResolvedScenario
 from .core.telemetry import citation_doc_ids
+import os
 
 
 @pytest.fixture
@@ -13,6 +14,9 @@ def blocking_scenarios(resolved_scenarios: list[ResolvedScenario]) -> list[Resol
         resolved
         for resolved in resolved_scenarios
         if resolved.scenario.turns and resolved.scenario.turns[0].response_mode == "blocking"
+        and not (
+            "eval_pyodide" in resolved.scenario.tags and not os.getenv("PYODIDE_BASE_URL")
+        )
     ]
 
 

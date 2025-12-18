@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
+from httpx import HTTPStatusError
 
 from .telemetry import ChatResult, parse_sse_stream, parse_standard_response
 
@@ -126,26 +127,37 @@ class AgentApiClient:
         constraints: Dict[str, Any],
         response_mode: str = "blocking",
     ) -> ChatResult:
-        start = time.monotonic()
-        resp = self._client.post(
-            f"{self.agent_base_url}/v1/chat",
-            json={
-                "thread_id": conversation_id,
-                "message": {"type": "user", "content": message},
-                "constraints": constraints,
-                "response_mode": response_mode,
-            },
-            headers=self._headers(),
-        )
-        duration_ms = (time.monotonic() - start) * 1000
-        resp.raise_for_status()
-        payload = resp.json()
-        return parse_standard_response(
-            payload=payload,
-            status_code=resp.status_code,
-            response_mode=response_mode,
-            duration_ms=duration_ms,
-        )
+        last_error: Optional[Exception] = None
+        for attempt in range(2):
+            start = time.monotonic()
+            resp = self._client.post(
+                f"{self.agent_base_url}/v1/chat",
+                json={
+                    "thread_id": conversation_id,
+                    "message": {"type": "user", "content": message},
+                    "constraints": constraints,
+                    "response_mode": response_mode,
+                },
+                headers=self._headers(),
+            )
+            duration_ms = (time.monotonic() - start) * 1000
+            try:
+                resp.raise_for_status()
+                payload = resp.json()
+                return parse_standard_response(
+                    payload=payload,
+                    status_code=resp.status_code,
+                    response_mode=response_mode,
+                    duration_ms=duration_ms,
+                )
+            except HTTPStatusError as error:
+                last_error = error
+                if resp.status_code >= 500 and attempt == 0:
+                    continue
+                raise HTTPStatusError(
+                    f"{error}. response_text={resp.text}", request=resp.request, response=resp
+                )
+        raise RuntimeError(f"Chat failed after retries: {last_error}")
 
     def chat_stream(
         self,
@@ -153,24 +165,33 @@ class AgentApiClient:
         message: str,
         constraints: Dict[str, Any],
     ) -> ChatResult:
-        start = time.monotonic()
-        with self._client.stream(
-            "POST",
-            f"{self.agent_base_url}/v1/chat",
-            json={
-                "thread_id": conversation_id,
-                "message": {"type": "user", "content": message},
-                "constraints": constraints,
-                "response_mode": "stream",
-            },
-            headers=self._headers(),
-        ) as resp:
-            resp.raise_for_status()
-            result = parse_sse_stream(
-                status_code=resp.status_code,
-                response_mode="stream",
-                lines=resp.iter_lines(),
-                duration_ms=0.0,
-            )
-        result.duration_ms = (time.monotonic() - start) * 1000
-        return result
+        last_error: Optional[Exception] = None
+        for attempt in range(2):
+            start = time.monotonic()
+            with self._client.stream(
+                "POST",
+                f"{self.agent_base_url}/v1/chat",
+                json={
+                    "thread_id": conversation_id,
+                    "message": {"type": "user", "content": message},
+                    "constraints": constraints,
+                    "response_mode": "stream",
+                },
+                headers=self._headers(),
+            ) as resp:
+                try:
+                    resp.raise_for_status()
+                    result = parse_sse_stream(
+                        status_code=resp.status_code,
+                        response_mode="stream",
+                        lines=resp.iter_lines(),
+                        duration_ms=0.0,
+                    )
+                except HTTPStatusError as error:
+                    last_error = error
+                    if resp.status_code >= 500 and attempt == 0:
+                        continue
+                    raise
+            result.duration_ms = (time.monotonic() - start) * 1000
+            return result
+        raise RuntimeError(f"Streaming chat failed after retries: {last_error}")

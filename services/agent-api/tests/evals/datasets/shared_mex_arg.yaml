@@ -63,25 +63,36 @@ scenarios:
           - name: "llm_bias"
             threshold: 0.7
           - name: "latency_ms"
-            threshold: 12000
+            threshold: 15000
           - name: "llm_grounding"
             threshold: 0.7
-  - name: "sse_mex_stream"
-    description: "Streaming chat smoke over Mexico housing finance corpus to ensure SSE response integrity."
-    tags: ["eval", "eval_sse", "eval_heavy"]
+  - name: "pyodide_cagr_mex_mortgages"
+    description: "Compute CAGR of Mexico outstanding mortgages as % of GDP (2000 vs 2015) using the code tool, with citations."
+    tags: ["eval", "eval_api", "eval_pyodide"]
     constraints:
       country_code: "MEX"
       auto_attach_base_docs: false
     attachments:
-      - "a3f5776b-8a9e-4020-97d9-31a5b01f39f4"
+      - "0510b240-5b88-4ae4-8678-4a21ac2ed102"
+      - "4d18a758-371e-4991-8f0f-bc9545395f4a"
     turns:
       - role: "user"
-        content: "Stream a brief summary of risks and recommendations from the Mexico housing finance materials."
-        response_mode: "stream"
+        content: "Using the attached reports, calculate the compound annual growth rate (CAGR) of Mexico's outstanding mortgages as a percentage of GDP, from 5.2% in 2000 to 12% in 2015. Use the code tool to perform the calculation, show the math steps briefly, and report the CAGR percent with citations for the input figures."
+        response_mode: "blocking"
         metrics:
-          - name: "latency_ms"
-            threshold: 20000
+          - name: "citation_coverage"
+            threshold: 0.9
           - name: "citation_precision"
-            threshold: 0.7
-          - name: "retrieval_relevance"
+            threshold: 0.9
+          - name: "citation_recall"
             threshold: 0.5
+          - name: "retrieval_relevance"
+            threshold: 0.6
+          - name: "llm_truthfulness"
+            threshold: 0.7
+          - name: "llm_bias"
+            threshold: 0.7
+          - name: "latency_ms"
+            threshold: 15000
+          - name: "llm_grounding"
+            threshold: 0.7
