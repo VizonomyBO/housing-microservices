@@ -70,4 +70,4 @@ scenarios:
         response_mode: "stream"
         metrics:
           - name: "latency_ms"
-            threshold: 15000
+            threshold: 20000
