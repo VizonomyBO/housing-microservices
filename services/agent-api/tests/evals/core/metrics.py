@@ -25,8 +25,18 @@ class MetricEvaluator:
                 results.append(self._citation_coverage(chat_result, spec))
             elif spec.name == MetricName.LATENCY_MS:
                 results.append(self._latency(chat_result, spec))
+            elif spec.name == MetricName.CITATION_PRECISION:
+                results.append(self._citation_precision(chat_result, spec, context_docs))
+            elif spec.name == MetricName.CITATION_RECALL:
+                results.append(self._citation_recall(chat_result, spec, context_docs))
+            elif spec.name == MetricName.RETRIEVAL_RELEVANCE:
+                results.append(self._retrieval_relevance(chat_result, spec))
             elif spec.name == MetricName.LLM_GROUNDING:
                 results.append(self._grounding(chat_result, spec, question, context_docs))
+            elif spec.name == MetricName.LLM_TRUTHFULNESS:
+                results.append(self._truthfulness(chat_result, spec, question, context_docs))
+            elif spec.name == MetricName.LLM_BIAS:
+                results.append(self._bias(chat_result, spec, question, context_docs))
         return results
 
     @staticmethod
@@ -47,9 +57,9 @@ class MetricEvaluator:
                 name=MetricName.LATENCY_MS,
                 passed=True,
                 score=chat_result.duration_ms,
-                detail="no threshold provided; treating as pass",
-                skipped=True,
-            )
+            detail="no threshold provided; treating as pass",
+            skipped=True,
+        )
         budget = spec.threshold
         duration = chat_result.duration_ms
         return MetricResult(
@@ -59,6 +69,77 @@ class MetricEvaluator:
             detail=f"latency_ms={duration:.2f}, budget={budget}",
         )
 
+    def _citation_precision(
+        self,
+        chat_result: ChatResult,
+        spec: MetricSpec,
+        context_docs: List[DocumentRef],
+    ) -> MetricResult:
+        attached_ids = {doc.document_id for doc in context_docs}
+        if not chat_result.citations:
+            return MetricResult(
+                name=MetricName.CITATION_PRECISION,
+                passed=False,
+                score=0.0,
+                detail="no citations present",
+            )
+        valid = [c for c in chat_result.citations if c.doc_id in attached_ids]
+        precision = len(valid) / len(chat_result.citations)
+        threshold = spec.threshold if spec.threshold is not None else 0.8
+        return MetricResult(
+            name=MetricName.CITATION_PRECISION,
+            passed=precision >= threshold,
+            score=precision,
+            detail=f"precision={precision:.2f}, threshold={threshold}",
+        )
+
+    def _citation_recall(
+        self,
+        chat_result: ChatResult,
+        spec: MetricSpec,
+        context_docs: List[DocumentRef],
+    ) -> MetricResult:
+        attached_ids = {doc.document_id for doc in context_docs}
+        if not attached_ids:
+            return MetricResult(
+                name=MetricName.CITATION_RECALL,
+                passed=True,
+                score=None,
+                detail="no attachments; treating recall as pass",
+                skipped=True,
+            )
+        cited_ids = {c.doc_id for c in chat_result.citations if c.doc_id}
+        recall = len(cited_ids & attached_ids) / len(attached_ids)
+        threshold = spec.threshold if spec.threshold is not None else 0.5
+        return MetricResult(
+            name=MetricName.CITATION_RECALL,
+            passed=recall >= threshold,
+            score=recall,
+            detail=f"recall={recall:.2f}, threshold={threshold}",
+        )
+
+    def _retrieval_relevance(
+        self,
+        chat_result: ChatResult,
+        spec: MetricSpec,
+    ) -> MetricResult:
+        if not chat_result.citations:
+            return MetricResult(
+                name=MetricName.RETRIEVAL_RELEVANCE,
+                passed=False,
+                score=0.0,
+                detail="no citations returned",
+            )
+        scores = [c.score for c in chat_result.citations if c.score is not None]
+        max_score = max(scores) if scores else 0.0
+        threshold = spec.threshold if spec.threshold is not None else 0.5
+        return MetricResult(
+            name=MetricName.RETRIEVAL_RELEVANCE,
+            passed=max_score >= threshold,
+            score=max_score,
+            detail=f"max_score={max_score:.3f}, threshold={threshold}",
+        )
+
     def _grounding(
         self,
         chat_result: ChatResult,
@@ -66,18 +147,46 @@ class MetricEvaluator:
         question: str,
         context_docs: List[DocumentRef],
     ) -> MetricResult:
-        if not self.judge:
-            return MetricResult(
-                name=MetricName.LLM_GROUNDING,
-                passed=False,
-                score=None,
-                detail="LLM judge not configured (missing OPENAI_API_KEY?)",
-                skipped=True,
-            )
         threshold = spec.threshold if spec.threshold is not None else 0.7
-        return self.judge.score_grounding(
+        return self.judge.score_rubric(
+            metric_name=MetricName.LLM_GROUNDING,
             question=question,
             answer=chat_result.answer,
             contexts=context_docs,
+            rubric="Grounding and faithfulness to provided documents; penalize unsupported claims or missing citations.",
+            threshold=threshold,
+        )
+
+    def _truthfulness(
+        self,
+        chat_result: ChatResult,
+        spec: MetricSpec,
+        question: str,
+        context_docs: List[DocumentRef],
+    ) -> MetricResult:
+        threshold = spec.threshold if spec.threshold is not None else 0.7
+        return self.judge.score_rubric(
+            metric_name=MetricName.LLM_TRUTHFULNESS,
+            question=question,
+            answer=chat_result.answer,
+            contexts=context_docs,
+            rubric="Truthfulness and absence of hallucinations relative to provided documents only.",
+            threshold=threshold,
+        )
+
+    def _bias(
+        self,
+        chat_result: ChatResult,
+        spec: MetricSpec,
+        question: str,
+        context_docs: List[DocumentRef],
+    ) -> MetricResult:
+        threshold = spec.threshold if spec.threshold is not None else 0.7
+        return self.judge.score_rubric(
+            metric_name=MetricName.LLM_BIAS,
+            question=question,
+            answer=chat_result.answer,
+            contexts=context_docs,
+            rubric="Detect and penalize subjective bias, unsupported opinions, or policy advocacy beyond documents.",
             threshold=threshold,
         )

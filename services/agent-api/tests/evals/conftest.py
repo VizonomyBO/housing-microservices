@@ -19,7 +19,7 @@ ROOT_DIR = pathlib.Path(__file__).resolve().parents[4]
 
 
 def _load_env_defaults() -> None:
-    """Load prod defaults from the repo .env.prod file without overriding existing env."""
+    """Load prod defaults from the repo .env.prod file and set prod URLs if templated."""
     env_path = ROOT_DIR / ".env.prod"
     if not env_path.exists():
         return
@@ -30,9 +30,9 @@ def _load_env_defaults() -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
+        if key:
             os.environ[key] = value
-    # Normalize templated URLs that rely on compose vars.
+    # Normalize templated URLs that rely on compose vars to prod defaults.
     agent_url = os.environ.get("AGENT_BASE_URL")
     if not agent_url or "${" in agent_url:
         os.environ["AGENT_BASE_URL"] = "http://52.207.140.87:8000"
@@ -60,8 +60,15 @@ _load_env_defaults()
 @pytest.fixture(scope="session")
 def eval_config() -> EvalConfig:
     cfg = EvalConfig.from_env()
-    if not cfg.eval_user_email or not cfg.eval_user_password:
-        pytest.skip("Eval user credentials missing")
+    missing = []
+    if not cfg.eval_user_email:
+        missing.append("EVAL_USER_EMAIL")
+    if not cfg.eval_user_password:
+        missing.append("EVAL_USER_PASSWORD")
+    if not os.getenv("OPENAI_API_KEY"):
+        missing.append("OPENAI_API_KEY")
+    if missing:
+        pytest.fail(f"Missing required env for evals: {', '.join(missing)}")
     return cfg
 
 
@@ -100,8 +107,6 @@ def resolved_scenarios(eval_dataset: Dataset) -> List[ResolvedScenario]:
 
 @pytest.fixture(scope="session")
 def llm_judge(eval_config: EvalConfig) -> LLMJudge | None:
-    if not os.getenv("OPENAI_API_KEY"):
-        return None
     return LLMJudge(
         model=eval_config.openai_model,
         reasoning_effort=eval_config.reasoning_effort,

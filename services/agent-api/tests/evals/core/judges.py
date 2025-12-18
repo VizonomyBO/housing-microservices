@@ -15,11 +15,13 @@ class LLMJudge:
         self.model = model
         self.reasoning_effort = reasoning_effort
 
-    def score_grounding(
+    def score_rubric(
         self,
+        metric_name: str,
         question: str,
         answer: str,
         contexts: Iterable[DocumentRef],
+        rubric: str,
         threshold: float,
     ) -> MetricResult:
         doc_lines: List[str] = []
@@ -29,52 +31,34 @@ class LLMJudge:
             )
         context_block = "\n".join(doc_lines)
         prompt = (
-            "You are an LLM judge scoring how well an answer is grounded in the provided documents.\n"
-            "Score from 0 to 1 where 1 is fully grounded and faithful. Respond with JSON: "
-            '{"score": <0-1 number>, "explanation": "<short reason>"}.\n'
+            "You are an LLM judge for RAG evaluations.\n"
+            "Return JSON with fields: score (0-1) and explanation (short, 1-2 sentences).\n"
+            f"Metric: {metric_name}\n"
+            f"Rubric: {rubric}\n"
             f"Question: {question}\n"
             f"Answer: {answer}\n"
             f"Documents:\n{context_block}"
         )
-        messages = [
-            {
-                "role": "system",
-                "content": "You grade answers for grounding and citation faithfulness.",
-            },
-            {"role": "user", "content": prompt},
-        ]
-
-        def _call(extra_body: Optional[dict] = None) -> MetricResult:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                temperature=0,
-                messages=messages,
-                response_format={"type": "json_object"},
-                extra_body=extra_body,
-            )
-            content = response.choices[0].message.content or "{}"
-            parsed = json.loads(content)
-            score = float(parsed.get("score", 0))
-            explanation = parsed.get("explanation") or parsed.get("reason") or ""
-            passed = score >= threshold
-            return MetricResult(
-                name=MetricName.LLM_GROUNDING,
-                passed=passed,
-                score=score,
-                detail=explanation,
-            )
-
-        try:
-            return _call(extra_body={"reasoning": {"effort": self.reasoning_effort}})
-        except Exception:
-            try:
-                # Fallback for APIs that do not support the reasoning parameter.
-                return _call(extra_body=None)
-            except Exception as error:  # noqa: BLE001
-                return MetricResult(
-                    name=MetricName.LLM_GROUNDING,
-                    passed=False,
-                    score=None,
-                    detail=f"LLM judge failed: {error}",
-                    skipped=True,
-                )
+        response = self.client.chat.completions.create(
+            model=self.model,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You grade answers for RAG quality (grounding, precision, recall, truthfulness, bias).",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        score = float(parsed.get("score", 0))
+        explanation = parsed.get("explanation") or parsed.get("reason") or ""
+        passed = score >= threshold
+        return MetricResult(
+            name=metric_name,
+            passed=passed,
+            score=score,
+            detail=explanation,
+        )

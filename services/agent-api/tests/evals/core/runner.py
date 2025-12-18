@@ -92,7 +92,7 @@ class EvalRunner:
 
     def _write_artifact(self, eval_result: EvalResult, resolved: ResolvedScenario) -> None:
         ts = time.strftime("%Y%m%dT%H%M%S")
-        scenario_dir = self.artifact_dir / ts / eval_result.scenario_name
+        scenario_dir = self.artifact_dir
         scenario_dir.mkdir(parents=True, exist_ok=True)
         artifact = {
             "scenario": resolved.scenario.model_dump(),
@@ -107,5 +107,6 @@ class EvalRunner:
             },
             "metrics": [metric.__dict__ for metric in eval_result.metrics],
         }
-        with (scenario_dir / "result.json").open("w", encoding="utf-8") as handle:
+        filename = f"{ts}_{eval_result.scenario_name}.json"
+        with (scenario_dir / filename).open("w", encoding="utf-8") as handle:
             json.dump(artifact, handle, indent=2)

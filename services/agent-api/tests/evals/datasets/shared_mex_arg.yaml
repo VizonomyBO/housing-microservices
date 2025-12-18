@@ -52,6 +52,16 @@ scenarios:
         metrics:
           - name: "citation_coverage"
             threshold: 0.8
+          - name: "citation_precision"
+            threshold: 0.9
+          - name: "citation_recall"
+            threshold: 0.5
+          - name: "retrieval_relevance"
+            threshold: 0.6
+          - name: "llm_truthfulness"
+            threshold: 0.7
+          - name: "llm_bias"
+            threshold: 0.7
           - name: "latency_ms"
             threshold: 12000
           - name: "llm_grounding"
@@ -71,3 +81,7 @@ scenarios:
         metrics:
           - name: "latency_ms"
             threshold: 20000
+          - name: "citation_precision"
+            threshold: 0.7
+          - name: "retrieval_relevance"
+            threshold: 0.5
