@@ -1,104 +1,94 @@
-# LLM Agent Eval Suite Proposal
+# LLM Agent Eval Suite Design (OOP pytest, API-driven)
 
-## Goals & Constraints
-- Type-safe, OOP-first eval scenarios runnable via `uv run pytest`, not bespoke CLIs.
-- Exercise the real Agent API over HTTP using production credentials (`.env.prod`); no dependency overrides, stubs, or mocks.
-- Target the ingestion-first, text-only stack (FastAPI ingestion, BM25 + pgvector with Voyage `voyage-context-3` + `rerank-2.5`, ReAct agent with Pyodide tool). Avoid graph/planner/cache/reduced-scope paths.
-- Attach existing prod documents stored in AWS Postgres/S3, load conversation history, and evaluate responses with LLM-as-judge metrics.
-- Capture retrieval traces (chunk IDs, scores, latency) for metrics and write eval artifacts to JSON under `artifacts/evals/` (gitignored).
-- Treat eval runs as read-only at the product level: create real conversations/attachments but avoid custom in-memory stores or bypassed persistence layers.
-- Enable a focused metric stack (faithfulness, answer/context relevance, latency, grounding) with a single default judge model (`gpt-5.1`) and an env override. Set `reasoning.effort` to `medium` via API parameters rather than encoding it in the model name.
+Design for a maintainable pytest harness that drives the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against the production stack. All evals ingest and use the `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` corpora as shared documents (no owner), and every metric is judged by `gpt-5.1` with `reasoning.effort=high`.
 
-## Recommended Stack (grounded in research)
-- **DeepEval** for pytest-friendly LLM-as-judge metrics and typed test cases (30+ metrics, supports component/e2e eval) [deepeval docs](https://deepeval.com/docs/getting-started).
-- **Ragas** for retrieval-oriented metrics (faithfulness, answer relevancy, context precision/recall) with pytest CI mode [ragas pytest guide](https://docs.ragas.io/en/v0.3.0/howtos/applications/add_to_ci/).
-- **TruLens RAG triad** (context relevance, groundedness, answer relevance) as a conceptual baseline for custom metrics [trulens RAG triad](https://www.trulens.org/getting_started/core_concepts/rag_triad/).
-- **Judge models**: Default to **gpt-5.1** for gating, and set `reasoning.effort` (`low`|`medium`|`high`) in the request body; allow overrides via `EVAL_JUDGE_MODEL` but keep the surface limited to OpenAI judges to avoid drift.
+## Goals & Guardrails
+- Real HTTP surface only: hit `/v1/conversations`, `/v1/conversations/{id}/attachments`, `/v1/chat` (blocking + SSE) with prod credentials; no DI overrides or stubs.
+- Text-only ingestion path: ingest MEX/ARG PDFs through ingestion-service (`/v1/documents/upload` → `/v1/documents/upload/complete`) with `owner_user_id=""`/`access_scope="base"` so docs are shareable; verify `status=active` before attaching.
+- Advanced retrieval expectations: BM25 + pgvector with Voyage `voyage-context-3` + `rerank-2.5`, HyDE/HyPE rewrites, contextual headers, fusion diversity, strict `[c#]` citations.
+- OOP-first pytest: scenario objects + thin client abstractions; fixtures manage env, auth, ingestion, and artifact sinks to minimize duplication.
+- Metrics use maintained libraries (DeepEval, Ragas) plus deterministic checks; judges default to `gpt-5.1` with `reasoning.effort=high` and a single override knob.
 
-## Proposed Architecture & Abstractions
-- **Type-safe scenario models (Pydantic v2)**:
-  - `DocRef`: `{doc_id: UUID, version_id: str | None, title: str}` representing existing DB/S3 documents to attach.
-  - `Turn`: `{role: Literal["user","assistant"], content: str, attachments: list[DocRef] | None}` for multi-turn histories.
-  - `Expectation`: `{label: str, rubric: str, expected_answer: str | None, citations_required: bool}`.
-  - `MetricSpec`: enum of built-in metrics (`faithfulness`, `context_precision`, `answer_relevancy`, `toxicity`, `latency`, etc.) with optional thresholds and judge model.
-  - `EvalScenario`: name, description, tenant/scope, dataset tag, `turns`, `expectations`, `metric_specs`, optional seeds for reproducibility.
-  - `EvalRunConfig`: judge model defaults, OpenAI/Anthropic keys, `stateless=True`, `capture_retrieval=True`, `read_only_db=True`, output path.
-- **Execution harness (pytest + httpx)**:
-  - Call the live Agent API (`AGENT_BASE_URL`) with HS256 tokens minted from `AUTH_SHARED_SECRET`; no DI overrides or auth stubs.
-  - Create conversations via `/v1/conversations`, bulk-attach existing documents, and post `/v1/chat` with `allow_stateless=false`.
-  - Capture retrieval data (chunk IDs/scores/latency) via response telemetry and feed them to metrics; write artifacts locally.
-- **Metric layer**:
-  - Ragas metrics for retrieval quality: context precision/recall, answer relevance, faithfulness using retrieved chunks vs. answer.
-  - DeepEval metrics for factuality/hallucination, toxicity, coherence, and custom GEval rubrics per `Expectation`.
-  - Custom deterministic metrics: latency budgets, citation coverage (% of sentences with citations), empty-context guard.
-  - Support per-scenario thresholds and judge model overrides; default to `gpt-5.1` for gating with an env override when needed.
-- **Result handling**:
-  - Write `artifacts/evals/<timestamp>/<scenario>.json` containing input turns, retrieved chunks (IDs and text hashes), raw model outputs, metric scores, and LLM judge transcripts.
-  - Optionally emit a single merged `summary.json` for dashboards; never write to application DB.
+## Harness Architecture (OOP)
+- **AgentApiClient**: wraps `httpx.AsyncClient` for prod base URL; methods to mint HS256 JWT (`AUTH_SHARED_SECRET`), create conversations, bulk-attach docs, send chat (blocking/SSE), and parse citations/latency from responses. SSE helper buffers events for metric use.
+- **Scenario Models (Pydantic v2)**:
+  - `AttachmentSpec`: `document_id`, `country_code`, `visibility`, `role`, `access_scope` (default `base`).
+  - `Turn`: `role`, `content`, `attachments`, `expectations` (optional rubrics), `response_mode` (blocking/stream).
+  - `MetricSpec`: enum for `faithfulness`, `answer_relevancy`, `context_precision`, `context_recall`, `citation_coverage`, `latency_budget`, `rerank_ordering`, `toxicity` with thresholds + optional judge override.
+  - `EvalScenario`: name, description, tags, `constraints` (country_code, auto_attach_base_docs), corpus (`AttachmentSpec` list), ordered `turns`, metric plan, expected rerank filters (HyDE/fusion flags), SSE expectation (stream vs blocking).
+  - `EvalRunConfig`: base URL, `EVAL_USER_ID`, JWT secret, judge model (default `gpt-5.1`), reasoning effort (`high`), artifact dir, timeouts, retry/backoff.
+- **EvalRunner**: orchestrates one scenario—creates conversation, bulk-attaches docs, executes turns, captures telemetry (latency, citations, retrieved chunk IDs/scores if returned), runs metric evaluators, and writes artifacts. Supports `stateless=False` by default to exercise persistence.
+- **Metrics Layer**:
+  - DeepEval GEval for `faithfulness` and `answer_relevancy` using `gpt-5.1` judge (reasoning.effort=high) with scenario-specific thresholds.
+  - Ragas `context_precision`/`context_recall` fed with retrieved chunks/citations, aligning judges via the Ragas alignment guide.
+  - Deterministic: citation coverage (% sentences with `[c#]`), rerank monotonicity (scores non-increasing), latency budget per turn, attachment gating assertions (non-active docs must fail).
+- **Artifacts**: JSON per run under `services/agent-api/tests/evals/artifacts/<ts>/<scenario>/` (gitignored) capturing prompts, responses, SSE transcript, retrieval traces, metric scores, and judge rationales.
 
-## Filesystem Layout (proposed)
+## Pytest Layout & Fixtures
 ```
 services/agent-api/tests/evals/
+  conftest.py           # env/marker config, artifact dir fixture, judge client fixture
   core/
-    scenarios.py        # Pydantic models + loader
-    runner.py           # Pytest fixtures, FastAPI TestClient setup, dependency overrides
-    metrics.py          # Ragas + DeepEval adapters, custom metrics
-    judges.py           # Judge model selection/config (OpenAI/Anthropic/local)
-    telemetry.py        # Retrieval trace sink + helpers
+    client.py           # AgentApiClient (HTTP + SSE helpers)
+    scenarios.py        # Pydantic models + loaders (YAML/JSON)
+    runner.py           # EvalRunner orchestrating chat + metrics
+    metrics.py          # DeepEval + Ragas adapters + deterministic checks
+    judges.py           # judge config (gpt-5.1 reasoning.effort=high default)
+    telemetry.py        # helpers to parse citations/chunks/latency from responses
   datasets/
-    housing_basics.yaml     # Scenario definitions (docs, turns, expectations)
-    troubleshooting.yaml
-  artifacts/             # gitignored JSON outputs per run
-  test_scenarios.py      # Parametrized pytest using Scenario objects
+    shared_mex_arg.yaml # canonical doc IDs/content_hashes + scenarios
+    stress/*.yaml       # high-recall, hyde/fusion, pyodide, attachment-gating cases
+  test_scenarios.py     # parametrized pytest entrypoint (marks=eval,eval_api,eval_sse)
+  artifacts/            # gitignored outputs
 ```
-- Keep proposal doc here: `docs/testing/llm_eval_suite_proposal.md`.
+- **Fixtures**:
+  - `eval_env`: validates `AGENT_BASE_URL`, `AUTH_SHARED_SECRET`, `EVAL_USER_ID`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `INGEST_BASE_URL`; skips with clear reason if missing.
+  - `agent_client`: initialized `AgentApiClient` with signed JWT for `EVAL_USER_ID`.
+  - `ingested_docs`: seeds/refreshes MEX/ARG via ingestion (see below), returns IDs + content hashes for scenarios.
+  - `scenario_catalog`: loads YAML scenarios into `EvalScenario` objects for parametrization.
+  - `artifact_writer`: writes run artifacts to timestamped directory; respects `EVAL_ARTIFACTS_DIR`.
 
-## Example Flow (pytest)
-```python
-# services/agent-api/tests/evals/test_scenarios.py
-import pytest
-from .core.runner import EvalRunner
-from .core.scenarios import load_scenarios
+## MEX/ARG Corpora Ingestion (prod-only, shared)
+- Files: `/home/nubol23/Desktop/Codes/MEX/*.pdf`, `/home/nubol23/Desktop/Codes/ARG/*.pdf`.
+- Flow (per ingestion-service):
+  1. `POST /v1/documents/upload` with JSON: `document_name`, `source_type="pdf"`, `access_scope="base"`, `owner_user_id=""`, `file_size_bytes`, `country_code` (`MEX`/`ARG`), `language="en"`, optional `tags` (`["eval","shared"]`), `output_dimension` (match pgvector, default 1024). Auth via ingestion bearer (HS256, see `ingestion_service.auth`).
+  2. Receive `upload.url` + signed form fields; `owner_user_id` stays blank (maps to shared/system owner).
+  3. `POST upload.url` multipart with the PDF file and returned fields. On success, expect `status="active"` and `content_hash`.
+  4. Verify via Agent API `GET /v1/documents?content_hash=...` and record `document_id` + `content_hash` in `datasets/shared_mex_arg.yaml`.
+- Treat uploads as idempotent via `content_hash`; if deduped, reuse returned IDs. Ingest once, reuse for all eval scenarios.
 
-runner = EvalRunner()
+## Scenario Coverage (examples)
+- **Hybrid retrieval + HyDE/HyPE**: long-form policy questions spanning multiple MEX/ARG memos; assert rerank scores drop monotonically and Ragas recall passes threshold.
+- **Attachment gating**: attempt chat with non-active doc ID → expect 409; then re-run with active doc → success.
+- **SSE streaming**: run `response_mode=stream`, ensure tokens arrive in order and final `done` frame contains citations/latency.
+- **Citation strictness**: numeric questions (e.g., finance metrics) must include `[c#]` markers and DeepEval faithfulness > threshold.
+- **Pyodide tool**: dataset question requiring tabular calc; assert tool call present and answer relevancy >= threshold.
+- **Ownership/null owner**: shared docs (owner=None/`SYSTEM_OWNER_SENTINEL`) attach and answer; per-user doc should be skipped when thread owner differs.
 
-@pytest.mark.parametrize("scenario", load_scenarios("datasets/housing_basics.yaml"))
-def test_eval_scenario(scenario):
-    result = runner.run(scenario)
-    result.assert_thresholds()  # raises if any metric falls below spec
-    result.write_artifacts()    # dumps JSON locally
-```
-- `EvalRunner.run`:
- 1) Mints an HS256 token, creates a conversation via `/v1/conversations`, and bulk-attaches documents.
- 2) Builds conversation history + attachments from `Scenario` and calls `/v1/chat` (live API).
- 3) Captures retrieval traces via `EvalTelemetrySink`.
- 4) Evaluates metrics (Ragas/DeepEval/custom) and returns a typed `EvalResult`.
+## Metrics & Judge Configuration
+- **Judge**: default `model="gpt-5.1"` with `reasoning.effort="high"` on every metric call; override via `EVAL_JUDGE_MODEL` for experiments. Aligns with LLM-as-judge best practices from Evidently and Ragas (prompt clarity, role hints).
+- **DeepEval**: use GEval templates for `faithfulness` and `answer_relevancy` (per https://deepeval.com/docs/metrics-faithfulness); thresholds suggested start at `>=0.8` faithfulness, `>=0.75` answer relevancy.
+- **Ragas**: `context_precision` and `context_recall` (per https://docs.ragas.io/en/stable/howtos/applications/align-llm-as-judge/) computed from retrieved chunks/citations; thresholds tuned per scenario (e.g., precision >=0.6, recall >=0.5 for long docs).
+- **Deterministic checks**: citation coverage >=90% of sentences have `[c#]`; rerank ordering non-increasing; latency budgets per scenario (e.g., <12s total, <4s streaming first token). Qdrant’s RAG eval guide informs recall/latency focus (https://qdrant.tech/blog/rag-evaluation-guide/).
+- **Toxicity/safety**: optional DeepEval toxicity metric for open-ended prompts; default threshold high (<=0.1 risk score).
 
-## Data Safety (read prod, do not write)
-- Use production credentials and real endpoints; no stubs or mocking. Expect real conversations/attachments to be created during evals.
-- Avoid re-uploading docs; reference existing `doc_id`/`version_id` via `DocRef` so the harness stays read-mostly.
-- Keep eval-side artifacts and judge transcripts on disk only (`artifacts/evals/`, gitignored); do not push judge content into the app DB.
+## Pytest Markers, Commands, CI
+- Markers: `@pytest.mark.eval` for all evals, `eval_api` for HTTP blocking, `eval_sse` for streaming, `eval_pyodide` for tool-heavy, `eval_heavy` for longer latency.
+- Commands:
+  - Local/prod: `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
+  - Stream focus: `uv run pytest tests/evals -m "eval_sse" --disable-warnings -q`
+- CI integration: optional nightly job that exports required env secrets, runs `-m eval_api and not eval_heavy`, uploads artifacts as workflow artifacts; skips gracefully when env vars missing.
+- Gitignore `services/agent-api/tests/evals/artifacts/` and DeepEval caches; artifacts stored locally only.
 
-## Metrics & Judges
-- **Retrieval**: context precision/recall, answer relevance, groundedness (TruLens triad), chunk coverage (% of cited chunks).
-- **Response quality**: faithfulness/hallucination (GEval/DeepEval), fluency/coherence, safety/toxicity.
-- **Operational**: latency budgets per scenario, token/price accounting, fallback/dedupe detection.
-- **Judges**: default `gpt-5.1` with `reasoning.effort=medium` (env override supported); keep the judge surface limited to OpenAI for consistency and cache calls locally to stabilize runs.
+## Implementation Notes
+- Reuse shared data layer types for document IDs/owner representations; never craft raw SQL.
+- Keep retries minimal (e.g., backoff on 429/5xx from Agent API/OpenAI) and fail fast otherwise.
+- Scenario definitions stay declarative (YAML/JSON) but load into OOP models for reuse inside tests.
+- Use `auto_attach_base_docs=True` where appropriate to exercise built-in base corpus handling; otherwise explicitly set attachments per turn.
 
-## Execution Commands (proposed)
-- Local dev: `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
-- Record artifacts only: `EVAL_ARTIFACTS_DIR=artifacts/evals/$(date +%s) uv run pytest tests/evals -m eval --disable-warnings -q`
-
-## Current Eval Suite (implemented)
-- Dataset coverage: `datasets/housing_basics.yaml` (policy memo overview) and `datasets/reduced_e2e_smoke.yaml` (reduced E2E prompts: guardrails, District 9 plan, ledger aggregate, KPI trigger). Scenarios attach the prod-seeded reduced E2E docs: policy `fb400d68-3200-4e07-9231-cea9ee7163eb`, ledger `6806e86f-549f-4588-84de-2dd089a8f7da`, KPI `232d5d61-f083-448f-ae2f-2aa9b9a1a3c0` (content from `tests/data/reduced_e2e/*.md`).
-- Harness wiring: Real HTTP calls to the Agent API (`AGENT_BASE_URL`) using HS256 tokens from `AUTH_SHARED_SECRET`; creates conversations via `/v1/conversations`, bulk-attaches documents, then posts `/v1/chat` with `allow_stateless=false`. No stubs; requires `.env.prod`, `EVAL_USER_ID`, and OPENAI credentials.
-- Metrics: DeepEval GEval (faithfulness/relevance) + Ragas (context precision/recall) + deterministic citation check. Judge default = `gpt-5.1` with `reasoning.effort=medium` for all metrics (override via `EVAL_JUDGE_MODEL`); other judge models are intentionally not wired.
-- Artifacts: JSON under `tests/evals/artifacts/evals/<ts>/<scenario>/result.json` (gitignored) unless `EVAL_ARTIFACTS_DIR` is set.
-- Running locally/CI: `cd services/agent-api && uv run pytest tests/evals -m eval` after `source .env.prod` and `export EVAL_USER_ID=11111111-2222-3333-4444-555555555555`. Adds new conversations/attachments in prod; ensure credentials are present.
-
-## Next Steps to Implement
-1) Keep `services/agent-api/tests/evals` skeleton (core modules, YAML scenarios) current and gitignore `artifacts/evals/`.
-2) Ensure the runner always hits the live Agent API with minted HS256 tokens and existing doc IDs (no auth/DI stubs).
-3) Keep DeepEval/Ragas dependencies in sync via `uv`.
-4) Maintain scenarios using existing production documents (DocRef list) and run a golden-path pytest to validate harness.
-5) Iterate on metric thresholds and judge model defaults; add CI job to run marked `eval` tests on demand (nightly or gated branch label).
+## References
+- LLM-as-judge patterns and prompt design: https://www.evidentlyai.com/llm-guide/llm-as-a-judge
+- Ragas judge alignment + retrieval metrics: https://docs.ragas.io/en/stable/howtos/applications/align-llm-as-judge/
+- DeepEval faithfulness/relevancy metrics: https://deepeval.com/docs/metrics-faithfulness
+- Pytest fixture/factory best practices: https://docs.pytest.org/en/stable/how-to/fixtures.html
+- RAG eval best practices (recall/latency emphasis): https://qdrant.tech/blog/rag-evaluation-guide/
