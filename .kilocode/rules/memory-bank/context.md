@@ -18,6 +18,7 @@ Validate the AWS path after the FastAPI ingestion replacement while keeping LLM 
 - **Attachment safety**: Documents stay blocked until ingestion is active; `/v1/chat` enforces UUID ownership for `thread_id`, with optional stateless mode.
 - **LangChain integrations**: Agent and ingestion now use LangChain Voyage integrations (embeddings/rerank) and LangChain text splitters (RecursiveCharacterTextSplitter) instead of bespoke clients/splitters.
 - **Dev reload compose**: `docker-compose.dev.yml` bind-mounts code for agent-api/ingestion/auth/user/shared_data_layer and runs services with reload; rebuild is only needed when dependencies change.
+- **Init-migrations flow**: Compose now uses a one-shot `init-migrations` service (Dockerfile under `docker/init-migrations/`) that waits for Postgres (pgvector 16 + `scripts/init-databases.sh`), runs `shared_data_layer.manage migrate --revision head`, and gates agent/ingestion startup (`condition: service_completed_successfully`). Prod deploy script includes this service and stops port 5432 conflicts.
 
 ## Next Steps
 1. Run `scripts/prod_smoke_check.sh` in AWS mode and capture command/output.

@@ -48,6 +48,7 @@ flowchart LR
 ### PostgreSQL
 - **Version**: 16 with `pgvector`.
 - **Databases**: `housing` (Agent API/shared) and `auth_db` (auth/user); keep schemas separate.
+- **Init flow**: Base image `pgvector/pgvector:pg16` with `scripts/init-databases.sh` creating both DBs; a dedicated `init-migrations` container (built from `docker/init-migrations/Dockerfile`) waits for DB readiness and runs shared_data_layer Alembic migrations before app services start (compose uses `condition: service_completed_successfully` to gate agent/ingestion).
 
 ## Deployment Model
 - **Local reduced**: Agent API + Postgres (LocalStack optional/deferred) via Compose profiles; defaults are AWS-first. Dev reload available via `docker-compose.dev.yml` with bind mounts; rebuild only for dependency changes.
