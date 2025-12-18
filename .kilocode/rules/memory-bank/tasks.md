@@ -49,6 +49,7 @@
 ## Agent Eval Suite (Prod, Pytest)
 - **Purpose**: Run RAG evals over the prod Agent API using the eval user and preloaded MEX corpus (no uploads). Artifacts are stored at `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored; flat).
 - **Prereqs**: `.env.evals` mirrors `.env.prod` but sets `AGENT_BASE_URL=http://localhost:8000` for local Agent API against the prod DB/auth; requires `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, Voyage keys. Loader fails if `.env.evals` and `.env.prod` are both missing.
+- **Deno**: install locally via `curl -fsSL https://deno.land/install.sh | sh` and ensure `$HOME/.deno/bin` is on PATH; do not set PATH in `.env.evals`/`.env.prod`.
 - **Command**: `set -a && source .env.evals && set +a && cd services/agent-api && uv run pytest tests/evals -m eval` (streaming currently skipped; re-enable with `-m eval_sse`).
 - **Scenarios/Data**: Defined in `services/agent-api/tests/evals/datasets/shared_mex_arg.yaml`; uses doc IDs from the MEX corpus already active for the eval user. Metrics include citation coverage/precision/recall, retrieval relevance, latency, grounding, truthfulness, and bias via `gpt-5.1` judge.
 - **Clients/Fixtures**: Harness under `services/agent-api/tests/evals/core/*` with HTTP client (blocking + SSE), runner, metrics, judge, and env/doc validation. Fails fast if required env vars are missing.

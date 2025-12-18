@@ -89,7 +89,8 @@ services/agent-api/tests/evals/
 - Gitignore `services/agent-api/tests/evals/artifacts/` and DeepEval caches; artifacts stored locally only.
 
 ## Environment Loading & Fail-Fast Defaults
-- `.env.evals` mirrors `.env.prod` but sets `AGENT_BASE_URL=http://localhost:8000` so evals can drive a local Agent API against the prod DB/auth; loader requires `.env.evals` (no fallback). Required: `AGENT_BASE_URL`, `AUTH_BASE_URL`, `EVAL_USER_EMAIL`, `EVAL_USER_PASSWORD`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, and Deno path exports (`DENO_INSTALL` and `PATH=${DENO_INSTALL}/bin:${PATH}`) for the vendored sandbox.
+- `.env.evals` mirrors `.env.prod` but sets `AGENT_BASE_URL=http://localhost:8000` so evals can drive a local Agent API against the prod DB/auth; loader requires `.env.evals` (no fallback). Required: `AGENT_BASE_URL`, `AUTH_BASE_URL`, `EVAL_USER_EMAIL`, `EVAL_USER_PASSWORD`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `EVAL_USER_ID`, `AUTH_SHARED_SECRET`.
+- Deno: install once via `curl -fsSL https://deno.land/install.sh | sh` and ensure your shell PATH includes `$HOME/.deno/bin` (shell init handles this). Do **not** override PATH in `.env.evals`; the vendored Pyodide sandbox relies on the global `deno` binary on PATH.
 - No fallbacks to templated URLs or missing secrets; OpenAI/Voyage keys must be present (fail fast).
 
 ## Implementation Notes
