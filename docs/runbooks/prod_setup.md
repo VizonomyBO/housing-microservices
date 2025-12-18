@@ -44,6 +44,17 @@ ENV_FILE="$env_file" ./scripts/prod_deploy_and_smoke.sh \
 ```
 Key flags: `--deploy-mode services-only|full-redeploy|skip`, `--no-build`, `--no-sync`, `--host`, `--smoke-file` (defaults to `services/agent-api/evals/data/MEX_2016_Mexico Financial Sector Assessment Program Housing Finance.pdf`), `--output-file` (defaults to `prod_sample_run.json`).
 
+### Deploying new code changes (services-only)
+Use this for routine updates when infra is already up:
+```bash
+env_file=$(scripts/use_env.sh prod)
+ENV_FILE="$env_file" ./scripts/deploy_stack.sh \
+  --mode services-only \
+  --host 52.207.140.87 \
+  --ssh-key ArchaaS/dist/vizonomy-v2-ec2-dev2.pem
+```
+What it does: syncs the repo + env to `/opt/housing-microservices` on the host, stops any port conflicts (5432/5001/5002/8000/8085), rebuilds images, runs `docker compose -f docker-compose.ec2.yml up -d postgres init-migrations agent-api auth-service user-service ingestion-service`, and prints health-check commands. To force a clean DB, add the volume-drop command from the section above before rerunning.
+
 ## Smoke (automated)
 Runs ingestion → activation → attachment → chat over live endpoints using the FastAPI ingestion service.
 ```bash
