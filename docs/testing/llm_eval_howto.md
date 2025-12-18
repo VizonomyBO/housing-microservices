@@ -3,13 +3,18 @@
 Use the eval harness under `services/agent-api/tests/evals` to exercise the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against prod using the preloaded MEX corpus and eval user.
 
 ## Prereqs
-- Prefer `.env.evals` for local agent + prod deps: includes `AGENT_BASE_URL=http://localhost:8000`, prod `AUTH_BASE_URL`, prod DB URLs, `AUTH_SHARED_SECRET`, `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`. `PYODIDE_BASE_URL` must be set to a reachable sandbox to enable code-tool evals.
-- `.env.prod` is the fallback if `.env.evals` is absent; fixtures auto-load and normalize templated URLs to `http://52.207.140.87:8000`/`5001`.
+- `.env.evals` is required (no `.env.prod` fallback). It should mirror prod settings but set `AGENT_BASE_URL=http://localhost:8000` for the local Agent API and include `AUTH_BASE_URL`, `AUTH_SHARED_SECRET`, `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, and `PYODIDE_BASE_URL` (for code-tool evals).
+- Install Deno locally via `curl -fsSL https://deno.land/install.sh | sh` (defaults to `$HOME/.deno/bin`). Ensure `~/.deno/bin` is on `PATH` for non-login shells, e.g. `export DENO_INSTALL=\"$HOME/.deno\" && export PATH=\"$DENO_INSTALL/bin:$PATH\"`, then verify with `deno --version`. Do **not** add PATH overrides to `.env.evals` or `.env.prod`.
 - Network access to prod services (auth/doc metadata/DB) and OpenAI/Voyage.
 
 ## Commands
-- All evals (blocking; streaming disabled for now): `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
-- To run the code-tool scenario, ensure `PYODIDE_BASE_URL` is set; otherwise it is skipped.
+- Load env and run blocking evals (streaming disabled for now):
+  ```bash
+  set -a && source .env.evals && set +a
+  cd services/agent-api
+  uv run pytest tests/evals -m eval --maxfail=1
+  ```
+- To exercise the code-tool scenario, ensure `PYODIDE_BASE_URL` is set and Deno is on `PATH`; otherwise it is skipped.
 
 ## Data & Scenarios
 - Dataset lives in `services/agent-api/tests/evals/datasets/shared_mex_arg.yaml` and references the active MEX corpus doc IDs already owned by the eval user. Do **not** upload new copies; attach existing IDs.
