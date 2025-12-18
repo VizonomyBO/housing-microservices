@@ -1,0 +1,73 @@
+documents:
+  - document_id: "0510b240-5b88-4ae4-8678-4a21ac2ed102"
+    canonical_name: "MEX_2002_Mexico Low income housing issues and options Main report"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "7f24ae45db4ecc0bbccff7410e91a0742c8e70b8656bffe1a8362d38b00d102a"
+  - document_id: "be7724a0-d8a9-4304-b203-857cb79dce2c"
+    canonical_name: "MEX_2002_Mexico Low income housing issues and options Vol 2 Background studies"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "a5b6612a83b74b51e99791d267132e1b66db86ef3057d6458654d3c56d6fa51b"
+  - document_id: "4d18a758-371e-4991-8f0f-bc9545395f4a"
+    canonical_name: "MEX_2016_Mexico Financial Sector Assessment Program Housing Finance"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "63cd281a56499558bc6b808c90ab53a992defea6fd18519435800d807bf551d9"
+  - document_id: "a3f5776b-8a9e-4020-97d9-31a5b01f39f4"
+    canonical_name: "MEX_2006_Mexico Technical Note on Housing Finance"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "1bc96c203387552ea6514863843d6aa21a7ee988ac7d107c5d2f304347d76a0e"
+  - document_id: "bb8b657e-755d-46c5-a52f-e19d09145886"
+    canonical_name: "MEX_2015_Investing in Residential Energy Efficiency Programs in Mexico"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "47a83c3a661e980dd84397bba68c591de4f1bba18f7361d6c70c5a1cf04f5026"
+  - document_id: "09c2d186-35bf-44c4-9566-d71424587d0d"
+    canonical_name: "MEX_2019_Improving Housing Resilience Synthesis Report"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "2973c1a023629f4b1e1c4a9835270e99e1db85b68059cb477b670fa2abb08eba"
+  - document_id: "c729798f-d11c-4da8-b249-9d406d43ac19"
+    canonical_name: "MEX_2002_FUNHAVIs housing microfinance program in Mexico"
+    country_code: "MEX"
+    access_scope: "user_private"
+    content_hash: "34da8f4292bb88613a289f9534ab58fa51617f8f3d29b0358484162a0dab6ad2"
+
+scenarios:
+  - name: "grounded_mex_summary"
+    description: "Blocking chat summarization over Mexico housing finance corpus with citations and latency guard."
+    tags: ["eval", "eval_api"]
+    constraints:
+      country_code: "MEX"
+      auto_attach_base_docs: false
+    attachments:
+      - "0510b240-5b88-4ae4-8678-4a21ac2ed102"
+      - "4d18a758-371e-4991-8f0f-bc9545395f4a"
+    turns:
+      - role: "user"
+        content: "Provide a concise (2-3 sentence) summary of the housing finance issues highlighted in the attached Mexico reports. Include citations."
+        response_mode: "blocking"
+        metrics:
+          - name: "citation_coverage"
+            threshold: 0.8
+          - name: "latency_ms"
+            threshold: 12000
+          - name: "llm_grounding"
+            threshold: 0.7
+  - name: "sse_mex_stream"
+    description: "Streaming chat smoke over Mexico housing finance corpus to ensure SSE response integrity."
+    tags: ["eval", "eval_sse", "eval_heavy"]
+    constraints:
+      country_code: "MEX"
+      auto_attach_base_docs: false
+    attachments:
+      - "a3f5776b-8a9e-4020-97d9-31a5b01f39f4"
+    turns:
+      - role: "user"
+        content: "Stream a brief summary of risks and recommendations from the Mexico housing finance materials."
+        response_mode: "stream"
+        metrics:
+          - name: "latency_ms"
+            threshold: 15000
