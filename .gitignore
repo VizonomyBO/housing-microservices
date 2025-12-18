@@ -121,3 +121,4 @@ override.tf.json
 Documents/
 services/agent-api/tests/evals/artifacts/
 services/agent-api/.deepeval/
+.env.evals
