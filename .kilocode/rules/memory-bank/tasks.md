@@ -52,3 +52,8 @@
 - **Command**: `set -a && source .env.evals && set +a && cd services/agent-api && uv run pytest tests/evals -m eval` (streaming currently skipped; re-enable with `-m eval_sse`).
 - **Scenarios/Data**: Defined in `services/agent-api/tests/evals/datasets/shared_mex_arg.yaml`; uses doc IDs from the MEX corpus already active for the eval user. Metrics include citation coverage/precision/recall, retrieval relevance, latency, grounding, truthfulness, and bias via `gpt-5.1` judge.
 - **Clients/Fixtures**: Harness under `services/agent-api/tests/evals/core/*` with HTTP client (blocking + SSE), runner, metrics, judge, and env/doc validation. Fails fast if required env vars are missing.
+
+## Prod Smoke / Deploy
+- **Deploy**: `scripts/prod_deploy_and_smoke.sh --deploy-mode services-only --no-build --env-file .env.prod --smoke-file services/agent-api/evals/data/MEX_2016_Mexico\ Financial\ Sector\ Assessment\ Program\ Housing\ Finance.pdf`. Deploy copies repo to `/opt/housing-microservices` on EC2 and runs `docker-compose.ec2.yml` (Postgres included).
+- **PATH note**: Do not override PATH in `.env.prod`; Deno PATH is set in the agent-api image. Postgres relies on its default PATH for `initdb`.
+- **Smoke**: Unified `scripts/local_smoke.sh` (supports `--target prod --env-file .env.prod --upload-file <pdf> --smoke-output <file>`). Uses demo user creds from `.env.prod` (skip registration), re-ingests the MEX FSAP PDF, attaches, and asks the code-tool CAGR question plus RAG questions. Expects `pyodide_sandbox` tool invocation and citations.

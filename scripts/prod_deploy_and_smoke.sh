@@ -178,10 +178,11 @@ run_smoke() {
   [[ -f "$SMOKE_FILE" ]] || die "Smoke upload file $SMOKE_FILE not found"
   log "Starting prod smoke with upload $SMOKE_FILE"
   log "Writing combined log to $LOG_FILE and output JSON to $OUTPUT_FILE"
+  TARGET=prod \
   ENV_FILE="$ENV_FILE" \
   SMOKE_UPLOAD_FILE="$SMOKE_FILE" \
-  PROD_SAMPLE_OUTPUT="$OUTPUT_FILE" \
-    ./scripts/prod_smoke_check.sh 2>&1 | tee "$LOG_FILE"
+  SMOKE_OUTPUT="$OUTPUT_FILE" \
+    ./scripts/local_smoke.sh --target prod --env-file "$ENV_FILE" --upload-file "$SMOKE_FILE" --smoke-output "$OUTPUT_FILE" 2>&1 | tee "$LOG_FILE"
 }
 
 main() {

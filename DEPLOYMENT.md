@@ -30,6 +30,7 @@ Notes:
 - Legacy deploy helper scripts have been removed; use `scripts/deploy_stack.sh` (full-redeploy/services-only/hot-patch) for all rollout modes.
 - `docker-compose.ec2.yml` now contains only the target services (no Lambda/Step Functions/Valkey/telemetry/nginx/swagger).
 - Terraform stack retains EC2 + Postgres + S3; Lambda/Step Functions artifacts have been removed. When running `full-redeploy`, confirm before using `--destroy-first` to avoid dropping data.
+- Do not override PATH globally in `.env.prod`; Deno PATH is set in the agent-api Dockerfile. Postgres relies on its default PATH for `initdb` to be available. The deploy scripts sync `.env.prod` to EC2, so keep PATH clean there.
 
 ## Table of Contents
 

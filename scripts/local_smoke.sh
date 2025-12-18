@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local end-to-end smoke: user -> login -> profile -> ingest eval docs -> poll -> attach -> chat.
+# End-to-end smoke: login -> ingest -> attach -> chat (local or prod targets).
 set -euo pipefail
 
 log() { echo "[local_smoke] $*" >&2; }
@@ -10,19 +10,41 @@ require_cmd() {
   fi
 }
 
+TARGET=${TARGET:-local}
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+ENV_FILE="${ENV_FILE:-}"
+SMOKE_UPLOAD_FILE="${SMOKE_UPLOAD_FILE:-}"
+SMOKE_OUTPUT=${SMOKE_OUTPUT:-"$ROOT_DIR/local_smoke_report.json"}
+SMOKE_UPLOAD_DIR_DEFAULT="$ROOT_DIR/services/agent-api/evals/data"
+SMOKE_UPLOAD_DIR=${SMOKE_UPLOAD_DIR:-"$SMOKE_UPLOAD_DIR_DEFAULT"}
+SMOKE_MAX_POLL_ATTEMPTS=${SMOKE_MAX_POLL_ATTEMPTS:-30}
+SMOKE_POLL_INTERVAL_SEC=${SMOKE_POLL_INTERVAL_SEC:-4}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; shift 2 ;;
+    --smoke-output) SMOKE_OUTPUT="$2"; shift 2 ;;
+    --upload-file) SMOKE_UPLOAD_FILE="$2"; shift 2 ;;
+    *) log "Unknown argument: $1"; exit 1 ;;
+  esac
+done
+
+if [[ -z "$ENV_FILE" ]]; then
+  ENV_FILE="$("$ROOT_DIR"/scripts/use_env.sh "$TARGET")"
+fi
+
+if [[ -f "$ENV_FILE" ]]; then
+  log "Loading env from $ENV_FILE"
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
 require_cmd curl
 require_cmd jq
 require_cmd python3
-
-ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-env_file=${ENV_FILE:-"$("$ROOT_DIR"/scripts/use_env.sh local)"}
-if [[ -f "$env_file" ]]; then
-  log "Loading env from $env_file"
-  set -a
-  # shellcheck disable=SC1090
-  source "$env_file"
-  set +a
-fi
 
 AGENT_BASE_URL=${AGENT_BASE_URL:-http://localhost:${AGENT_API_PORT:-8000}}
 AUTH_BASE_URL=${AUTH_BASE_URL:-http://localhost:${AUTH_SERVICE_PORT:-5001}}
@@ -30,11 +52,25 @@ USER_BASE_URL=${USER_BASE_URL:-http://localhost:${USER_SERVICE_PORT:-5002}}
 INGEST_BASE_URL=${INGEST_BASE_URL:-http://localhost:${INGESTION_SERVICE_PORT:-8085}}
 SMOKE_COUNTRY_CODE=${SMOKE_COUNTRY_CODE:-MEX}
 SMOKE_LANGUAGE=${SMOKE_LANGUAGE:-en}
-SMOKE_OUTPUT=${SMOKE_OUTPUT:-"$ROOT_DIR/local_smoke_report.json"}
-SMOKE_UPLOAD_DIR=${SMOKE_UPLOAD_DIR:-"$ROOT_DIR/services/agent-api/evals/data"}
-SMOKE_MAX_POLL_ATTEMPTS=${SMOKE_MAX_POLL_ATTEMPTS:-30}
-SMOKE_POLL_INTERVAL_SEC=${SMOKE_POLL_INTERVAL_SEC:-4}
+SMOKE_TAG=${SMOKE_TAG:-$( [[ "$TARGET" == "prod" ]] && echo "prod-smoke" || echo "local-smoke" )}
+SMOKE_NAMESPACE=${SMOKE_NAMESPACE:-$SMOKE_TAG}
+SMOKE_ACCESS_SCOPE=${SMOKE_ACCESS_SCOPE:-user_private}
+STAMP_UPLOAD=${STAMP_UPLOAD:-$( [[ "$TARGET" == "prod" ]] && echo 1 || echo 0 )}
 RUN_ID=$(date +%s)
+SMOKE_SKIP_REGISTRATION=${SMOKE_SKIP_REGISTRATION:-$( [[ "$TARGET" == "prod" ]] && echo 1 || echo 0 )}
+if [[ "$SMOKE_SKIP_REGISTRATION" -eq 1 ]]; then
+  SMOKE_USER_EMAIL=${SMOKE_USER_EMAIL:-${PROD_DEMO_EMAIL:-}}
+  SMOKE_USER_PASSWORD=${SMOKE_USER_PASSWORD:-${PROD_DEMO_PASSWORD:-}}
+  SMOKE_USER_USERNAME=${SMOKE_USER_USERNAME:-${PROD_DEMO_USERNAME:-smoke_demo}}
+  if [[ -z "$SMOKE_USER_EMAIL" || -z "$SMOKE_USER_PASSWORD" ]]; then
+    log "SMOKE_SKIP_REGISTRATION=1 requires SMOKE_USER_EMAIL/SMOKE_USER_PASSWORD (or PROD_DEMO_EMAIL/PROD_DEMO_PASSWORD)"
+    exit 1
+  fi
+else
+  SMOKE_USER_EMAIL=${SMOKE_USER_EMAIL:-"smoke_${RUN_ID}@example.com"}
+  SMOKE_USER_PASSWORD=${SMOKE_USER_PASSWORD:-"TestPass123!"}
+  SMOKE_USER_USERNAME=${SMOKE_USER_USERNAME:-"smoke_${RUN_ID}"}
+fi
 
 for required in OPENAI_API_KEY VOYAGE_API_KEY JWT_SECRET_KEY; do
   if [[ -z "${!required:-}" ]]; then
@@ -71,6 +107,14 @@ PY
 }
 
 ensure_files() {
+  if [[ -n "$SMOKE_UPLOAD_FILE" ]]; then
+    if [[ ! -f "$SMOKE_UPLOAD_FILE" ]]; then
+      log "Upload file not found: $SMOKE_UPLOAD_FILE"
+      exit 1
+    fi
+    FILES=("$SMOKE_UPLOAD_FILE")
+    return
+  fi
   if [[ ! -d "$SMOKE_UPLOAD_DIR" ]]; then
     log "Upload dir not found: $SMOKE_UPLOAD_DIR"
     exit 1
@@ -90,18 +134,20 @@ ensure_files
 
 TMP_DOCS=$(mktemp)
 TMP_QAS=$(mktemp)
-trap 'rm -f "$TMP_DOCS" "$TMP_QAS"' EXIT
-
-USER_EMAIL="smoke_${RUN_ID}@example.com"
-USER_PASSWORD="TestPass123!"
-USER_USERNAME="smoke_${RUN_ID}"
+QUESTION_TMP_FILES=()
+UPLOAD_TMP_FILES=()
+trap 'rm -f "$TMP_DOCS" "$TMP_QAS" "${QUESTION_TMP_FILES[@]:-}" "${UPLOAD_TMP_FILES[@]:-}"' EXIT
 
 register_user() {
+  if [[ "$SMOKE_SKIP_REGISTRATION" -eq 1 ]]; then
+    log "Skipping registration; using existing user $SMOKE_USER_EMAIL"
+    return
+  fi
   local payload
   payload=$(jq -n \
-    --arg email "$USER_EMAIL" \
-    --arg username "$USER_USERNAME" \
-    --arg password "$USER_PASSWORD" \
+    --arg email "$SMOKE_USER_EMAIL" \
+    --arg username "$SMOKE_USER_USERNAME" \
+    --arg password "$SMOKE_USER_PASSWORD" \
     '{
       email:$email,
       username:$username,
@@ -126,7 +172,7 @@ register_user() {
 
 login_user() {
   local payload
-  payload=$(jq -n --arg login "$USER_EMAIL" --arg password "$USER_PASSWORD" '{login:$login,password:$password}')
+  payload=$(jq -n --arg login "$SMOKE_USER_EMAIL" --arg password "$SMOKE_USER_PASSWORD" '{login:$login,password:$password}')
   local resp status body
   resp=$(curl -s -w "\n%{http_code}" -X POST "${AUTH_BASE_URL%/}/v1/auth/login" \
     -H 'Content-Type: application/json' -d "$payload")
@@ -167,17 +213,20 @@ request_upload() {
     --arg source "$source_type" \
     --arg country "$SMOKE_COUNTRY_CODE" \
     --arg lang "$SMOKE_LANGUAGE" \
+    --arg tag "$SMOKE_TAG" \
     --argjson size "$size" \
     --arg relpath "${file#$ROOT_DIR/}" \
+    --arg run_id "$RUN_ID" \
+    --arg scope "$SMOKE_ACCESS_SCOPE" \
     '{
       document_name:$name,
       source_type:$source,
       country_code:$country,
       language:$lang,
-      tags:["local-smoke","eval"],
+      tags:[$tag,"eval"],
       file_size_bytes:$size,
-      access_scope:"user_private",
-      metadata:{run_id:'"$RUN_ID"', source:$relpath}
+      access_scope:$scope,
+      metadata:{run_id:$run_id, source:$relpath}
     }')
   resp=$(curl -s -w "\n%{http_code}" -X POST "${INGEST_BASE_URL%/}/v1/documents/upload" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -266,12 +315,14 @@ create_conversation() {
   local payload resp status body
   payload=$(jq -n \
     --arg country "$SMOKE_COUNTRY_CODE" \
-    --arg title "Local Smoke $RUN_ID" \
+    --arg title "Smoke $TARGET $RUN_ID" \
+    --arg namespace "$SMOKE_NAMESPACE" \
+    --arg tag "$SMOKE_TAG" \
     '{
       country_code:$country,
-      namespace:"local-smoke",
+      namespace:$namespace,
       title:$title,
-      tags:["local-smoke","eval"]
+      tags:[$tag, "eval"]
     }')
   resp=$(curl -s -w "\n%{http_code}" -X POST "${AGENT_BASE_URL%/}/v1/conversations" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -311,6 +362,8 @@ attach_documents() {
 
 ask_question() {
   local question="$1"
+  local expected_tool="${2:-}"
+  local output_file="$3"
   local payload resp status body answer citations_count
   payload=$(jq -n \
     --arg thread "$CONVERSATION_ID" \
@@ -334,17 +387,25 @@ ask_question() {
   fi
   answer=$(echo "$body" | jq -r '.done.answer // .done.payload.answer // empty')
   citations_count=$(echo "$body" | jq -r '(.done.citations // .done.payload.citations // []) | length')
+  tool_calls=$(echo "$body" | jq -c '.done.tool_calls // .done.payload.tool_calls // []')
   if [[ -z "$answer" || ${#answer} -lt 20 || "$citations_count" -eq 0 ]]; then
     log "Answer invalid or missing citations: $answer"
     log "Raw response: $body"
     exit 1
   fi
+  if [[ -n "$expected_tool" ]]; then
+    if ! echo "$tool_calls" | jq -e --arg tool "$expected_tool" 'map(select(.name == $tool)) | length > 0' >/dev/null; then
+      log "Expected tool $expected_tool was not invoked; tool_calls=$tool_calls"
+      exit 1
+    fi
+  fi
   local citations_json
   citations_json=$(echo "$body" | jq -c '.done.citations // .done.payload.citations // []')
   jq -n -c --arg q "$question" --arg a "$answer" \
     --argjson citations "$citations_json" \
+    --argjson tool_calls "$tool_calls" \
     --argjson raw "$body" \
-    '{question:$q, answer:$a, citations:$citations, raw:$raw}' >>"$TMP_QAS"
+    '{question:$q, answer:$a, citations:$citations, tool_calls:$tool_calls, raw:$raw}' >"$output_file"
   log "Answered: $question"
 }
 
@@ -356,8 +417,21 @@ for file in "${FILES[@]}"; do
   base=$(basename "$file")
   ext="${base##*.}"
   doc_name="${base%.*}"
+  upload_path="$file"
+  if [[ "$STAMP_UPLOAD" -eq 1 ]]; then
+    tmp_copy="$(mktemp /tmp/smoke_upload_XXXX.${ext})"
+    cp "$file" "$tmp_copy"
+    stamp="$(date -Iseconds)"
+    if [[ "${ext,,}" == "pdf" ]]; then
+      printf '\n%% smoke-run %s\n' "$stamp" >>"$tmp_copy"
+    else
+      printf '\n<!-- smoke-run %s -->\n' "$stamp" >>"$tmp_copy"
+    fi
+    upload_path="$tmp_copy"
+    UPLOAD_TMP_FILES+=("$tmp_copy")
+  fi
   log "Uploading $base"
-  request_upload "$file" "$doc_name" "${ext,,}"
+  request_upload "$upload_path" "$doc_name" "${ext,,}"
 done
 
 create_conversation
@@ -367,25 +441,41 @@ QUESTIONS=(
   "Summarize the main housing finance vulnerabilities highlighted in the Mexico 2016 FSAP report and cite the evidence."
   "List two policy recommendations from the report to strengthen Mexico's mortgage market and mention why each matters."
   "What risks did the report note about housing-related funding sources, and how should they be mitigated?"
+  "Using evidence from the Mexico 2016 FSAP housing finance report, use the pyodide_sandbox code execution tool to calculate the compound annual growth rate (CAGR) for a mortgage portfolio growing from 520 billion MXN in 2010 to 1.2 trillion MXN in 2015. Show the Python code you executed and cite the report sections you relied on."
 )
+QUESTION_EXPECTED_TOOL=("" "" "" "pyodide_sandbox")
 
-for q in "${QUESTIONS[@]}"; do
-  ask_question "$q"
+pids=()
+for idx in "${!QUESTIONS[@]}"; do
+  tmp_out=$(mktemp)
+  QUESTION_TMP_FILES+=("$tmp_out")
+  (
+    ask_question "${QUESTIONS[$idx]}" "${QUESTION_EXPECTED_TOOL[$idx]}" "$tmp_out"
+  ) &
+  pids+=("$!")
 done
 
-DOCS_JSON=$(jq -s '.' "$TMP_DOCS")
-QAS_JSON=$(jq -s '.' "$TMP_QAS")
+for pid in "${pids[@]}"; do
+  if ! wait "$pid"; then
+    log "One or more questions failed"
+    exit 1
+  fi
+done
+
+cat "${QUESTION_TMP_FILES[@]}" >>"$TMP_QAS"
 
 jq -n \
   --arg run_id "$RUN_ID" \
+  --arg target "$TARGET" \
   --arg conversation_id "$CONVERSATION_ID" \
-  --arg user_email "$USER_EMAIL" \
+  --arg user_email "$SMOKE_USER_EMAIL" \
   --arg agent_url "$AGENT_BASE_URL" \
   --arg ingest_url "$INGEST_BASE_URL" \
-  --argjson documents "$DOCS_JSON" \
-  --argjson questions "$QAS_JSON" \
+  --slurpfile documents "$TMP_DOCS" \
+  --slurpfile questions "$TMP_QAS" \
   '{
     run_id:$run_id,
+    target:$target,
     conversation_id:$conversation_id,
     user_email:$user_email,
     agent_base_url:$agent_url,
