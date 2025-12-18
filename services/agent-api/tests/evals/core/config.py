@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 @dataclass
 class EvalConfig:
-    agent_base_url: str
     auth_base_url: str
     eval_user_email: str
     eval_user_password: str
@@ -17,10 +16,9 @@ class EvalConfig:
     @classmethod
     def from_env(cls) -> "EvalConfig":
         return cls(
-            agent_base_url=os.getenv("AGENT_BASE_URL", "http://52.207.140.87:8000"),
-            auth_base_url=os.getenv("AUTH_BASE_URL", "http://52.207.140.87:5001"),
-            eval_user_email=os.getenv("EVAL_USER_EMAIL", "eval_user@example.com"),
-            eval_user_password=os.getenv("EVAL_USER_PASSWORD", "TestPass123!"),
+            auth_base_url=os.getenv("AUTH_BASE_URL"),
+            eval_user_email=os.getenv("EVAL_USER_EMAIL"),
+            eval_user_password=os.getenv("EVAL_USER_PASSWORD"),
             eval_user_id=os.getenv("EVAL_USER_ID"),
             openai_model=os.getenv("EVAL_JUDGE_MODEL", "gpt-5.1"),
             reasoning_effort=os.getenv("EVAL_REASONING_EFFORT", "high"),

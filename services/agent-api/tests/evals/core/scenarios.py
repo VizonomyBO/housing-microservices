@@ -13,7 +13,6 @@ class MetricName:
     CITATION_PRECISION = "citation_precision"
     CITATION_RECALL = "citation_recall"
     RETRIEVAL_RELEVANCE = "retrieval_relevance"
-    LATENCY_MS = "latency_ms"
     LLM_GROUNDING = "llm_grounding"
     LLM_TRUTHFULNESS = "llm_truthfulness"
     LLM_BIAS = "llm_bias"

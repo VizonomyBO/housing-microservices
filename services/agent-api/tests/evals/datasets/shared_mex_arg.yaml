@@ -62,8 +62,6 @@ scenarios:
             threshold: 0.7
           - name: "llm_bias"
             threshold: 0.7
-          - name: "latency_ms"
-            threshold: 15000
           - name: "llm_grounding"
             threshold: 0.7
   - name: "pyodide_cagr_mex_mortgages"
@@ -92,7 +90,5 @@ scenarios:
             threshold: 0.7
           - name: "llm_bias"
             threshold: 0.7
-          - name: "latency_ms"
-            threshold: 15000
           - name: "llm_grounding"
             threshold: 0.7

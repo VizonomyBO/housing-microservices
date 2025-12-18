@@ -1,6 +1,6 @@
 # LLM Agent Eval Suite Design (OOP pytest, API-driven)
 
-Design for a maintainable pytest harness that drives the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against the production stack. All evals reuse the already uploaded `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` corpora tied to the provided eval user account (no new uploads), and every metric is judged by `gpt-5.1` with `reasoning.effort=high`.
+Design for a maintainable pytest harness that drives the Agent API end-to-end (chat + SSE, attachments, retrieval/rerank) against the production stack. All evals reuse the already uploaded `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` corpora tied to the provided eval user account (no new uploads), and every metric is judged by `gpt-5.1` with `reasoning.effort=high`. Evals load `.env.evals` by default (full copy of `.env.prod` but `AGENT_BASE_URL=http://localhost:8000` so they hit a local Agent API pointed at the prod DB/auth) and fail fast if any required secret is missing.
 
 ## Goals & Guardrails
 - Real HTTP surface only: hit `/v1/conversations`, `/v1/conversations/{id}/attachments`, `/v1/chat` (blocking + SSE) with prod credentials; no DI overrides or stubs.
@@ -10,7 +10,7 @@ Design for a maintainable pytest harness that drives the Agent API end-to-end (c
 - Metrics use maintained libraries (DeepEval, Ragas) plus deterministic checks; judges default to `gpt-5.1` with `reasoning.effort=high` and a single override knob.
 
 ## Seed Corpus (MEX/ARG) and Document IDs
-- Reuse the prod-ingested PDFs under `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` that are already uploaded on the provided eval user (`eval_user@example.com`, `TestPass123!`). Do not re-upload these files; rely on the existing IDs and verify they are `status="active"`.
+- Reuse the prod-ingested PDFs under `/home/nubol23/Desktop/Codes/MEX` and `/home/nubol23/Desktop/Codes/ARG` that are already uploaded on the provided eval user (`eval_user@example.com`, `TestPass123!`). Do not re-upload these files; rely on the existing IDs and verify they are `status="active"`. Keep ownership on the eval user—no ownerless/base-scope clones.
 - Expected active document set on the eval user (record in `datasets/shared_mex_arg.yaml` with content hashes):
   - Mexico Low income housing (Main report): `0510b240-5b88-4ae4-8678-4a21ac2ed102`
   - Mexico Low income housing (Vol 2): `be7724a0-d8a9-4304-b203-857cb79dce2c`
@@ -22,7 +22,7 @@ Design for a maintainable pytest harness that drives the Agent API end-to-end (c
 - Attach these documents to conversations for every scenario; do not re-upload unless recovery is required because an ID is missing/archived. Verify `status="active"` before running tests.
 
 ## Harness Architecture (OOP)
-- **AgentApiClient**: wraps `httpx.AsyncClient` for prod base URL; methods to mint HS256 JWT (`AUTH_SHARED_SECRET`), create conversations, bulk-attach docs, send chat (blocking/SSE), and parse citations/latency from responses. SSE helper buffers events for metric use.
+- **AgentApiClient**: wraps `httpx.AsyncClient` for the configured base URL; methods to mint HS256 JWT (`AUTH_SHARED_SECRET`), create conversations, bulk-attach docs, send chat (blocking/SSE), and parse citations/latency from responses. SSE helper exists but streaming tests are currently skipped in pytest to avoid duplicate artifacts while we focus on blocking evals.
 - **Scenario Models (Pydantic v2)**: typed dataclasses to compose pytest parametrization and reuse across suites:
   - `AttachmentSpec`: `document_id`, `country_code`, `visibility`, `role`, `access_scope` (default `base`).
   - `Turn`: `role`, `content`, `attachments`, `expectations` (optional rubrics), `response_mode` (blocking/stream).
@@ -34,7 +34,7 @@ Design for a maintainable pytest harness that drives the Agent API end-to-end (c
   - DeepEval GEval for `faithfulness` and `answer_relevancy` using `gpt-5.1` judge (reasoning.effort=high) with scenario-specific thresholds.
   - Ragas `context_precision`/`context_recall` fed with retrieved chunks/citations, aligning judges via the Ragas alignment guide.
   - Deterministic: citation coverage (% sentences with `[c#]`), rerank monotonicity (scores non-increasing), latency budget per turn, attachment gating assertions (non-active docs must fail).
-- **Artifacts**: JSON per run under `services/agent-api/tests/evals/artifacts/<ts>/<scenario>/` (gitignored) capturing prompts, responses, SSE transcript, retrieval traces, metric scores, and judge rationales.
+- **Artifacts**: JSON per run under `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored) capturing prompts, responses, retrieval traces, metric scores, and judge rationales (flat structure to simplify collection).
 
 ## Pytest Layout & Fixtures
 ```
@@ -69,7 +69,7 @@ services/agent-api/tests/evals/
 - **Attachment gating**: attempt chat with non-active doc ID → expect 409; then re-run with active doc → success.
 - **SSE streaming**: run `response_mode=stream`, ensure tokens arrive in order and final `done` frame contains citations/latency.
 - **Citation strictness**: numeric questions (e.g., finance metrics) must include `[c#]` markers and DeepEval faithfulness > threshold.
-- **Pyodide tool**: dataset question requiring tabular calc; assert tool call present and answer relevancy >= threshold.
+- **Pyodide tool**: dataset question requiring tabular calc; assert tool call present and answer relevancy >= threshold. Uses the vendored Deno-based Pyodide sandbox (no remote base URL or package fallback).
 - **Ownership/access**: docs owned by the eval user attach and answer; docs owned by other users should be rejected or hidden when attempting attachment/chat.
 
 ## Metrics & Judge Configuration
@@ -80,12 +80,17 @@ services/agent-api/tests/evals/
 - **Toxicity/safety**: optional DeepEval toxicity metric for open-ended prompts; default threshold high (<=0.1 risk score).
 
 ## Pytest Markers, Commands, CI
-- Markers: `@pytest.mark.eval` for all evals, `eval_api` for HTTP blocking, `eval_sse` for streaming, `eval_pyodide` for tool-heavy, `eval_heavy` for longer latency. Add `requires_prod` to guard prod-only runs (default).
+- Markers: `@pytest.mark.eval` for all evals, `eval_api` for HTTP blocking, `eval_sse` for streaming (currently skipped), `eval_pyodide` for tool-heavy, `eval_heavy` for longer latency. Add `requires_prod` to guard prod-only runs (default).
 - Commands:
+  - Local Agent API with prod DB/auth (preferred for eval dev): `set -a && source .env.evals && set +a && cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`
   - Prod via compose pointing to prod DB: `COMPOSE_PROFILES=reduced,ops docker compose --env-file .env.prod up agent-api auth-service user-service ingestion-service -d` then `cd services/agent-api && uv run pytest tests/evals -m eval --maxfail=1`; tear down compose after runs.
-  - Stream focus: `uv run pytest tests/evals -m "eval_sse" --disable-warnings -q`
+  - Stream focus (when re-enabled): `uv run pytest tests/evals -m "eval_sse" --disable-warnings -q`
 - CI integration: optional nightly job that exports required env secrets, runs `-m eval_api and not eval_heavy`, uploads artifacts as workflow artifacts; skips gracefully when env vars missing.
 - Gitignore `services/agent-api/tests/evals/artifacts/` and DeepEval caches; artifacts stored locally only.
+
+## Environment Loading & Fail-Fast Defaults
+- `.env.evals` mirrors `.env.prod` but sets `AGENT_BASE_URL=http://localhost:8000` so evals can drive a local Agent API against the prod DB/auth; loader requires `.env.evals` (no fallback). Required: `AGENT_BASE_URL`, `AUTH_BASE_URL`, `EVAL_USER_EMAIL`, `EVAL_USER_PASSWORD`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, and Deno path exports (`DENO_INSTALL` and `PATH=${DENO_INSTALL}/bin:${PATH}`) for the vendored sandbox.
+- No fallbacks to templated URLs or missing secrets; OpenAI/Voyage keys must be present (fail fast).
 
 ## Implementation Notes
 - Reuse shared data layer types for document IDs/owner representations; never craft raw SQL.

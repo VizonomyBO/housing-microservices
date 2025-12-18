@@ -27,6 +27,7 @@ class ChatResult:
     duration_ms: float = 0.0
     raw: Any = None
     request_id: Optional[str] = None
+    tool_calls: Optional[List[dict]] = None
 
 
 def parse_citations(raw: Iterable[dict[str, Any]]) -> List[Citation]:
@@ -55,6 +56,7 @@ def parse_standard_response(
     citations_raw = done_section.get("citations") or []
     citations = parse_citations(citations_raw)
     request_id = payload.get("request_id") or done_section.get("request_id")
+    tool_calls = done_section.get("tool_calls")
     return ChatResult(
         answer=answer,
         citations=citations,
@@ -63,6 +65,7 @@ def parse_standard_response(
         duration_ms=duration_ms,
         raw=payload,
         request_id=request_id,
+        tool_calls=tool_calls,
     )
 
 

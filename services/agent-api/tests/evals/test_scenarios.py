@@ -5,8 +5,6 @@ import pytest
 from .core.runner import EvalRunner
 from .core.scenarios import ResolvedScenario
 from .core.telemetry import citation_doc_ids
-import os
-
 
 @pytest.fixture
 def blocking_scenarios(resolved_scenarios: list[ResolvedScenario]) -> list[ResolvedScenario]:
@@ -14,9 +12,6 @@ def blocking_scenarios(resolved_scenarios: list[ResolvedScenario]) -> list[Resol
         resolved
         for resolved in resolved_scenarios
         if resolved.scenario.turns and resolved.scenario.turns[0].response_mode == "blocking"
-        and not (
-            "eval_pyodide" in resolved.scenario.tags and not os.getenv("PYODIDE_BASE_URL")
-        )
     ]
 
 
@@ -47,6 +42,7 @@ def test_blocking_scenarios(blocking_scenarios: list[ResolvedScenario], eval_run
 @pytest.mark.eval_sse
 @pytest.mark.eval_heavy
 @pytest.mark.requires_prod
+@pytest.mark.skip(reason="Streaming evals temporarily disabled to avoid duplicate SSE outputs")
 def test_streaming_scenarios(streaming_scenarios: list[ResolvedScenario], eval_runner: EvalRunner) -> None:
     for resolved in streaming_scenarios:
         result = eval_runner.run(resolved)

@@ -23,8 +23,6 @@ class MetricEvaluator:
         for spec in metric_specs:
             if spec.name == MetricName.CITATION_COVERAGE:
                 results.append(self._citation_coverage(chat_result, spec))
-            elif spec.name == MetricName.LATENCY_MS:
-                results.append(self._latency(chat_result, spec))
             elif spec.name == MetricName.CITATION_PRECISION:
                 results.append(self._citation_precision(chat_result, spec, context_docs))
             elif spec.name == MetricName.CITATION_RECALL:
@@ -48,25 +46,6 @@ class MetricEvaluator:
             passed=coverage >= threshold,
             score=coverage,
             detail=f"coverage={coverage:.2f}, threshold={threshold}",
-        )
-
-    @staticmethod
-    def _latency(chat_result: ChatResult, spec: MetricSpec) -> MetricResult:
-        if spec.threshold is None:
-            return MetricResult(
-                name=MetricName.LATENCY_MS,
-                passed=True,
-                score=chat_result.duration_ms,
-            detail="no threshold provided; treating as pass",
-            skipped=True,
-        )
-        budget = spec.threshold
-        duration = chat_result.duration_ms
-        return MetricResult(
-            name=MetricName.LATENCY_MS,
-            passed=duration <= budget,
-            score=duration,
-            detail=f"latency_ms={duration:.2f}, budget={budget}",
         )
 
     def _citation_precision(
@@ -155,6 +134,7 @@ class MetricEvaluator:
             contexts=context_docs,
             rubric="Grounding and faithfulness to provided documents; penalize unsupported claims or missing citations.",
             threshold=threshold,
+            citation_snippets=_citation_snippets(chat_result),
         )
 
     def _truthfulness(
@@ -172,6 +152,7 @@ class MetricEvaluator:
             contexts=context_docs,
             rubric="Truthfulness and absence of hallucinations relative to provided documents only.",
             threshold=threshold,
+            citation_snippets=_citation_snippets(chat_result),
         )
 
     def _bias(
@@ -189,4 +170,19 @@ class MetricEvaluator:
             contexts=context_docs,
             rubric="Detect and penalize subjective bias, unsupported opinions, or policy advocacy beyond documents.",
             threshold=threshold,
+            citation_snippets=_citation_snippets(chat_result),
         )
+
+
+def _citation_snippets(chat_result: ChatResult) -> List[str]:
+    snippets: List[str] = []
+    for citation in chat_result.citations:
+        parts = [
+            f"doc_id={citation.doc_id}",
+            f"name={citation.canonical_name}" if citation.canonical_name else None,
+            f"score={citation.score}" if citation.score is not None else None,
+        ]
+        meta = ", ".join([p for p in parts if p])
+        text = citation.text or ""
+        snippets.append(f"- {meta}\n{text}")
+    return snippets

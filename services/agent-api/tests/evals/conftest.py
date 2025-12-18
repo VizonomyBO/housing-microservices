@@ -5,6 +5,7 @@ import pathlib
 from typing import Iterable, List
 
 import pytest
+from fastapi.testclient import TestClient
 
 from .core.client import AgentApiClient
 from .core.config import EvalConfig
@@ -12,6 +13,7 @@ from .core.judges import LLMJudge
 from .core.metrics import MetricEvaluator
 from .core.runner import EvalRunner
 from .core.scenarios import Dataset, ResolvedScenario, load_dataset, resolve_scenario
+from agent_api.http.app import create_app
 
 
 DATASET_PATH = pathlib.Path(__file__).parent / "datasets" / "shared_mex_arg.yaml"
@@ -21,12 +23,15 @@ PROD_ENV_FILE = ".env.prod"
 
 
 def _load_env_defaults() -> None:
-    """Load eval defaults preferring .env.evals, falling back to .env.prod."""
+    """
+    Load eval defaults from .env.evals only. Fail fast if missing to avoid implicit defaults.
+    """
+
     env_path = ROOT_DIR / EVAL_ENV_FILE
     if not env_path.exists():
-        env_path = ROOT_DIR / PROD_ENV_FILE
-    if not env_path.exists():
-        return
+        msg = f"Missing {EVAL_ENV_FILE}; cannot load eval defaults."
+        raise RuntimeError(msg)
+
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -35,14 +40,8 @@ def _load_env_defaults() -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if key:
-            os.environ[key] = value
-    # Normalize templated URLs that rely on compose vars to prod defaults.
-    agent_url = os.environ.get("AGENT_BASE_URL")
-    if not agent_url or "${" in agent_url:
-        os.environ["AGENT_BASE_URL"] = "http://52.207.140.87:8000"
-    auth_url = os.environ.get("AUTH_BASE_URL")
-    if not auth_url or "${" in auth_url:
-        os.environ["AUTH_BASE_URL"] = "http://52.207.140.87:5001"
+            expanded = os.path.expandvars(value)
+            os.environ[key] = expanded
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -65,6 +64,8 @@ _load_env_defaults()
 def eval_config() -> EvalConfig:
     cfg = EvalConfig.from_env()
     missing = []
+    if not cfg.auth_base_url:
+        missing.append("AUTH_BASE_URL")
     if not cfg.eval_user_email:
         missing.append("EVAL_USER_EMAIL")
     if not cfg.eval_user_password:
@@ -83,15 +84,20 @@ def eval_dataset() -> Dataset:
 
 @pytest.fixture(scope="session")
 def agent_client(eval_config: EvalConfig) -> Iterable[AgentApiClient]:
-    client = AgentApiClient(
-        agent_base_url=eval_config.agent_base_url,
-        auth_base_url=eval_config.auth_base_url,
-    )
-    tokens = client.login(eval_config.eval_user_email, eval_config.eval_user_password)
-    if not eval_config.eval_user_id:
-        eval_config.eval_user_id = tokens.user_id
-    yield client
-    client.close()
+    # Run Agent API in-process via ASGI transport (no external HTTP for agent).
+    app = create_app()
+    with TestClient(app) as agent_tc:
+        client = AgentApiClient(
+            agent_base_url="http://testserver",
+            auth_base_url=eval_config.auth_base_url,
+            transport=None,
+            agent_test_client=agent_tc,
+        )
+        tokens = client.login(eval_config.eval_user_email, eval_config.eval_user_password)
+        if not eval_config.eval_user_id:
+            eval_config.eval_user_id = tokens.user_id
+        yield client
+        client.close()
 
 
 @pytest.fixture(scope="session")

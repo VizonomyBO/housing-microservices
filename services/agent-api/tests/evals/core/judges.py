@@ -23,13 +23,18 @@ class LLMJudge:
         contexts: Iterable[DocumentRef],
         rubric: str,
         threshold: float,
+        citation_snippets: Optional[List[str]] = None,
     ) -> MetricResult:
         doc_lines: List[str] = []
         for doc in contexts:
             doc_lines.append(
                 f"- {doc.canonical_name or doc.document_id} (doc_id={doc.document_id}, country={doc.country_code})"
             )
-        context_block = "\n".join(doc_lines)
+        context_block = "\n".join(doc_lines) or "None provided"
+        snippet_block = ""
+        if citation_snippets:
+            formatted = "\n".join(citation_snippets)
+            snippet_block = f"\nCited snippets:\n{formatted}"
         prompt = (
             "You are an LLM judge for RAG evaluations.\n"
             "Return JSON with fields: score (0-1) and explanation (short, 1-2 sentences).\n"
@@ -38,6 +43,7 @@ class LLMJudge:
             f"Question: {question}\n"
             f"Answer: {answer}\n"
             f"Documents:\n{context_block}"
+            f"{snippet_block}"
         )
         response = self.client.chat.completions.create(
             model=self.model,

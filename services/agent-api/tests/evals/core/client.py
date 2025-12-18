@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
+from fastapi.testclient import TestClient
 from httpx import HTTPStatusError
 
 from .telemetry import ChatResult, parse_sse_stream, parse_standard_response
@@ -23,14 +24,32 @@ class AgentApiClient:
         agent_base_url: str,
         auth_base_url: str,
         timeout: float = 60.0,
+        transport: httpx.BaseTransport | None = None,
+        agent_test_client: TestClient | None = None,
     ) -> None:
-        self.agent_base_url = agent_base_url.rstrip("/")
+        base = agent_base_url or "http://testserver"
+        self.agent_base_url = base.rstrip("/")
         self.auth_base_url = auth_base_url.rstrip("/")
-        self._client = httpx.Client(timeout=timeout)
+        mounts: Dict[str, httpx.BaseTransport] = {}
+        if transport:
+            mounts[self.agent_base_url] = transport
+        self._agent = agent_test_client or TestClient(
+            app=None,  # type: ignore[arg-type]  # placeholder if not provided
+            base_url=self.agent_base_url,
+        )
+        if transport and agent_test_client is None:
+            # If no explicit TestClient passed, build an httpx.Client for transport-based usage.
+            self._agent = httpx.Client(timeout=timeout, base_url=self.agent_base_url, mounts=mounts)
+        self._auth = httpx.Client(timeout=timeout)
         self._tokens: Optional[AuthTokens] = None
 
     def close(self) -> None:
-        self._client.close()
+        for client in (self._agent, self._auth):
+            try:
+                if hasattr(client, "close"):
+                    client.close()
+            except Exception:
+                pass
 
     def __enter__(self) -> "AgentApiClient":
         return self
@@ -39,7 +58,7 @@ class AgentApiClient:
         self.close()
 
     def login(self, email: str, password: str) -> AuthTokens:
-        resp = self._client.post(
+        resp = self._auth.post(
             f"{self.auth_base_url}/v1/auth/login",
             json={"login": email, "password": password},
         )
@@ -61,7 +80,7 @@ class AgentApiClient:
         return {"Authorization": f"Bearer {self._tokens.access_token}"}
 
     def list_documents(self, page_size: int = 100) -> Dict[str, Any]:
-        resp = self._client.get(
+        resp = self._agent.get(
             f"{self.agent_base_url}/v1/documents",
             params={"page": 1, "page_size": page_size},
             headers=self._headers(),
@@ -82,12 +101,20 @@ class AgentApiClient:
             "title": title,
             "tags": tags or [],
         }
-        resp = self._client.post(
+        resp = self._agent.post(
             f"{self.agent_base_url}/v1/conversations",
             json=payload,
             headers=self._headers(),
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except HTTPStatusError as exc:
+            detail = resp.text
+            raise HTTPStatusError(
+                f"{exc}. response_text={detail}",
+                request=resp.request,
+                response=resp,
+            ) from exc
         body = resp.json()
         conversation = body.get("conversation") or body
         conversation_id = (
@@ -112,7 +139,7 @@ class AgentApiClient:
             "visibility": visibility,
             "role": role,
         }
-        resp = self._client.post(
+        resp = self._agent.post(
             f"{self.agent_base_url}/v1/conversations/{conversation_id}/attachments/bulk",
             json=payload,
             headers=self._headers(),
@@ -130,7 +157,7 @@ class AgentApiClient:
         last_error: Optional[Exception] = None
         for attempt in range(2):
             start = time.monotonic()
-            resp = self._client.post(
+            resp = self._agent.post(
                 f"{self.agent_base_url}/v1/chat",
                 json={
                     "thread_id": conversation_id,
@@ -165,10 +192,11 @@ class AgentApiClient:
         message: str,
         constraints: Dict[str, Any],
     ) -> ChatResult:
+        # Streaming tests are skipped; keep implementation for completeness.
         last_error: Optional[Exception] = None
         for attempt in range(2):
             start = time.monotonic()
-            with self._client.stream(
+            with self._agent.stream(
                 "POST",
                 f"{self.agent_base_url}/v1/chat",
                 json={

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, cast, List, Dict
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 class ChatRunResult:
     done_payload: dict[str, Any]
     messages: list[dict[str, Any]] | None = None
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 class ChatRunnerProtocol(Protocol):
@@ -197,6 +198,7 @@ class LangGraphRunner(ChatRunnerProtocol):
         if not ai_content:
             ai_content = "I'm sorry, I couldn't produce a response."
 
+        tool_calls = _extract_tool_history(result.get("messages") if isinstance(result, dict) else None)
         citations = runtime.last_retrieval.citations if runtime.last_retrieval else []
         if not citations:
             raise GatewayError(
@@ -224,9 +226,44 @@ class LangGraphRunner(ChatRunnerProtocol):
             "route": "react",
             "citations": citations,
             "requires_sql": False,
+            "tool_calls": tool_calls,
         }
         messages = [{"role": "assistant", "content": ai_content}]
-        return ChatRunResult(done_payload=payload, messages=messages)
+        return ChatRunResult(done_payload=payload, messages=messages, tool_calls=tool_calls)
+
+
+def _extract_tool_history(messages: Any) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    if not messages:
+        return history
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            for call in msg.tool_calls or []:
+                history.append(
+                    {
+                        "type": "tool_call",
+                        "name": call.get("name"),
+                        "id": call.get("id"),
+                        "args": call.get("args"),
+                    }
+                )
+        elif isinstance(msg, ToolMessage):
+            history.append(
+                {
+                    "type": "tool_result",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": msg.content,
+                }
+            )
+        elif isinstance(msg, dict) and msg.get("type") == "tool":
+            history.append(
+                {
+                    "type": "tool_result",
+                    "tool_call_id": msg.get("tool_call_id"),
+                    "content": msg.get("content"),
+                }
+            )
+    return history
 
 
 __all__ = [

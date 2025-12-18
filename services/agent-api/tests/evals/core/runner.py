@@ -104,6 +104,8 @@ class EvalRunner:
                 "status_code": eval_result.chat_result.status_code,
                 "duration_ms": eval_result.chat_result.duration_ms,
                 "request_id": eval_result.chat_result.request_id,
+                "tool_calls": eval_result.chat_result.tool_calls,
+                "raw": eval_result.chat_result.raw,
             },
             "metrics": [metric.__dict__ for metric in eval_result.metrics],
         }
