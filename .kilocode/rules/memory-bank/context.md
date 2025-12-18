@@ -7,6 +7,7 @@ Validate the AWS path after the FastAPI ingestion replacement while keeping LLM 
 - **AWS Verification (Step 9)**: Rerun the AWS curl walkthrough plus `scripts/prod_smoke_check.sh` against the real stack; keep uploads unique and reuse the same execution until resolved.
 - **Ingestion Service**: Exercise the EC2 FastAPI ingestion pipeline end-to-end (MarkItDown → chunk → embed → index → activate) and ensure Agent API attachment gates stay intact.
 - **Tracker Discipline**: Maintain `TASK_PLAN.md` / `TASK_PLAN_PROGRESS.md` for the ingestion work; do **not** delete them at handoff per current-session instructions.
+- **Agent Eval Harness**: Pytest eval suite now lives under `services/agent-api/tests/evals` hitting prod with the eval user and preloaded MEX corpus; artifacts drop under `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json`. Requires `.env.prod` (loads by default) plus `OPENAI_API_KEY`.
 
 ## Recent Changes
 - **FastAPI ingestion on EC2** replaced Lambda/S3; envs/scripts point `INGEST_BASE_URL` to `http://52.207.140.87:8085`, and Agent API upload now proxies to this service (no inline ingestion).

@@ -45,3 +45,10 @@
 
 ## Recent Updates
 - Auth/user services aligned to cache-free stack; images built locally via `docker compose build auth-service user-service` (not pushed to any registry yet).
+
+## Agent Eval Suite (Prod, Pytest)
+- **Purpose**: Run RAG evals over the prod Agent API using the eval user and preloaded MEX corpus (no uploads). Artifacts are stored at `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored).
+- **Prereqs**: `.env.prod` present with `EVAL_USER_EMAIL=eval_user@example.com`, `EVAL_USER_PASSWORD=TestPass123!`, `EVAL_USER_ID=52f96e69-2232-4215-878e-45041858ba30`, `OPENAI_API_KEY`, Voyage keys. `.env.prod` is auto-loaded by the eval fixtures and overrides templated URLs to `http://52.207.140.87:8000` and `http://52.207.140.87:5001`.
+- **Command**: `cd services/agent-api && uv run pytest tests/evals -m eval` (use `-m eval_sse` for streaming focus). Requires prod network access.
+- **Scenarios/Data**: Defined in `services/agent-api/tests/evals/datasets/shared_mex_arg.yaml`; uses doc IDs from the MEX corpus already active for the eval user. Metrics include citation coverage/precision/recall, retrieval relevance, latency, grounding, truthfulness, and bias via `gpt-5.1` judge.
+- **Clients/Fixtures**: Harness under `services/agent-api/tests/evals/core/*` with HTTP client (blocking + SSE), runner, metrics, judge, and env/doc validation. Fails fast if required env vars are missing.
