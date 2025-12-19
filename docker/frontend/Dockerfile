@@ -8,16 +8,20 @@ RUN apk add --no-cache git
 
 # Clone the frontend repository and checkout start-conversation branch
 ARG GITHUB_TOKEN
+# Use CACHEBUST to force fresh clone: docker build --build-arg CACHEBUST=$(date +%s) ...
+ARG CACHEBUST=1
 WORKDIR /app
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-      git clone https://${GITHUB_TOKEN}@github.com/VizonomyBO/housing-frontend.git frontend; \
+RUN echo "Cache bust: $CACHEBUST" && \
+    if [ -n "$GITHUB_TOKEN" ]; then \
+      git clone --depth 1 --branch start-conversation https://${GITHUB_TOKEN}@github.com/VizonomyBO/housing-frontend.git frontend; \
     else \
       echo "Warning: GITHUB_TOKEN not provided, attempting public clone"; \
-      git clone https://github.com/VizonomyBO/housing-frontend.git frontend || exit 1; \
+      git clone --depth 1 --branch start-conversation https://github.com/VizonomyBO/housing-frontend.git frontend || exit 1; \
     fi
 
 WORKDIR /app/frontend
-RUN git checkout start-conversation || echo "Warning: start-conversation branch not found, using default branch"
+# Ensure we have the absolute latest commits
+RUN git fetch origin start-conversation && git reset --hard origin/start-conversation
 
 # Set Vite environment variable for build
 ARG VITE_PUBLIC_CONTENT_URL
