@@ -1,5 +1,6 @@
 # Frontend Dockerfile - Builds React Router app from GitHub
 ARG GITHUB_TOKEN
+ARG VITE_PUBLIC_CONTENT_URL
 FROM node:20-alpine AS builder
 
 # Install git for cloning
@@ -17,6 +18,10 @@ RUN if [ -n "$GITHUB_TOKEN" ]; then \
 
 WORKDIR /app/frontend
 RUN git checkout start-conversation || echo "Warning: start-conversation branch not found, using default branch"
+
+# Set Vite environment variable for build
+ARG VITE_PUBLIC_CONTENT_URL
+ENV VITE_PUBLIC_CONTENT_URL=${VITE_PUBLIC_CONTENT_URL}
 
 # Install dependencies and build
 RUN npm ci && npm run build

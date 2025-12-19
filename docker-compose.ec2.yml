@@ -186,11 +186,13 @@ services:
       dockerfile: docker/frontend/Dockerfile
       args:
         GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+        VITE_PUBLIC_CONTENT_URL: ${VITE_PUBLIC_CONTENT_URL:-https://housing-public-content.s3.us-east-1.amazonaws.com}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
+      VITE_PUBLIC_CONTENT_URL: ${VITE_PUBLIC_CONTENT_URL:-https://housing-public-content.s3.us-east-1.amazonaws.com}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
