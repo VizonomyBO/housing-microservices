@@ -18,7 +18,7 @@ from shared_data_layer.db.maintenance import (
     refresh_active_chunks_view,
     refresh_base_documents_cache_for_country,
 )
-from shared_data_layer.db.models.documents import Document, IngestionJob
+from shared_data_layer.db.models.documents import Document, IngestionJob, UploadedFile
 from shared_data_layer.db.models.retrieval import Chunk, ChunkMetrics
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,7 @@ from ingestion_service.embeddings import (
 )
 from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 from ingestion_service.schemas import UploadInitRequest
+from ingestion_service.storage import S3Storage, StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,7 @@ class IngestionPipeline:
         self._settings = settings
         self._chunker = MarkdownChunker()
         self._converter = MarkdownConverter()
+        self._storage = S3Storage(settings)
         self._storage_dimension = settings.vector_store_dimension
         self._default_output_dimension = settings.voyage_output_dimension
         if self._default_output_dimension != self._storage_dimension:
@@ -300,6 +302,32 @@ class IngestionPipeline:
             ingestion_id=ingestion_id,
             output_dimension=output_dimension,
         )
+
+        # Store original file to S3 for later download
+        try:
+            storage_uri, checksum = await self._storage.upload(
+                document_id=document_id,
+                file_bytes=file_bytes,
+                source_type=request.source_type,
+            )
+            await self._create_uploaded_file(
+                session=session,
+                document=document,
+                owner_user_id=owner_user_id,
+                storage_uri=storage_uri,
+                byte_size=len(file_bytes),
+                content_hash=content_hash,
+                checksum=checksum,
+                source_type=request.source_type,
+            )
+        except StorageError as exc:
+            logger.warning(
+                "Failed to store original file for document %s: %s",
+                document_id,
+                exc,
+            )
+            # Continue with ingestion even if storage fails - file won't be downloadable
+            # but text extraction and indexing will still work
 
         try:
             markdown, conversion_meta = self._converter.convert(
@@ -365,6 +393,40 @@ class IngestionPipeline:
             stmt = stmt.where(Document.owner_user_id == owner_user_id)
         result = await session.execute(stmt.limit(1))
         return result.scalar_one_or_none()
+
+    async def _create_uploaded_file(
+        self,
+        *,
+        session: AsyncSession,
+        document: Document,
+        owner_user_id: UUID | None,
+        storage_uri: str,
+        byte_size: int,
+        content_hash: str,
+        checksum: str,
+        source_type: str,
+    ) -> UploadedFile:
+        """Create an UploadedFile record linking the document to its S3 storage."""
+        uploaded_file = UploadedFile(
+            owner_user_id=owner_user_id,
+            document_id=document.id,
+            storage_uri=storage_uri,
+            byte_size=byte_size,
+            content_hash=content_hash,
+            checksum=checksum,
+            ingestion_metadata={
+                "source_type": source_type,
+                "original_name": document.canonical_name,
+            },
+        )
+        session.add(uploaded_file)
+        await session.flush()
+        logger.info(
+            "Created UploadedFile record for document %s at %s",
+            document.id,
+            storage_uri,
+        )
+        return uploaded_file
 
     async def _create_document(
         self,

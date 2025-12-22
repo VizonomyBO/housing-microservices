@@ -19,6 +19,7 @@ dependencies = [
   "shared-data-layer",
   "langchain-text-splitters>=1.0.0",
   "langchain-voyageai>=0.3.0",
+  "aioboto3>=13.0.0",
 ]
 
 [build-system]

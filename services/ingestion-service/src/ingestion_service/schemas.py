@@ -78,3 +78,14 @@ class UploadCompleteResponse(BaseModel):
     status: str
     content_hash: str
     message: str | None = None
+
+
+class DocumentDownloadResponse(BaseModel):
+    """Response containing a presigned download URL for the document."""
+
+    document_id: UUID
+    document_name: str
+    source_type: str
+    download_url: str
+    expires_in_sec: int
+    byte_size: int

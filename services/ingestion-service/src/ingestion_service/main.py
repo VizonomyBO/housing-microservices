@@ -16,12 +16,15 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.responses import Response
 from pydantic import HttpUrl
+from sqlalchemy import select
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
 from ingestion_service.pipeline import IngestionError, IngestionPipeline
 from ingestion_service.schemas import (
+    DocumentDownloadResponse,
     UploadCompleteResponse,
     UploadInitRequest,
     UploadInitResponse,
@@ -33,7 +36,9 @@ from ingestion_service.settings import (
     get_settings,
 )
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
+from ingestion_service.storage import S3Storage, StorageError
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
+from shared_data_layer.db.models.documents import Document, UploadedFile
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,7 @@ async def lifespan(app: FastAPI):
     )
     await init_engine(settings)
     app.state.pipeline = IngestionPipeline(settings)
+    app.state.storage = S3Storage(settings)
     logger.info("Ingestion service initialized")
     try:
         yield
@@ -322,6 +328,205 @@ async def complete_upload(
         message="Ingestion completed"
         if document.status == "active"
         else "Ingestion failed",
+    )
+
+
+@app.get(
+    "/v1/documents/{document_id}/download",
+    response_model=DocumentDownloadResponse,
+    summary="Get a presigned URL to download the original document file",
+)
+async def download_document(
+    request: Request,
+    document_id: UUID,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> DocumentDownloadResponse:
+    """
+    Generate a presigned URL to download the original uploaded document.
+
+    The URL is valid for 1 hour by default.
+    """
+    user = await _require_user(authorization, settings)
+
+    # Find the document
+    doc_stmt = select(Document).where(
+        Document.id == document_id,
+        Document.deleted_at.is_(None),
+    )
+    result = await db.execute(doc_stmt)
+    document = result.scalar_one_or_none()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check access permissions
+    if document.access_scope == "user_private":
+        if document.owner_user_id != UUID(user.user_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to access this document",
+            )
+    elif document.access_scope == "user_shared":
+        # For shared docs, owner or anyone in a conversation with it can access
+        # For now, allow if user is the owner
+        if (
+            document.owner_user_id
+            and document.owner_user_id != UUID(user.user_id)
+            and document.owner_user_id != SYSTEM_OWNER_SENTINEL
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to access this document",
+            )
+    # base documents are accessible to all authenticated users
+
+    # Find the uploaded file record
+    file_stmt = select(UploadedFile).where(UploadedFile.document_id == document_id)
+    file_result = await db.execute(file_stmt)
+    uploaded_file = file_result.scalar_one_or_none()
+
+    if not uploaded_file:
+        raise HTTPException(
+            status_code=404,
+            detail="Original file not available for download",
+        )
+
+    # Get the source type from metadata or infer from storage URI
+    source_type = "pdf"  # default
+    if uploaded_file.ingestion_metadata:
+        source_type = uploaded_file.ingestion_metadata.get("source_type", "pdf")
+
+    # Generate presigned download URL
+    storage: S3Storage = request.app.state.storage
+    expires_in = 3600  # 1 hour
+
+    try:
+        download_url = await storage.get_download_url(
+            uploaded_file.storage_uri,
+            expires_in=expires_in,
+        )
+    except StorageError as exc:
+        logger.exception("Failed to generate download URL for document %s", document_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate download URL: {exc}",
+        ) from exc
+
+    return DocumentDownloadResponse(
+        document_id=document.id,
+        document_name=document.canonical_name,
+        source_type=source_type,
+        download_url=download_url,
+        expires_in_sec=expires_in,
+        byte_size=uploaded_file.byte_size,
+    )
+
+
+@app.get(
+    "/v1/documents/{document_id}/download/direct",
+    summary="Download the original document file directly",
+    responses={
+        200: {
+            "description": "The document file",
+            "content": {"application/octet-stream": {}},
+        }
+    },
+)
+async def download_document_direct(
+    request: Request,
+    document_id: UUID,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> Response:
+    """
+    Download the original uploaded document file directly.
+
+    Returns the file bytes with appropriate content-type and filename headers.
+    """
+    user = await _require_user(authorization, settings)
+
+    # Find the document
+    doc_stmt = select(Document).where(
+        Document.id == document_id,
+        Document.deleted_at.is_(None),
+    )
+    result = await db.execute(doc_stmt)
+    document = result.scalar_one_or_none()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check access permissions
+    if document.access_scope == "user_private":
+        if document.owner_user_id != UUID(user.user_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to access this document",
+            )
+    elif document.access_scope == "user_shared":
+        if (
+            document.owner_user_id
+            and document.owner_user_id != UUID(user.user_id)
+            and document.owner_user_id != SYSTEM_OWNER_SENTINEL
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to access this document",
+            )
+
+    # Find the uploaded file record
+    file_stmt = select(UploadedFile).where(UploadedFile.document_id == document_id)
+    file_result = await db.execute(file_stmt)
+    uploaded_file = file_result.scalar_one_or_none()
+
+    if not uploaded_file:
+        raise HTTPException(
+            status_code=404,
+            detail="Original file not available for download",
+        )
+
+    # Get source type and determine content type
+    source_type = "pdf"
+    if uploaded_file.ingestion_metadata:
+        source_type = uploaded_file.ingestion_metadata.get("source_type", "pdf")
+
+    content_type_map = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc": "application/msword",
+        "txt": "text/plain",
+        "md": "text/markdown",
+        "html": "text/html",
+        "json": "application/json",
+    }
+    content_type = content_type_map.get(source_type, "application/octet-stream")
+
+    # Download from S3
+    storage: S3Storage = request.app.state.storage
+    try:
+        file_bytes = await storage.download(uploaded_file.storage_uri)
+    except StorageError as exc:
+        logger.exception("Failed to download document %s from storage", document_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download file: {exc}",
+        ) from exc
+
+    # Build filename
+    filename = document.canonical_name
+    if not filename.lower().endswith(f".{source_type}"):
+        filename = f"{filename}.{source_type}"
+
+    return Response(
+        content=file_bytes,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(file_bytes)),
+        },
     )
 
 

@@ -52,6 +52,17 @@ class Settings(BaseSettings):
         default=100 * 1024 * 1024, description="Upload size cap (100MB)"
     )
 
+    # S3 Storage
+    aws_region: str = Field(default="us-east-1", description="AWS region")
+    aws_endpoint_url: str | None = Field(
+        default=None,
+        description="AWS endpoint URL (for LocalStack or compatible services)",
+    )
+    raw_documents_bucket: str = Field(
+        default="housing-raw-dev",
+        description="S3 bucket for storing raw uploaded documents",
+    )
+
     # Ingestion
     allowed_source_types: Sequence[str] = Field(
         default=("pdf", "docx", "doc", "txt", "md", "html", "json")
