@@ -26,6 +26,7 @@ from agent_api.http.routes.chat import router as chat_router
 from agent_api.http.routes.conversations import router as conversations_router
 from agent_api.http.routes.documents import router as documents_router
 from agent_api.http.routes.metrics import router as metrics_router
+from agent_api.http.routes.reports import router as reports_router
 from agent_api.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(attachments_router)
     app.include_router(metrics_router)
+    app.include_router(reports_router)
 
     @app.get("/health", include_in_schema=False)
     async def root_health() -> dict[str, str]:
