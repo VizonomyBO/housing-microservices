@@ -223,6 +223,7 @@ EOF
     --exclude "ArchaaS/terraform.tfstate*"
     --exclude "terraform.tfstate*"
     --exclude ".kilocode"
+    --exclude "Documents"
   )
   # Suppress macOS extended attribute warnings (harmless - Linux tar ignores them)
   # Filter LIBARCHIVE.xattr warnings on both local and remote sides
