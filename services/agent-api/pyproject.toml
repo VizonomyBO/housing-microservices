@@ -26,6 +26,9 @@ dependencies = [
   "testcontainers>=4.7.2",
   "polyfactory>=2.0.0",
   "langchain-voyageai>=0.3.0",
+  "jinja2>=3.1.0",
+  "weasyprint>=62.0",
+  "markdown>=3.6.0",
 ]
 
 [project.optional-dependencies]
