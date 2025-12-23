@@ -351,10 +351,12 @@ deploy_services() {
   ssh $(ssh_opts) "$SSH_USER@$HOST" bash -s <<EOF
 set -euo pipefail
 cd "$REMOTE_DIR"
+# Source env file to make variables available for sudo
+set -a && source "$REMOTE_ENV_FILE" && set +a
 # Ensure compose is fully down and ports are released
 $compose_cmd down --remove-orphans || true
 sleep 2
-# Start services
+# Start services (env vars are now in the environment)
 $compose_cmd up $up_flags $services
 EOF
 

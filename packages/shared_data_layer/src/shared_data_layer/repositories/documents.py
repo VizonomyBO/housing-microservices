@@ -41,9 +41,26 @@ class DocumentRepository(BaseRepository[Document]):
     async def list_documents_for_country(
         self, country_code: str, include_base: bool = True
     ) -> List[DocumentRead]:
-        stmt = select(Document).where(Document.country_code == country_code)
-        # Logic for include_base could be added here if 'base' means something
-        # specific in access_scope or similar
+        """
+        List documents for a country, including:
+        - Country-specific documents (country_code = provided code)
+        - Regional documents (country_code = region code for this country)
+        - Global documents (country_code = 'GLO')
+        """
+        from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
+
+        # Build list of country codes to query
+        codes_to_query = [country_code]
+
+        # Add region code if country is mapped
+        region = REGION_BY_COUNTRY_ALPHA3.get(country_code)
+        if region:
+            codes_to_query.append(region.value)
+
+        # Always add global
+        codes_to_query.append(Region.GLO.value)
+
+        stmt = select(Document).where(Document.country_code.in_(codes_to_query))
         result = await self.session.execute(stmt)
         documents = result.scalars().all()
         return [DocumentRead.model_validate(doc) for doc in documents]

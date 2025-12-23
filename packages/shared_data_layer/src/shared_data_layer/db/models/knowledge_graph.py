@@ -55,9 +55,7 @@ class GraphEntity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             ondelete="SET NULL",
             name="fk_graph_entities_chunk",
         ),
-        {
-            "comment": "Deprecated graph RAG storage; unused by text-only RAG"
-        },
+        {"comment": "Deprecated graph RAG storage; unused by text-only RAG"},
     )
 
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -244,9 +242,7 @@ class GraphCommunity(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "algo_version",
             name="uq_graph_communities_key_algo",
         ),
-        {
-            "comment": "Deprecated graph clustering storage; unused by text-only RAG"
-        },
+        {"comment": "Deprecated graph clustering storage; unused by text-only RAG"},
     )
 
 

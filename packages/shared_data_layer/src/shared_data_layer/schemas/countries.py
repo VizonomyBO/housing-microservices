@@ -288,3 +288,154 @@ class CountryISOAlpha3(str, Enum):
 
 
 COUNTRY_NAME_BY_ALPHA3 = {member.value: member.label for member in CountryISOAlpha3}
+
+
+class Region(str, Enum):
+    """World Bank regional classifications plus Global."""
+
+    AFR = "AFR"  # Africa
+    EAP = "EAP"  # East Asia & Pacific
+    ECA = "ECA"  # Europe & Central Asia
+    LAC = "LAC"  # Latin America and the Caribbean
+    MNA = "MNA"  # Middle East, North Africa, Afghanistan & Pakistan
+    SAR = "SAR"  # South Asia
+    GLO = "GLO"  # Global (applies to all countries)
+
+
+REGION_BY_COUNTRY_ALPHA3: dict[str, Region] = {
+    # Africa (AFR)
+    "AGO": Region.AFR,  # Angola
+    "BFA": Region.AFR,  # Burkina Faso
+    "CMR": Region.AFR,  # Cameroon
+    "COM": Region.AFR,  # Comoros
+    "COD": Region.AFR,  # Congo, Democratic Republic of
+    "SWZ": Region.AFR,  # Eswatini
+    "GMB": Region.AFR,  # Gambia
+    "GNB": Region.AFR,  # Guinea-Bissau
+    "LBR": Region.AFR,  # Liberia
+    "MLI": Region.AFR,  # Mali
+    "MOZ": Region.AFR,  # Mozambique
+    "NGA": Region.AFR,  # Nigeria
+    "SEN": Region.AFR,  # Senegal
+    "SOM": Region.AFR,  # Somalia, Federal Republic of
+    "SDN": Region.AFR,  # Sudan
+    "UGA": Region.AFR,  # Uganda
+    "BEN": Region.AFR,  # Benin
+    "BDI": Region.AFR,  # Burundi
+    "CAF": Region.AFR,  # Central African Republic
+    "CIV": Region.AFR,  # Cote d'Ivoire
+    "GNQ": Region.AFR,  # Equatorial Guinea
+    "ETH": Region.AFR,  # Ethiopia
+    "GHA": Region.AFR,  # Ghana
+    "KEN": Region.AFR,  # Kenya
+    "MDG": Region.AFR,  # Madagascar
+    "MRT": Region.AFR,  # Mauritania
+    "NAM": Region.AFR,  # Namibia
+    "RWA": Region.AFR,  # Rwanda
+    "SYC": Region.AFR,  # Seychelles
+    "ZAF": Region.AFR,  # South Africa
+    "TZA": Region.AFR,  # Tanzania
+    "ZMB": Region.AFR,  # Zambia
+    "BWA": Region.AFR,  # Botswana
+    "CPV": Region.AFR,  # Cabo Verde
+    "TCD": Region.AFR,  # Chad
+    "COG": Region.AFR,  # Congo, Republic of
+    "ERI": Region.AFR,  # Eritrea
+    "GAB": Region.AFR,  # Gabon
+    "GIN": Region.AFR,  # Guinea
+    "LSO": Region.AFR,  # Lesotho
+    "MWI": Region.AFR,  # Malawi
+    "MUS": Region.AFR,  # Mauritius
+    "NER": Region.AFR,  # Niger
+    "STP": Region.AFR,  # Sao Tome & Principe
+    "SLE": Region.AFR,  # Sierra Leone
+    "SSD": Region.AFR,  # South Sudan
+    "TGO": Region.AFR,  # Togo
+    "ZWE": Region.AFR,  # Zimbabwe
+    # East Asia & Pacific (EAP)
+    "KHM": Region.EAP,  # Cambodia
+    "KOR": Region.EAP,  # Korea
+    "MNG": Region.EAP,  # Mongolia
+    "PHL": Region.EAP,  # Philippines
+    "TLS": Region.EAP,  # Timor-Leste
+    "CHN": Region.EAP,  # China
+    "LAO": Region.EAP,  # Lao PDR
+    "MMR": Region.EAP,  # Myanmar
+    "SGP": Region.EAP,  # Singapore
+    "VNM": Region.EAP,  # Viet Nam
+    "IDN": Region.EAP,  # Indonesia
+    "MYS": Region.EAP,  # Malaysia
+    "PNG": Region.EAP,  # Papua New Guinea
+    "THA": Region.EAP,  # Thailand
+    # Europe & Central Asia (ECA)
+    "ALB": Region.ECA,  # Albania
+    "BLR": Region.ECA,  # Belarus
+    "HRV": Region.ECA,  # Croatia
+    "XKX": Region.ECA,  # Kosovo
+    "MNE": Region.ECA,  # Montenegro
+    "ROU": Region.ECA,  # Romania
+    "TJK": Region.ECA,  # Tajikistan
+    "UKR": Region.ECA,  # Ukraine
+    "ARM": Region.ECA,  # Armenia
+    "BIH": Region.ECA,  # Bosnia and Herzegovina
+    "GEO": Region.ECA,  # Georgia
+    "KGZ": Region.ECA,  # Kyrgyz Republic
+    "MKD": Region.ECA,  # North Macedonia
+    "RUS": Region.ECA,  # Russian Federation
+    "TUR": Region.ECA,  # Türkiye
+    "UZB": Region.ECA,  # Uzbekistan
+    "AZE": Region.ECA,  # Azerbaijan
+    "BGR": Region.ECA,  # Bulgaria
+    "KAZ": Region.ECA,  # Kazakhstan
+    "MDA": Region.ECA,  # Moldova
+    "POL": Region.ECA,  # Poland
+    "SRB": Region.ECA,  # Serbia
+    "TKM": Region.ECA,  # Turkmenistan
+    # Latin America and the Caribbean (LAC)
+    "ARG": Region.LAC,  # Argentina
+    "COL": Region.LAC,  # Colombia
+    "DOM": Region.LAC,  # Dominican Republic
+    "GTM": Region.LAC,  # Guatemala
+    "JAM": Region.LAC,  # Jamaica
+    "PAN": Region.LAC,  # Panama
+    "SXM": Region.LAC,  # Sint Maarten
+    "VEN": Region.LAC,  # Venezuela
+    "BOL": Region.LAC,  # Bolivia
+    "CHL": Region.LAC,  # Chile
+    "ECU": Region.LAC,  # Ecuador
+    "HTI": Region.LAC,  # Haiti
+    "MEX": Region.LAC,  # Mexico
+    "PRY": Region.LAC,  # Paraguay
+    "SUR": Region.LAC,  # Suriname
+    "BRA": Region.LAC,  # Brazil
+    "CRI": Region.LAC,  # Costa Rica
+    "SLV": Region.LAC,  # El Salvador
+    "HND": Region.LAC,  # Honduras
+    "NIC": Region.LAC,  # Nicaragua
+    "PER": Region.LAC,  # Peru
+    "URY": Region.LAC,  # Uruguay
+    # Middle East, North Africa, Afghanistan & Pakistan (MNA)
+    "AFG": Region.MNA,  # Afghanistan
+    "EGY": Region.MNA,  # Egypt
+    "JOR": Region.MNA,  # Jordan
+    "MAR": Region.MNA,  # Morocco
+    "SYR": Region.MNA,  # Syria
+    "YEM": Region.MNA,  # Yemen
+    "DZA": Region.MNA,  # Algeria
+    "IRN": Region.MNA,  # Iran
+    "LBN": Region.MNA,  # Lebanon
+    "PAK": Region.MNA,  # Pakistan
+    "TUN": Region.MNA,  # Tunisia
+    "DJI": Region.MNA,  # Djibouti
+    "IRQ": Region.MNA,  # Iraq
+    "LBY": Region.MNA,  # Libya
+    "SAU": Region.MNA,  # Saudi Arabia
+    "PSE": Region.MNA,  # West Bank and Gaza
+    # South Asia (SAR)
+    "IND": Region.SAR,  # India
+    "BGD": Region.SAR,  # Bangladesh
+    "MDV": Region.SAR,  # Maldives
+    "LKA": Region.SAR,  # Sri Lanka
+    "BTN": Region.SAR,  # Bhutan
+    "NPL": Region.SAR,  # Nepal
+}
