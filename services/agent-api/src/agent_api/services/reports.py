@@ -113,6 +113,7 @@ class ReportService:
 
         # 4. Generate Content for each section
         sections_data = []
+        all_citations = {}  # Map citation_id -> document info
         
         # Use a fresh thread ID for the whole report so context is shared
         thread_id = str(uuid4())
@@ -150,6 +151,16 @@ class ReportService:
                 )
                 
                 markdown_content = result.done_payload.get("answer", "")
+                citations = result.done_payload.get("citations", [])
+                
+                # Collect citations from this section
+                for citation in citations:
+                    citation_id = citation.get("citation_id")
+                    if citation_id and citation_id not in all_citations:
+                        all_citations[citation_id] = {
+                            "document_name": citation.get("document_name", "Unknown"),
+                            "chunk_id": citation.get("chunk_id"),
+                        }
                 
                 # Convert Markdown to HTML
                 html_content = markdown.markdown(markdown_content)
@@ -166,7 +177,16 @@ class ReportService:
                     "content": f"<p>Error generating content: {str(e)}</p>"
                 })
 
-        # 5. Render PDF
+        # 5. Build References section
+        references = []
+        for citation_id in sorted(all_citations.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            citation_info = all_citations[citation_id]
+            references.append({
+                "id": citation_id,
+                "document_name": citation_info["document_name"]
+            })
+        
+        # 6. Render PDF
         env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(TEMPLATE_DIR))
         )
@@ -175,7 +195,8 @@ class ReportService:
         rendered_html = template.render(
             country=country_code,
             date=datetime.now().strftime("%d %B %Y"),
-            sections=sections_data
+            sections=sections_data,
+            references=references
         )
 
         pdf_bytes = weasyprint.HTML(string=rendered_html).write_pdf()
