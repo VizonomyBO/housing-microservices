@@ -113,7 +113,7 @@ class ReportService:
 
         # 4. Generate Content for each section
         sections_data = []
-        all_citations = {}  # Map citation_id -> document info
+        all_citations = {}  # Map document_name -> document info (for unique docs)
         
         # Use a fresh thread ID for the whole report so context is shared
         thread_id = str(uuid4())
@@ -153,14 +153,21 @@ class ReportService:
                 markdown_content = result.done_payload.get("answer", "")
                 citations = result.done_payload.get("citations", [])
                 
-                # Collect citations from this section
-                for citation in citations:
-                    citation_id = citation.get("citation_id")
-                    if citation_id and citation_id not in all_citations:
-                        all_citations[citation_id] = {
-                            "document_name": citation.get("document_name", "Unknown"),
-                            "chunk_id": citation.get("chunk_id"),
+                # Collect citations grouped by document
+                # Format: {"doc_id", "chunk_id", "canonical_name", "page_number", "position", "text", "score"}
+                # Citations are numbered [c1]-[c8] per retrieval
+                for idx, citation in enumerate(citations, start=1):
+                    doc_name = citation.get("canonical_name") or citation.get("doc_id", "Unknown")
+                    
+                    # Group citation numbers by document name
+                    if doc_name not in all_citations:
+                        all_citations[doc_name] = {
+                            "document_name": doc_name,
+                            "citation_numbers": [],
                         }
+                    # Add citation number if not already present
+                    if idx not in all_citations[doc_name]["citation_numbers"]:
+                        all_citations[doc_name]["citation_numbers"].append(idx)
                 
                 # Convert Markdown to HTML
                 html_content = markdown.markdown(markdown_content)
@@ -177,14 +184,19 @@ class ReportService:
                     "content": f"<p>Error generating content: {str(e)}</p>"
                 })
 
-        # 5. Build References section
+        # 5. Build References section - group citations by document
         references = []
-        for citation_id in sorted(all_citations.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-            citation_info = all_citations[citation_id]
+        for doc_name, citation_info in all_citations.items():
+            # Format citation numbers like [c1][c2][c4]
+            citation_nums = sorted(citation_info["citation_numbers"])
+            citations_str = "".join(f"[c{n}]" for n in citation_nums)
             references.append({
-                "id": citation_id,
-                "document_name": citation_info["document_name"]
+                "citations": citations_str,
+                "document_name": citation_info["document_name"],
             })
+        
+        # Sort by document name for consistency
+        references.sort(key=lambda x: x["document_name"])
         
         # 6. Render PDF
         env = jinja2.Environment(

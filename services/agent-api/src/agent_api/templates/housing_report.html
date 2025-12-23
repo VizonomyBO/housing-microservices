@@ -4,140 +4,262 @@
 <head>
     <meta charset="UTF-8">
     <title>{{ country }} Housing Assessment</title>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Running header - removed from flow, placed in page margin */
+        .running-header {
+            position: running(pageHeader);
+        }
+
         @page {
             size: A4;
-            margin: 2cm;
+            margin: 55mm 20mm 25mm 20mm;
 
-            @top-center {
-                content: element(header);
+            @top-left {
+                content: element(pageHeader);
+                vertical-align: top;
+                width: 100%;
             }
 
-            @bottom-right {
-                content: counter(page);
-                font-family: sans-serif;
+            @bottom-left {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: "Open Sans", sans-serif;
                 font-size: 10pt;
-                color: #555;
+                color: rgba(0, 13, 26, 0.7);
             }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            font-family: "Helvetica", "Arial", sans-serif;
-            color: #333;
+            font-family: "Open Sans", sans-serif;
+            color: #000;
             font-size: 11pt;
             line-height: 1.5;
+            background: #fff;
         }
 
-        h1,
-        h2,
-        h3,
-        h4 {
-            color: #0071bc;
-            /* World Bank Blue-ish */
-            font-weight: bold;
+        /* Running header container */
+        .running-header {
+            width: 170mm;
+            background: #fff;
         }
 
-        h1 {
-            font-size: 24pt;
-            margin-bottom: 0.5cm;
-            border-bottom: 2px solid #0071bc;
-            padding-bottom: 0.2cm;
+        /* Dark top bar */
+        .top-bar {
+            background-color: #181f25;
+            height: 6mm;
+            width: 210mm;
+            margin-left: -20mm;
+            margin-bottom: 8mm;
         }
 
-        h2 {
-            font-size: 18pt;
-            margin-top: 1cm;
-            margin-bottom: 0.3cm;
+        /* Header content */
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
         }
 
-        h3 {
+        .header-left {
+            flex: 1;
+        }
+
+        .report-date {
+            font-size: 11pt;
+            font-weight: 700;
+            color: rgba(0, 13, 26, 0.7);
+            margin-bottom: 2px;
+        }
+
+        .country-name {
+            font-size: 36pt;
+            font-weight: 600;
+            color: #004370;
+            line-height: 1.2;
+            text-transform: capitalize;
+            margin-bottom: 4px;
+        }
+
+        .report-title {
             font-size: 14pt;
-            margin-top: 0.5cm;
-            color: #00558f;
+            font-weight: 700;
+            color: #000d1a;
+            line-height: 1.4;
         }
 
-        .header {
-            position: running(header);
+        .header-logo {
+            width: 150px;
+            height: auto;
+        }
+
+        /* Watermark */
+        .watermark {
+            position: fixed;
+            bottom: -20mm;
+            right: -20mm;
+            width: 120mm;
+            height: 120mm;
+            opacity: 1;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .watermark img {
             width: 100%;
-            text-align: right;
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 5px;
-            margin-bottom: 20px;
-            font-size: 9pt;
-            color: #777;
+            height: 100%;
+            object-fit: contain;
         }
 
-        .logo {
-            float: right;
-            height: 40px;
+        /* Section styles */
+        .section {
+            margin-bottom: 16px;
         }
 
-        .title-page {
-            text-align: center;
-            margin-top: 5cm;
+        .section-title {
+            font-size: 12pt;
+            font-weight: 700;
+            color: #009fda;
+            margin-bottom: 5px;
+            letter-spacing: 0.02em;
         }
 
-        .title-page h1 {
-            border: none;
-            font-size: 32pt;
+        .section-content {
+            padding-left: 16px;
+            font-size: 10pt;
+            line-height: 1.5;
+            color: #000;
         }
 
-        .date {
-            color: #666;
-            margin-top: 1cm;
+        .section-content p {
+            margin-bottom: 5px;
+            text-align: left;
         }
 
-        /* Markdown generated content styles */
-        ul,
-        ol {
-            margin-left: 20px;
+        .section-content strong,
+        .section-content b {
+            font-weight: 700;
         }
 
-        li {
+        .section-content ul,
+        .section-content ol {
+            margin-left: 16px;
             margin-bottom: 5px;
         }
 
-        p {
-            margin-bottom: 10px;
-            text-align: justify;
+        .section-content li {
+            margin-bottom: 2px;
+            line-height: 1.5;
         }
 
+        .section-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 9pt;
+        }
+
+        .section-content th {
+            background-color: #004370;
+            color: white;
+            padding: 5px 7px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .section-content td {
+            padding: 5px 7px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .section-content tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .section-content h3 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #004370;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
+
+        .section-content h4 {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #000d1a;
+            margin-top: 6px;
+            margin-bottom: 3px;
+        }
+
+        /* References section */
         .references {
-            margin-top: 2cm;
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .references-title {
+            font-size: 12pt;
+            font-weight: 700;
+            color: #009fda;
+            margin-bottom: 8px;
         }
 
         .reference-item {
-            margin-bottom: 8px;
-            font-size: 10pt;
+            margin-bottom: 5px;
+            font-size: 9pt;
+            line-height: 1.4;
         }
 
         .reference-id {
             font-weight: bold;
             color: #0071bc;
         }
+
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            
+            .top-bar {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
     </style>
 </head>
 
 <body>
 
-    <div class="header">
-        {{ country }} - AI-Generated Housing Assessment Diagnostic Report
-        <!-- Logo placeholder, ideally base64 or file path -->
-        <!-- <img src="logo.png" class="logo" /> -->
+    <!-- Running header (appears on every page) -->
+    <div class="running-header">
+        <div class="top-bar"></div>
+        <div class="header-content">
+            <div class="header-left">
+                <div class="report-date">{{ date }}</div>
+                <div class="country-name">{{ country }}</div>
+                <div class="report-title">AI-Generated Housing Assessment Diagnostic Report</div>
+            </div>
+            <img src="https://housing-public-content.s3.us-east-1.amazonaws.com/images/logos/world-bank-logo.png" class="header-logo" alt="World Bank Group" />
+        </div>
     </div>
 
-    <div class="title-page">
-        <h1>{{ country }}</h1>
-        <h2>AI-Generated Housing Assessment Diagnostic Report</h2>
-        <div class="date">{{ date }}</div>
+    <!-- Watermark -->
+    <div class="watermark">
+        <img src="https://housing-public-content.s3.us-east-1.amazonaws.com/images/logos/watermark.png" alt="" />
     </div>
 
-    <div style="page-break-after: always;"></div>
-
+    <!-- Report sections -->
     {% for section in sections %}
     <div class="section">
-        <h2>{{ section.title }}</h2>
-        <div class="content">
+        <div class="section-title">{{ section.title }}</div>
+        <div class="section-content">
             {{ section.content | safe }}
         </div>
     </div>
@@ -145,10 +267,10 @@
 
     {% if references %}
     <div class="references">
-        <h2>References</h2>
+        <div class="references-title">References</div>
         {% for ref in references %}
         <div class="reference-item">
-            <span class="reference-id">[c{{ ref.id }}]</span> {{ ref.document_name }}
+            <span class="reference-id">[c{{ loop.index }}]</span> {{ ref.document_name }}
         </div>
         {% endfor %}
     </div>
