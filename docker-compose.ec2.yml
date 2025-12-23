@@ -186,6 +186,7 @@ services:
       dockerfile: docker/frontend/Dockerfile
       args:
         GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+        CACHEBUST: ${CACHEBUST:-1}
         VITE_PUBLIC_CONTENT_URL: ${VITE_PUBLIC_CONTENT_URL:-https://housing-public-content.s3.us-east-1.amazonaws.com}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

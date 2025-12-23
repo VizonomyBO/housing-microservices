@@ -11,13 +11,16 @@ ARG GITHUB_TOKEN
 # Use CACHEBUST to force fresh clone: docker build --build-arg CACHEBUST=$(date +%s) ...
 ARG CACHEBUST=1
 WORKDIR /app
+# Clone using GITHUB_TOKEN for authentication
 RUN echo "Cache bust: $CACHEBUST" && \
-    if [ -n "$GITHUB_TOKEN" ]; then \
-      git clone --depth 1 --branch start-conversation https://${GITHUB_TOKEN}@github.com/VizonomyBO/housing-frontend.git frontend; \
-    else \
-      echo "Warning: GITHUB_TOKEN not provided, attempting public clone"; \
-      git clone --depth 1 --branch start-conversation https://github.com/VizonomyBO/housing-frontend.git frontend || exit 1; \
-    fi
+    echo "DEBUG: GITHUB_TOKEN length = ${#GITHUB_TOKEN}" && \
+    if [ -z "$GITHUB_TOKEN" ]; then \
+      echo "ERROR: GITHUB_TOKEN build arg is empty or not set"; \
+      echo "Check: docker-compose build args and .env file"; \
+      exit 1; \
+    fi && \
+    git clone --depth 1 --branch start-conversation \
+      https://${GITHUB_TOKEN}@github.com/VizonomyBO/housing-frontend.git frontend
 
 WORKDIR /app/frontend
 # Ensure we have the absolute latest commits
