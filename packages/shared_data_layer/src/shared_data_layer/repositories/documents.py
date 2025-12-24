@@ -177,6 +177,8 @@ class DocumentRepository(BaseRepository[Document]):
         document: Document,
         conversation: Conversation,
     ) -> None:
+        from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
+
         if document.access_scope != "base":
             return
         if document.country_code is None:
@@ -188,11 +190,25 @@ class DocumentRepository(BaseRepository[Document]):
                 "Conversations must define a country_code "
                 "before attaching base documents."
             )
-        if conversation.country_code != document.country_code:
-            raise ValueError(
-                "Base documents can only be attached to conversations "
-                "in the same country."
-            )
+
+        # Allow exact country match
+        if conversation.country_code == document.country_code:
+            return
+
+        # Allow global documents for any conversation
+        if document.country_code == Region.GLO.value:
+            return
+
+        # Allow regional documents if conversation country is in that region
+        region = REGION_BY_COUNTRY_ALPHA3.get(conversation.country_code)
+        if region and document.country_code == region.value:
+            return
+
+        raise ValueError(
+            f"Base document (country_code={document.country_code}) cannot be attached "
+            f"to conversation (country_code={conversation.country_code}). "
+            "Documents must be from the same country, region, or global."
+        )
 
 
 class UploadedFileRepository(BaseRepository[UploadedFile]):

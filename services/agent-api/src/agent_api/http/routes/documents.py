@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.repositories.documents import UploadedFileRepository
+from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,32 @@ from agent_api.settings import Settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
+
+# Set of all region codes for quick lookup
+_REGION_CODES = {r.value for r in Region}
+
+
+def _expand_country_codes(codes: list[str], include_global: bool = True) -> list[str]:
+    """Expand country codes to include their region and optionally global.
+
+    When querying for a specific country (e.g., CMR), we also want to return
+    documents from the region (AFR) and global documents (GLO).
+
+    If a region code is passed (e.g., AFR), it's kept as-is.
+    """
+    expanded = set(codes)
+    for code in codes:
+        # Skip if it's already a region code
+        if code in _REGION_CODES:
+            continue
+        # Look up the region for this country
+        region = REGION_BY_COUNTRY_ALPHA3.get(code)
+        if region:
+            expanded.add(region.value)
+    # Include global documents
+    if include_global:
+        expanded.add(Region.GLO.value)
+    return list(expanded)
 
 
 @router.get("", summary="List uploaded documents for the authenticated user")
@@ -42,6 +69,10 @@ async def list_documents(
         list[str] | None,
         Query(description="Filter by country code"),
     ] = None,
+    include_global: Annotated[
+        bool,
+        Query(description="Include global (GLO) documents in country queries"),
+    ] = False,
     created_after: Annotated[
         datetime | None,
         Query(description="Return documents created after this timestamp"),
@@ -59,7 +90,9 @@ async def list_documents(
     if content_hash:
         stmt = stmt.where(Document.content_hash.in_(content_hash))
     if country_code:
-        stmt = stmt.where(Document.country_code.in_(country_code))
+        # Expand country codes to include their region (and optionally global) documents
+        expanded_codes = _expand_country_codes(country_code, include_global=include_global)
+        stmt = stmt.where(Document.country_code.in_(expanded_codes))
     if created_after:
         stmt = stmt.where(Document.created_at >= created_after)
     if created_before:
