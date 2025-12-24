@@ -27,7 +27,7 @@ INGEST_BASE_URL=${INGEST_BASE_URL:-http://52.207.140.87:8085}
 
 # Auth credentials - support both naming conventions
 AUTH_LOGIN=${AUTH_LOGIN:-${PROD_DEMO_EMAIL:-demo_client}}
-AUTH_PASSWORD=${AUTH_PASSWORD:-${PROD_DEMO_PASSWORD:-ChangeMe!123}}
+AUTH_PASSWORD=${AUTH_PASSWORD:-${PROD_DEMO_PASSWORD:-DemoPass123!}}
 
 # Token expires in 900s (15 min); refresh when 60s from expiry
 TOKEN_REFRESH_THRESHOLD=840
