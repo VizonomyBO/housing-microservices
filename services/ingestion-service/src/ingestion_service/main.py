@@ -14,13 +14,16 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
 )
+from fastapi.responses import StreamingResponse
 from pydantic import HttpUrl
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
 from ingestion_service.pipeline import IngestionError, IngestionPipeline
+from ingestion_service.s3 import download_pdf_from_s3, upload_pdf_to_s3
 from ingestion_service.schemas import (
     UploadCompleteResponse,
     UploadInitRequest,
@@ -34,6 +37,7 @@ from ingestion_service.settings import (
 )
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
+from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +296,23 @@ async def complete_upload(
         raise HTTPException(status_code=413, detail="File exceeds max_file_size_bytes")
     payload.file_size_bytes = actual_size
 
+    # Upload PDF to S3 if source_type is PDF and bucket is configured
+    s3_uri: str | None = None
+    if source_type.lower() == "pdf" and settings.s3_housing_pdf_bucket:
+        try:
+            s3_uri = upload_pdf_to_s3(
+                file_bytes=body,
+                document_id=document_id,
+                document_name=document_name,
+                settings=settings,
+            )
+            logger.info("PDF uploaded to S3: %s", s3_uri)
+        except Exception as exc:
+            # Log error but don't fail the upload - ingestion can proceed without S3
+            logger.warning(
+                "Failed to upload PDF to S3 (continuing with ingestion): %s", exc
+            )
+
     try:
         pipeline: IngestionPipeline = request.app.state.pipeline
         document, job = await pipeline.ingest_file(
@@ -323,6 +344,103 @@ async def complete_upload(
         if document.status == "active"
         else "Ingestion failed",
     )
+
+
+@app.get(
+    "/v1/documents/{document_id}/download",
+    summary="Download PDF document from S3",
+    response_class=Response,
+)
+async def download_document(
+    document_id: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> Response:
+    """
+    Download a PDF document from S3.
+
+    Requires authentication and verifies the user has access to the document.
+    """
+    # Authenticate user
+    user = await _require_user(authorization, settings)
+
+    # Validate document_id
+    try:
+        document_uuid = UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid document_id") from exc
+
+    # Check if S3 bucket is configured
+    if not settings.s3_housing_pdf_bucket:
+        raise HTTPException(
+            status_code=500, detail="S3 housing PDF bucket is not configured"
+        )
+
+    # Get document from database
+    doc_repo = DocumentRepository(db)
+    document = await doc_repo.get(document_uuid)
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Verify user has access to the document
+    # User can access if:
+    # 1. They own it (owner_user_id matches)
+    # 2. It's a base document (access_scope == "base")
+    user_id = user.user_id if user.user_id else None
+    has_access = False
+
+    if document.access_scope == "base":
+        # Base documents are accessible to all authenticated users
+        has_access = True
+    elif document.owner_user_id and user_id:
+        # User documents: must match owner
+        has_access = str(document.owner_user_id) == user_id
+    elif document.owner_user_id is None and user_id is None:
+        # System documents without owner
+        has_access = True
+
+    if not has_access:
+        raise HTTPException(
+            status_code=403, detail="Access denied to this document"
+        )
+
+    # Get document name from canonical_name
+    # The S3 key format is: document_id/document_name
+    # canonical_name should match the document_name used during upload
+    document_name = document.canonical_name
+
+    try:
+        # Download PDF from S3
+        file_bytes = download_pdf_from_s3(
+            document_id=document_id,
+            document_name=document_name,
+            settings=settings,
+        )
+
+        # Return file as response
+        return Response(
+            content=file_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{document_name}"',
+                "Content-Length": str(len(file_bytes)),
+            },
+        )
+
+    except RuntimeError as exc:
+        error_msg = str(exc)
+        if "not found" in error_msg.lower():
+            raise HTTPException(status_code=404, detail="PDF file not found in S3") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to download PDF: {error_msg}"
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error during PDF download")
+        raise HTTPException(
+            status_code=500, detail="Unexpected error during download"
+        ) from exc
 
 
 def create_app() -> FastAPI:

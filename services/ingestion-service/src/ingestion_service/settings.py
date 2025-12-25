@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     )
     worker_name: str = "ingestion-service"
 
+    # S3 Configuration
+    s3_housing_pdf_bucket: str | None = Field(
+        default=None,
+        description="S3 bucket name for housing PDF documents",
+    )
+    aws_region: str = Field(
+        default="us-east-1",
+        description="AWS region for S3 operations",
+    )
+
     def model_post_init(self, __context: Any) -> None:  # type: ignore[override]
         if self.signing_secret is None and self.jwt_secret_key:
             object.__setattr__(self, "signing_secret", self.jwt_secret_key)
