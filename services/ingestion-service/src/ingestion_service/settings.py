@@ -78,6 +78,16 @@ class Settings(BaseSettings):
         description="AWS region for S3 operations",
     )
 
+    # CORS Configuration
+    cors_origins: str | list[str] = Field(
+        default="http://localhost:3000,http://localhost:5173",
+        description="Allowed CORS origins (comma-separated, or '*' for all)",
+    )
+    cors_allow_credentials: bool = Field(
+        default=True,
+        description="Allow credentials in CORS requests",
+    )
+
     def model_post_init(self, __context: Any) -> None:  # type: ignore[override]
         if self.signing_secret is None and self.jwt_secret_key:
             object.__setattr__(self, "signing_secret", self.jwt_secret_key)
@@ -114,6 +124,17 @@ class Settings(BaseSettings):
         if dimension <= 0:
             raise ValueError("vector_store_dimension must be positive")
         return dimension
+
+    @field_validator("cors_origins", mode="after")
+    @classmethod
+    def _parse_cors_origins(cls, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            if value.strip() == "*":
+                return ["*"]
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return ["*"]
 
 
 @lru_cache(maxsize=1)
