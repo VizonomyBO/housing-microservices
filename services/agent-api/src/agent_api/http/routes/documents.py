@@ -8,8 +8,8 @@ from typing import Annotated
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi.responses import JSONResponse, Response
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.repositories.documents import UploadedFileRepository
 from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
@@ -195,6 +195,89 @@ async def upload_document(
         )
     await db_session.commit()
     return JSONResponse(status_code=response.status_code, content=data)
+
+
+@router.get(
+    "/{document_id}/download",
+    summary="Download PDF document from S3",
+    response_class=Response,
+)
+async def download_document(
+    document_id: Annotated[str, Path(description="Document UUID")],
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    auth_context: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    """
+    Download a PDF document from S3 via ingestion service.
+
+    Requires authentication and verifies the user has access to the document.
+    """
+    _require_user(auth_context)
+
+    # Validate document_id format
+    try:
+        UUID(document_id)
+    except ValueError as exc:
+        raise GatewayError(
+            code="VALIDATION_ERROR",
+            message="Invalid document_id format",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+
+    # Proxy to ingestion service
+    ingestion_url = (
+        settings.ingestion_base_url.rstrip("/")
+        + f"/v1/documents/{document_id}/download"
+    )
+    timeout = httpx.Timeout(settings.ingestion_request_timeout_seconds)
+    headers = {}
+    if settings.ingestion_api_key:
+        headers["Authorization"] = f"Bearer {settings.ingestion_api_key}"
+    # Forward the user's auth token to ingestion service
+    if auth_context.token:
+        headers["Authorization"] = f"Bearer {auth_context.token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(ingestion_url, headers=headers)
+            if response.status_code >= 500:
+                raise GatewayError(
+                    code="INGESTION_FAILED",
+                    message="Ingestion service unavailable",
+                    status_code=503,
+                )
+            if response.status_code >= 400:
+                error_text = response.text
+                raise GatewayError(
+                    code="DOWNLOAD_FAILED",
+                    message=error_text,
+                    status_code=response.status_code,
+                )
+
+            # Return the PDF file with proper headers
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "application/pdf"),
+                headers={
+                    "Content-Disposition": response.headers.get(
+                        "content-disposition", f'attachment; filename="document.pdf"'
+                    ),
+                    "Content-Length": str(len(response.content)),
+                },
+            )
+    except httpx.TimeoutException as exc:
+        raise GatewayError(
+            code="TIMEOUT",
+            message="Request to ingestion service timed out",
+            status_code=504,
+        ) from exc
+    except httpx.RequestError as exc:
+        raise GatewayError(
+            code="INGESTION_FAILED",
+            message=f"Failed to connect to ingestion service: {exc}",
+            status_code=503,
+        ) from exc
 
 
 def _to_document_schema(doc: Document) -> DocumentListItem:

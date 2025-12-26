@@ -58,6 +58,11 @@ class Settings:
     cors_allowed_origins: tuple[str, ...]
     cors_allow_credentials: bool
     pyodide: PyodideConfig
+    s3_housing_pdf_bucket: str | None
+    aws_region: str
+    aws_access_key_id: str | None
+    aws_secret_access_key: str | None
+    s3_endpoint_url: str | None
 
 
 def load_settings() -> Settings:
@@ -110,6 +115,13 @@ def load_settings() -> Settings:
         allowed_packages=_env_csv("PYODIDE_ALLOWED_PACKAGES", ()),
     )
 
+    # S3 Configuration for report caching
+    s3_housing_pdf_bucket = _env_str("S3_HOUSING_PDF_BUCKET")
+    aws_region = _env_str("AWS_REGION", "us-east-1") or "us-east-1"
+    aws_access_key_id = _env_str("AWS_ACCESS_KEY_ID")
+    aws_secret_access_key = _env_str("AWS_SECRET_ACCESS_KEY")
+    s3_endpoint_url = _env_str("AWS_ENDPOINT_URL")
+
     return Settings(
         service_name=os.getenv("SERVICE_NAME", "agent_api"),
         stack_profile=stack_profile,
@@ -132,6 +144,11 @@ def load_settings() -> Settings:
         cors_allowed_origins=cors_allowed_origins,
         cors_allow_credentials=cors_allow_credentials,
         pyodide=pyodide,
+        s3_housing_pdf_bucket=s3_housing_pdf_bucket,
+        aws_region=aws_region,
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        s3_endpoint_url=s3_endpoint_url,
     )
 
 

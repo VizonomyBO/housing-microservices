@@ -14,7 +14,9 @@ from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.schemas import ResponseMode, ChatMessagePayload
 from agent_api.models.chat import ChatRequestContext
+from agent_api.report_cache import get_cached_report, upload_cached_report
 from agent_api.services.conversations import ConversationService
+from agent_api.settings import Settings
 from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
@@ -69,9 +71,10 @@ SECTION_PROMPTS = [
 ]
 
 class ReportService:
-    def __init__(self, db_session: AsyncSession, runner: LangGraphRunner):
+    def __init__(self, db_session: AsyncSession, runner: LangGraphRunner, settings: Settings):
         self._db_session = db_session
         self._runner = runner
+        self._settings = settings
         self._doc_repo = DocumentRepository(db_session)
         self._convo_service = ConversationService(db_session)
 
@@ -82,6 +85,13 @@ class ReportService:
         request_context: RequestContext,
         auth_context: AuthContext,
     ) -> bytes:
+        # 0. Check for cached report in S3
+        if self._settings.s3_housing_pdf_bucket:
+            cached_report = get_cached_report(country_code, self._settings)
+            if cached_report is not None:
+                logger.info(f"Returning cached report for country {country_code}")
+                return cached_report
+
         # 1. Fetch all documents for the country
         documents = await self._doc_repo.list_documents_for_country(country_code)
         if not documents:
@@ -212,5 +222,12 @@ class ReportService:
         )
 
         pdf_bytes = weasyprint.HTML(string=rendered_html).write_pdf()
+        
+        # 7. Upload to S3 cache (non-blocking)
+        if self._settings.s3_housing_pdf_bucket:
+            try:
+                upload_cached_report(country_code, pdf_bytes, self._settings)
+            except Exception as e:
+                logger.warning(f"Failed to upload report to cache (non-fatal): {e}")
         
         return pdf_bytes

@@ -10,8 +10,10 @@ from agent_api.http.deps import (
     get_db_session,
     get_request_context,
     get_runner,
+    get_settings,
 )
 from agent_api.services.reports import ReportService
+from agent_api.settings import Settings
 
 router = APIRouter(prefix="/v1/reports", tags=["reports"])
 
@@ -33,8 +35,9 @@ async def generate_report(
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     chat_runner: Annotated[list, Depends(get_runner)], # get_runner returns Any (LangGraphRunner)
+    settings: Annotated[Settings, Depends(get_settings)],
 ):
-    service = ReportService(db_session=db_session, runner=chat_runner)
+    service = ReportService(db_session=db_session, runner=chat_runner, settings=settings)
     
     # User ID is required
     user_id = auth_context.user_id

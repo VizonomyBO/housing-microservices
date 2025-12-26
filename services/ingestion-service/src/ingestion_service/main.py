@@ -17,6 +17,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import HttpUrl
 
@@ -59,6 +60,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ingestion Service", version="0.1.0", lifespan=lifespan)
+
+# Configure CORS
+# Load settings (cached, safe to call at module level)
+try:
+    cors_settings = get_settings()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_settings.cors_origins,
+        allow_credentials=cors_settings.cors_allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+except Exception as e:
+    # Fallback if settings can't be loaded (e.g., during import)
+    # Will be configured properly when app starts
+    logger.warning(f"Could not configure CORS at module load: {e}")
 
 
 @app.get("/health", include_in_schema=False)
@@ -441,6 +458,99 @@ async def download_document(
         raise HTTPException(
             status_code=500, detail="Unexpected error during download"
         ) from exc
+
+
+@app.get(
+    "/v1/documents/by-name/{canonical_name}/download",
+    summary="Download PDF document from S3 by canonical name",
+    response_class=Response,
+)
+async def download_document_by_name(
+    canonical_name: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> Response:
+    """
+    Download a PDF document from S3 by canonical name.
+
+    Requires authentication and verifies the user has access to the document.
+    Searches for documents owned by the authenticated user with the given canonical_name.
+    """
+    # Authenticate user
+    user = await _require_user(authorization, settings)
+
+    # Check if S3 bucket is configured
+    if not settings.s3_housing_pdf_bucket:
+        raise HTTPException(
+            status_code=500, detail="S3 housing PDF bucket is not configured"
+        )
+
+    # Find document by canonical_name
+    # ALL documents are accessible to any authenticated user (no access restrictions)
+    from sqlalchemy import select
+    from shared_data_layer.db.models.documents import Document
+
+    # Search for ALL documents with matching canonical_name
+    stmt = select(Document).where(
+        Document.canonical_name == canonical_name
+    )
+    
+    result = await db.execute(stmt)
+    documents = result.scalars().all()
+
+    if not documents:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document not found with name '{canonical_name}'",
+        )
+
+    # Try each document until we find one with PDF in S3
+    # ALL documents are accessible - no access checks needed
+    document = None
+    file_bytes = None
+    last_error = None
+
+    for doc in documents:
+
+        # Try to download PDF from S3 for this document
+        try:
+            file_bytes = download_pdf_from_s3(
+                document_id=str(doc.id),
+                document_name=doc.canonical_name,
+                settings=settings,
+            )
+            document = doc
+            break  # Found a document with PDF in S3
+        except RuntimeError as exc:
+            last_error = exc
+            continue  # Try next document
+
+    if not document or not file_bytes:
+        if last_error:
+            error_msg = str(last_error)
+            if "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"PDF file not found in S3 for document '{canonical_name}'",
+                ) from last_error
+        raise HTTPException(
+            status_code=404,
+            detail=f"PDF file not found in S3 for document '{canonical_name}'",
+        )
+
+    # Use canonical_name for S3 key construction
+    document_name = document.canonical_name
+
+    # Return file as response
+    return Response(
+        content=file_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{document_name}"',
+            "Content-Length": str(len(file_bytes)),
+        },
+    )
 
 
 def create_app() -> FastAPI:
