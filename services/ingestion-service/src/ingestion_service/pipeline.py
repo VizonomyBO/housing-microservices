@@ -552,7 +552,7 @@ class IngestionPipeline:
 
         t_db_start = time.perf_counter()
         # Commit in batches to avoid disk saturation from large transactions
-        BATCH_SIZE = 100
+        BATCH_SIZE = 10
         total_chunks = len(chunks)
         logger.info(
             "[%s] STEP 4/4: Writing %d chunks to database (batch size=%d)...",
