@@ -12,6 +12,11 @@
 #   PROD_DEMO_EMAIL, PROD_DEMO_PASSWORD (or AUTH_LOGIN, AUTH_PASSWORD)
 # Optional:
 #   INGEST_UPLOAD_API_KEY, INTERVAL_SECONDS (default 120), DOCUMENTS_ROOT, LOG_FILE
+#   SKIP_COUNT (default 0) - skip first N documents, MAX_COUNT - limit total uploads
+#   VACUUM_EVERY (default 20) - run VACUUM every N uploads to prevent disk bloat
+#   MIN_DISK_FREE_PCT (default 15) - pause if disk free % drops below this
+#   SSH_KEY_PATH (default ~/.ssh/house2.pem) - SSH key for remote VACUUM/disk checks
+#   PG_CONTAINER (default housing-microservices-postgres-1) - PostgreSQL container name
 
 set -euo pipefail
 
@@ -20,13 +25,23 @@ LOG_FILE=${LOG_FILE:-Documents/upload_results.jsonl}
 INTERVAL_SECONDS=${INTERVAL_SECONDS:-120}
 DEFAULT_LANGUAGE=${DEFAULT_LANGUAGE:-en}
 MAX_COUNT=${MAX_COUNT:-0}
+SKIP_COUNT=${SKIP_COUNT:-122}
+# Run VACUUM every N uploads to prevent orphaned file accumulation (0=disabled)
+# Recommended: 10-20 for large batches, lower if disk issues occur
+VACUUM_EVERY=${VACUUM_EVERY:-1}
+# Minimum free disk % before pausing uploads
+MIN_DISK_FREE_PCT=${MIN_DISK_FREE_PCT:-15}
+# SSH key for remote server access (for VACUUM and disk checks)
+SSH_KEY_PATH=${SSH_KEY_PATH:-~/.ssh/house2.pem}
+# PostgreSQL container name
+PG_CONTAINER=${PG_CONTAINER:-vizonomy-prod-postgres-1}
 
 # URLs - use defaults if not set
 AUTH_BASE_URL=${AUTH_BASE_URL:-http://52.207.140.87:5001}
 INGEST_BASE_URL=${INGEST_BASE_URL:-http://52.207.140.87:8085}
 
 # Auth credentials - support both naming conventions
-AUTH_LOGIN=${AUTH_LOGIN:-${PROD_DEMO_EMAIL:-demo_client}}
+AUTH_LOGIN=${AUTH_LOGIN:-${PROD_DEMO_EMAIL:-demo.client@example.com}}
 AUTH_PASSWORD=${AUTH_PASSWORD:-${PROD_DEMO_PASSWORD:-DemoPass123!}}
 
 # Token expires in 900s (15 min); refresh when 60s from expiry
@@ -50,6 +65,76 @@ log() {
 
 log_json() {
   jq -n "$@" >>"$LOG_FILE"
+}
+
+# Get disk usage percentage (returns used %)
+get_disk_used_pct() {
+  local host=${INGEST_BASE_URL#http://}
+  host=${host%%:*}
+  local used_pct=""
+  
+  if [[ -f "$SSH_KEY_PATH" ]]; then
+    used_pct=$(ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+      ec2-user@"$host" 'df / --output=pcent | tail -1 | tr -d " %"' </dev/null 2>/dev/null) || true
+  fi
+  echo "${used_pct:-0}"
+}
+
+# Check disk free percentage on remote server
+check_disk_space() {
+  local host=${INGEST_BASE_URL#http://}
+  host=${host%%:*}
+  local free_pct=""
+  
+  # Check if SSH key exists
+  if [[ ! -f "$SSH_KEY_PATH" ]]; then
+    log "  Disk check: skipped (SSH key not found at $SSH_KEY_PATH)"
+    return 0
+  fi
+  
+  # Run SSH directly (works from WSL/Linux) - use || true to prevent script exit
+  free_pct=$(ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    ec2-user@"$host" 'df / --output=avail,size | tail -1' </dev/null 2>/dev/null | awk '{printf "%.0f", ($1/$2)*100}') || true
+  
+  if [[ -n "$free_pct" && "$free_pct" =~ ^[0-9]+$ ]]; then
+    if (( free_pct < MIN_DISK_FREE_PCT )); then
+      log "WARNING: Server disk only ${free_pct}% free (threshold: ${MIN_DISK_FREE_PCT}%)"
+      log "PAUSING uploads. Run 'VACUUM' on PostgreSQL or free disk space, then restart."
+      return 1
+    fi
+    log "  Disk check: ${free_pct}% free"
+  else
+    log "  Disk check: skipped (SSH failed)"
+  fi
+  return 0
+}
+
+# Trigger VACUUM on the database to clean up dead tuples and free space
+run_vacuum() {
+  local host=${INGEST_BASE_URL#http://}
+  host=${host%%:*}
+  log "Running VACUUM on database to prevent orphaned file accumulation..."
+  
+  # Check if SSH key exists
+  if [[ ! -f "$SSH_KEY_PATH" ]]; then
+    log "  VACUUM skipped (SSH key not found at $SSH_KEY_PATH)"
+    return 0
+  fi
+  
+  # Run SSH with simplified command - use || true to prevent script exit on failure
+  local vacuum_cmd="sudo docker exec $PG_CONTAINER psql -U vizonomy_user -d housing -c 'VACUUM ANALYZE;'"
+  
+  local output exit_code
+  output=$(ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    ec2-user@"$host" "$vacuum_cmd" </dev/null 2>&1) || true
+  exit_code=$?
+  
+  if [[ $exit_code -eq 0 ]] && [[ -z "$output" || "$output" == *"VACUUM"* ]]; then
+    log "  VACUUM completed"
+  else
+    log "  VACUUM skipped (SSH error): ${output:-no output}"
+  fi
+  return 0
 }
 
 get_file_size() {
@@ -128,6 +213,13 @@ while IFS= read -r -d '' file_path; do
   targets_countries+=("$country")
 done < <(find "$DOCUMENTS_ROOT" -type f ! -name '.DS_Store' -print0 | sort -z)
 
+# Skip first SKIP_COUNT documents
+if (( SKIP_COUNT > 0 )) && (( ${#targets_files[@]} > SKIP_COUNT )); then
+  log "Skipping first $SKIP_COUNT documents..."
+  targets_files=("${targets_files[@]:SKIP_COUNT}")
+  targets_countries=("${targets_countries[@]:SKIP_COUNT}")
+fi
+
 if (( MAX_COUNT > 0 )) && (( ${#targets_files[@]} > MAX_COUNT )); then
   targets_files=("${targets_files[@]:0:MAX_COUNT}")
   targets_countries=("${targets_countries[@]:0:MAX_COUNT}")
@@ -159,6 +251,19 @@ for i in "${!targets_files[@]}"; do
   
   log "[$((i+1))/$total] Processing: $country :: $name"
   
+  # Check disk usage before upload
+  DISK_BEFORE=$(get_disk_used_pct)
+  if [[ -n "$DISK_BEFORE" && "$DISK_BEFORE" -gt 0 ]]; then
+    log "  📊 Disk before: ${DISK_BEFORE}% used"
+    
+    # Wait if disk is above 85%
+    while [[ "$DISK_BEFORE" -gt 85 ]]; do
+      log "  ⚠️  HIGH DISK USAGE (${DISK_BEFORE}%)! Waiting 60s for cleanup..."
+      sleep 60
+      DISK_BEFORE=$(get_disk_used_pct)
+    done
+  fi
+  
   # Ensure token is valid (refresh if needed)
   if ! ensure_token; then
     log "  ERROR: Token refresh failed. Skipping $name"
@@ -167,7 +272,8 @@ for i in "${!targets_files[@]}"; do
   
   # Step 2: Get file size (per runbook step 2)
   FILE_SIZE=$(get_file_size "$file")
-  log "  File size: $FILE_SIZE bytes"
+  FILE_SIZE_MB=$(awk "BEGIN {printf \"%.1f\", $FILE_SIZE/1024/1024}")
+  log "  File size: ${FILE_SIZE_MB} MB"
   
   # Step 3: Request presigned upload (per runbook step 3)
   log "  Requesting presign from $INGEST_BASE_URL/v1/documents/upload..."
@@ -211,9 +317,10 @@ for i in "${!targets_files[@]}"; do
   done < <(echo "$UPLOAD_FIELDS" | jq -r 'to_entries[] | [.key, (.value|tostring)] | @tsv')
   FORM_ARGS+=(-F "file=@${file}")
   
-  UPLOAD_RESULT=$(curl -sS -X POST "$UPLOAD_URL" \
+  # Show progress bar during upload (progress goes to stderr, response to stdout)
+  UPLOAD_RESULT=$(curl --progress-bar -X POST "$UPLOAD_URL" \
     -H "Authorization: Bearer $TOKEN" \
-    "${FORM_ARGS[@]}" 2>&1) || true
+    "${FORM_ARGS[@]}" 2>/dev/tty) || true
   
   log "  Upload response: $UPLOAD_RESULT"
   
@@ -223,10 +330,22 @@ for i in "${!targets_files[@]}"; do
   
   if [[ "$UPLOAD_STATUS" == "active" ]] || [[ -n "$INGESTION_ID" ]]; then
     status_label="success"
-    log "  SUCCESS: $name uploaded (doc_id=$DOC_ID, ingestion_id=$INGESTION_ID)"
+    log "  ✅ SUCCESS: $name uploaded (doc_id=$DOC_ID)"
+    
+    # Check disk after ingestion completed
+    DISK_AFTER=$(get_disk_used_pct)
+    if [[ -n "$DISK_AFTER" && "$DISK_AFTER" -gt 0 ]]; then
+      DISK_DELTA=$((DISK_AFTER - DISK_BEFORE))
+      log "  📊 Disk after: ${DISK_AFTER}% used (${DISK_DELTA:+$DISK_DELTA}% change)"
+      
+      # Warn if disk jumped significantly
+      if [[ "$DISK_DELTA" -gt 10 ]]; then
+        log "  ⚠️  Large disk increase detected! Consider running VACUUM."
+      fi
+    fi
   else
     status_label="error"
-    log "  FAILED: $name upload error. Response: $UPLOAD_RESULT"
+    log "  ❌ FAILED: $name upload error. Response: $UPLOAD_RESULT"
   fi
   
   # Log result
@@ -246,12 +365,50 @@ for i in "${!targets_files[@]}"; do
     "$( [[ "$status_label" == "success" ]] && echo "OK" || echo "FAIL")" \
     "$country" "$name" "$DOC_ID"
   
+  # Cleanup large variables to release memory
+  unset UPLOAD_RESP UPLOAD_RESULT UPLOAD_FIELDS DOC_ID UPLOAD_URL UPLOAD_STATUS INGESTION_ID FORM_ARGS
+  
+  # Periodic maintenance to prevent orphaned file accumulation
+  if (( VACUUM_EVERY > 0 )) && (( (i + 1) % VACUUM_EVERY == 0 )); then
+    run_vacuum
+  fi
+  
   # Wait before next file
   if (( i + 1 < total )); then
+    # Check disk space before continuing
+    if ! check_disk_space; then
+      log "FATAL: Disk space too low. Stopping uploads at file $((i+1))/$total"
+      log "Resume with: SKIP_COUNT=$((SKIP_COUNT + i + 1)) ./scripts/upload_documents_batch.sh"
+      exit 1
+    fi
     log "  Waiting ${INTERVAL_SECONDS}s before next file..."
     sleep "$INTERVAL_SECONDS"
   fi
 done
+
+# Final cleanup
+if (( VACUUM_EVERY > 0 )); then
+  run_vacuum
+fi
+
+# Run final materialized view refresh (important if SKIP_VIEW_REFRESH was enabled)
+log "Running final cleanup..."
+if [[ -f "$SSH_KEY_PATH" ]]; then
+  REFRESH_HOST=${INGEST_BASE_URL#http://}
+  REFRESH_HOST=${REFRESH_HOST%%:*}
+  
+  log "  1. Refreshing materialized view..."
+  ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=30 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    ec2-user@"$REFRESH_HOST" \
+    "sudo docker exec $PG_CONTAINER psql -U vizonomy_user -d housing -c 'REFRESH MATERIALIZED VIEW active_chunks;'" \
+    </dev/null 2>/dev/null && log "    View refresh completed" || log "    View refresh skipped"
+  
+  log "  2. Recreating vector index (this may take a while)..."
+  ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=600 -o StrictHostKeyChecking=no -o BatchMode=yes \
+    ec2-user@"$REFRESH_HOST" \
+    "sudo docker exec $PG_CONTAINER psql -U vizonomy_user -d housing -c 'CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw ON chunks USING hnsw (embedding vector_ip_ops) WITH (m = 16, ef_construction = 64);'" \
+    </dev/null 2>/dev/null && log "    Index created" || log "    Index creation skipped"
+fi
 
 log "Done. Log written to $LOG_FILE"
 

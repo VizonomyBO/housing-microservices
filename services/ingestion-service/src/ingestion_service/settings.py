@@ -87,6 +87,13 @@ class Settings(BaseSettings):
         default=True,
         description="Allow credentials in CORS requests",
     )
+    
+    # Batch upload optimization
+    skip_view_refresh: bool = Field(
+        default=False,
+        description="Skip REFRESH MATERIALIZED VIEW after each document (for batch uploads). "
+                    "Run REFRESH manually after batch completes.",
+    )
 
     def model_post_init(self, __context: Any) -> None:  # type: ignore[override]
         if self.signing_secret is None and self.jwt_secret_key:
