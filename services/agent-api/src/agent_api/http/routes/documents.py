@@ -59,7 +59,7 @@ async def list_documents(
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     page: Annotated[int, Query(ge=1, le=1000)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
     tags: Annotated[list[str] | None, Query(description="Filter by tag (all must match)")] = None,
     content_hash: Annotated[
         list[str] | None,
