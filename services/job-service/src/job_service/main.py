@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from job_service.jobs import JobResult, ReportPreGenerationJob, get_next_month
+from job_service.jobs import JobResult, ReportPreGenerationJob
 from job_service.scheduler import JobScheduler
 from job_service.settings import Settings, load_settings
 
@@ -45,7 +44,7 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Job service started on port {settings.http_port}")
     logger.info(
-        f"Report pre-generation scheduled for day {settings.schedule.day_of_month} "
+        f"Report regeneration scheduled for day {settings.schedule.day_of_month} "
         f"at {settings.schedule.hour:02d}:{settings.schedule.minute:02d}"
     )
 
@@ -100,7 +99,6 @@ class JobResultResponse(BaseModel):
 class TriggerResponse(BaseModel):
     message: str
     job_id: str
-    target_month: str
 
 
 # Endpoints
@@ -141,21 +139,12 @@ async def get_report_job_status():
 
 
 @app.post("/v1/jobs/report-pregeneration/trigger", response_model=TriggerResponse, tags=["jobs"])
-async def trigger_report_pregeneration(
-    background_tasks: BackgroundTasks,
-    target_month: Annotated[
-        str | None,
-        Query(
-            description="Target month in YYYY-MM format. Defaults to next month.",
-            pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-        ),
-    ] = None,
-):
+async def trigger_report_pregeneration(background_tasks: BackgroundTasks):
     """
-    Manually trigger the report pre-generation job.
+    Manually trigger the report regeneration job.
 
-    This will generate reports for all countries with documents,
-    targeting the specified month (or next month if not specified).
+    This will regenerate reports for all countries with skip_cache=True,
+    overwriting existing cached reports. Reports expire 30 days after generation.
     """
     if not report_job:
         raise HTTPException(status_code=503, detail="Job not initialized")
@@ -163,15 +152,12 @@ async def trigger_report_pregeneration(
     if report_job.is_running:
         raise HTTPException(status_code=409, detail="Job is already running")
 
-    month = target_month or get_next_month()
-
     # Run in background
-    background_tasks.add_task(report_job.run, month)
+    background_tasks.add_task(report_job.run)
 
     return TriggerResponse(
         message="Job triggered successfully",
         job_id="report_pregeneration",
-        target_month=month,
     )
 
 
@@ -205,4 +191,3 @@ def _result_to_response(result: JobResult) -> JobResultResponse:
 
 
 __all__ = ["app"]
-
