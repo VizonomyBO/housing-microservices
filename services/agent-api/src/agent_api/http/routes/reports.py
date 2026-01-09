@@ -21,6 +21,15 @@ router = APIRouter(prefix="/v1/reports", tags=["reports"])
 @router.get(
     "/housing/{country_code}",
     summary="Generate and download a housing assessment report",
+    description="""
+    Generate a PDF housing assessment report for a country.
+    
+    Reports are cached in S3 and expire 30 days after generation.
+    Use `skip_cache=true` to force regeneration (the new report will still be cached).
+    
+    The pre-generation job runs on the 25th of each month with `skip_cache=true`
+    to refresh all reports before they expire.
+    """,
     status_code=200,
     responses={
         200: {
@@ -36,20 +45,11 @@ async def generate_report(
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     chat_runner: Annotated[list, Depends(get_runner)], # get_runner returns Any (LangGraphRunner)
     settings: Annotated[Settings, Depends(get_settings)],
-    target_month: Annotated[
-        str | None,
-        Query(
-            description="Target month for caching in YYYY-MM format (e.g., '2026-02'). "
-                        "If provided, the report will be cached under this month's key. "
-                        "Useful for pre-generating next month's reports.",
-            pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-        ),
-    ] = None,
     skip_cache: Annotated[
         bool,
         Query(
             description="Skip cache lookup and force regeneration. "
-                        "The report will still be uploaded to the cache."
+                        "The new report will still be uploaded to the cache."
         ),
     ] = False,
 ):
@@ -66,7 +66,6 @@ async def generate_report(
         user_id=user_id or "anonymous", # Fallback if auth is loose, though usually required
         request_context=request_context,
         auth_context=auth_context,
-        target_month=target_month,
         skip_cache_lookup=skip_cache,
     )
     

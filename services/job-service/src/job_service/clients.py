@@ -92,7 +92,6 @@ class AgentApiClient:
     async def generate_report(
         self,
         country_code: str,
-        target_month: str,
         skip_cache: bool = True,
     ) -> tuple[bool, int, str]:
         """
@@ -100,8 +99,7 @@ class AgentApiClient:
 
         Args:
             country_code: ISO-3 country code
-            target_month: Target month in YYYY-MM format
-            skip_cache: Whether to skip cache lookup
+            skip_cache: Whether to skip cache lookup (default True for pre-generation)
 
         Returns:
             Tuple of (success, http_status, message)
@@ -109,7 +107,6 @@ class AgentApiClient:
         token = await self.auth_client.get_access_token()
 
         params: dict[str, Any] = {
-            "target_month": target_month,
             "skip_cache": str(skip_cache).lower(),
         }
 

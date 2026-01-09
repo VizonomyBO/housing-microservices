@@ -8,19 +8,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from dateutil.relativedelta import relativedelta
-
 from job_service.clients import AgentApiClient, AuthClient
 from job_service.countries import ISO_ALPHA3_CODES
 from job_service.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-
-def get_next_month() -> str:
-    """Get the next month in YYYY-MM format."""
-    next_month = datetime.now() + relativedelta(months=1)
-    return next_month.strftime("%Y-%m")
 
 
 @dataclass
@@ -46,13 +38,16 @@ class JobResult:
 
 class ReportPreGenerationJob:
     """
-    Job that pre-generates housing reports for the next month.
+    Job that regenerates housing reports for all countries.
 
-    This job:
-    1. Calculates the target month (next month)
-    2. Uses all ISO-3 country codes (regional/global docs provide content)
-    3. Generates reports for each country sequentially
-    4. Logs results and tracks failures
+    This job runs on the 25th of each month and:
+    1. Iterates through all ISO-3 country codes
+    2. Generates reports with skip_cache=True to force regeneration
+    3. Each report overwrites the existing cached version
+    4. Reports expire 30 days after generation
+
+    The 25th timing ensures reports are refreshed before they expire
+    (assuming initial generation around the 1st of the month).
     """
 
     def __init__(self, settings: Settings):
@@ -70,13 +65,12 @@ class ReportPreGenerationJob:
     def last_result(self) -> JobResult | None:
         return self._last_result
 
-    async def run(self, target_month: str | None = None) -> JobResult:
+    async def run(self) -> JobResult:
         """
         Execute the report pre-generation job.
 
-        Args:
-            target_month: Optional override for target month (YYYY-MM).
-                         If not provided, uses next month.
+        Regenerates all country reports with skip_cache=True,
+        overwriting the existing cached versions.
         """
         if self._is_running:
             logger.warning("Job is already running, skipping")
@@ -93,9 +87,7 @@ class ReportPreGenerationJob:
             started_at=datetime.now(),
         )
 
-        # Determine target month
-        month = target_month or get_next_month()
-        logger.info(f"Starting report pre-generation job for month: {month}")
+        logger.info("Starting report regeneration job")
 
         try:
             # Use all ISO-3 country codes - regional/global docs provide content
@@ -110,8 +102,7 @@ class ReportPreGenerationJob:
 
                 success, status, message = await self.agent_client.generate_report(
                     country_code=country_code,
-                    target_month=month,
-                    skip_cache=True,  # Always regenerate for pre-generation
+                    skip_cache=True,  # Always regenerate to refresh the cache
                 )
 
                 if success:
@@ -152,4 +143,4 @@ class ReportPreGenerationJob:
         return result
 
 
-__all__ = ["ReportPreGenerationJob", "JobResult", "get_next_month"]
+__all__ = ["ReportPreGenerationJob", "JobResult"]

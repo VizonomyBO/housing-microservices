@@ -14,7 +14,7 @@ from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.schemas import ResponseMode, ChatMessagePayload
 from agent_api.models.chat import ChatRequestContext
-from agent_api.report_cache import get_cached_report, upload_cached_report, validate_target_month
+from agent_api.report_cache import get_cached_report, upload_cached_report
 from agent_api.services.conversations import ConversationService
 from agent_api.settings import Settings
 from shared_data_layer.repositories.documents import DocumentRepository
@@ -84,18 +84,30 @@ class ReportService:
         user_id: str,
         request_context: RequestContext,
         auth_context: AuthContext,
-        target_month: str | None = None,
         skip_cache_lookup: bool = False,
     ) -> bytes:
-        validated_month = validate_target_month(target_month)
-        if target_month and not validated_month:
-            logger.warning(f"Invalid target_month format: {target_month}, ignoring")
-        
-        # 0. Check for cached report in S3
+        """
+        Generate a housing assessment report for a country.
+
+        Reports are cached in S3 and expire 30 days after generation.
+        The pre-generation job on the 25th uses skip_cache_lookup=True
+        to force regeneration, ensuring reports are refreshed monthly.
+
+        Args:
+            country_code: ISO-3 country code
+            user_id: User requesting the report
+            request_context: Request context for tracing
+            auth_context: Auth context for permissions
+            skip_cache_lookup: If True, skip cache and regenerate
+
+        Returns:
+            PDF bytes of the generated report
+        """
+        # 0. Check for cached report in S3 (expires after 30 days)
         if self._settings.s3_housing_pdf_bucket and not skip_cache_lookup:
-            cached_report = get_cached_report(country_code, self._settings, validated_month)
+            cached_report = get_cached_report(country_code, self._settings)
             if cached_report is not None:
-                logger.info(f"Returning cached report for country {country_code} (month: {validated_month or 'current'})")
+                logger.info(f"Returning cached report for country {country_code}")
                 return cached_report
 
         # 1. Fetch all documents for the country
@@ -229,11 +241,11 @@ class ReportService:
 
         pdf_bytes = weasyprint.HTML(string=rendered_html).write_pdf()
         
-        # 7. Upload to S3 cache (non-blocking)
+        # 7. Upload to S3 cache
         if self._settings.s3_housing_pdf_bucket:
             try:
-                upload_cached_report(country_code, pdf_bytes, self._settings, validated_month)
-                logger.info(f"Cached report for {country_code} (month: {validated_month or 'current'})")
+                upload_cached_report(country_code, pdf_bytes, self._settings)
+                logger.info(f"Cached report for {country_code}")
             except Exception as e:
                 logger.warning(f"Failed to upload report to cache (non-fatal): {e}")
         
