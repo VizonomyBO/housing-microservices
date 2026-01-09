@@ -11,6 +11,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 
 from job_service.clients import AgentApiClient, AuthClient
+from job_service.countries import ISO_ALPHA3_CODES
 from job_service.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class ReportPreGenerationJob:
 
     This job:
     1. Calculates the target month (next month)
-    2. Fetches all countries that have documents
+    2. Uses all ISO-3 country codes (regional/global docs provide content)
     3. Generates reports for each country sequentially
     4. Logs results and tracks failures
     """
@@ -97,21 +98,13 @@ class ReportPreGenerationJob:
         logger.info(f"Starting report pre-generation job for month: {month}")
 
         try:
-            # 1. Fetch countries with documents
-            countries = await self.agent_client.get_countries_with_documents(
-                access_scope=self.settings.report_access_scope
-            )
-
-            if not countries:
-                logger.warning("No countries found with documents")
-                result.success = True
-                result.completed_at = datetime.now()
-                return result
-
+            # Use all ISO-3 country codes - regional/global docs provide content
+            # even for countries without direct documents
+            countries = list(ISO_ALPHA3_CODES)
             result.total_items = len(countries)
-            logger.info(f"Processing {len(countries)} countries")
+            logger.info(f"Processing all {len(countries)} ISO-3 country codes")
 
-            # 2. Generate reports sequentially
+            # Generate reports sequentially
             for i, country_code in enumerate(countries, 1):
                 logger.info(f"[{i}/{len(countries)}] Generating report for {country_code}...")
 
@@ -137,7 +130,7 @@ class ReportPreGenerationJob:
                 if i < len(countries):
                     await asyncio.sleep(self.settings.delay_between_reports_seconds)
 
-            # 3. Determine overall success
+            # Determine overall success
             result.success = result.failed_items == 0
             result.completed_at = datetime.now()
 
@@ -160,4 +153,3 @@ class ReportPreGenerationJob:
 
 
 __all__ = ["ReportPreGenerationJob", "JobResult", "get_next_month"]
-
