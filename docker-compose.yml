@@ -218,6 +218,44 @@ services:
       retries: 5
       start_period: 20s
 
+  job-service:
+    <<: *service-defaults
+    build:
+      context: ./services/job-service
+      dockerfile: Dockerfile
+    container_name: job-service
+    depends_on:
+      agent-api:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    ports:
+      - "${JOB_SERVICE_PORT:-8090}:8090"
+    environment:
+      JOB_SERVICE_PORT: 8090
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Schedule: day 25, 2:00 AM
+      JOB_SCHEDULE_DAY: ${JOB_SCHEDULE_DAY:-25}
+      JOB_SCHEDULE_HOUR: ${JOB_SCHEDULE_HOUR:-2}
+      JOB_SCHEDULE_MINUTE: ${JOB_SCHEDULE_MINUTE:-0}
+      JOB_RUN_ON_STARTUP: ${JOB_RUN_ON_STARTUP:-false}
+      # API endpoints
+      AGENT_BASE_URL: ${JOB_AGENT_BASE_URL:-http://agent-api:8000}
+      AUTH_BASE_URL: ${JOB_AUTH_BASE_URL:-http://auth-service:5000}
+      # Service account credentials (for job execution)
+      JOB_SERVICE_EMAIL: ${JOB_SERVICE_EMAIL:-${PROD_DEMO_EMAIL:-}}
+      JOB_SERVICE_PASSWORD: ${JOB_SERVICE_PASSWORD:-${PROD_DEMO_PASSWORD:-}}
+      # Job config
+      JOB_REPORT_ACCESS_SCOPE: ${JOB_REPORT_ACCESS_SCOPE:-base}
+      JOB_REPORT_TIMEOUT_SECONDS: ${JOB_REPORT_TIMEOUT_SECONDS:-600}
+      JOB_DELAY_BETWEEN_REPORTS: ${JOB_DELAY_BETWEEN_REPORTS:-5}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
 volumes:
   postgres_data:
   localstack_data:

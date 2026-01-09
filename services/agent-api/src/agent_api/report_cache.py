@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 import boto3
 from botocore.exceptions import ClientError
@@ -27,27 +29,51 @@ def _get_s3_client(settings: Settings) -> boto3.client:
     return boto3.client("s3", **client_kwargs)
 
 
-def _get_cache_key(country_code: str) -> str:
+def get_next_month() -> str:
+    """Get the next month in YYYY-MM format."""
+    next_month = datetime.now() + relativedelta(months=1)
+    return next_month.strftime("%Y-%m")
+
+
+def validate_target_month(target_month: str | None) -> str | None:
+    """
+    Validate target_month format (YYYY-MM).
+    
+    Returns the validated month string or None if invalid/not provided.
+    """
+    if not target_month:
+        return None
+    if re.match(r"^\d{4}-(0[1-9]|1[0-2])$", target_month):
+        return target_month
+    return None
+
+
+def _get_cache_key(country_code: str, target_month: str | None = None) -> str:
     """
     Generate S3 cache key for a report.
 
     Args:
         country_code: ISO-3 country code (e.g., "USA")
+        target_month: Optional target month in YYYY-MM format. 
+                      If not provided, uses current month.
 
     Returns:
         S3 key in format: reports/report_{country_code}_{YYYY-MM}.pdf
     """
-    current_month = datetime.now().strftime("%Y-%m")
-    return f"reports/report_{country_code}_{current_month}.pdf"
+    month = target_month if target_month else datetime.now().strftime("%Y-%m")
+    return f"reports/report_{country_code}_{month}.pdf"
 
 
-def get_cached_report(country_code: str, settings: Settings) -> bytes | None:
+def get_cached_report(
+    country_code: str, settings: Settings, target_month: str | None = None
+) -> bytes | None:
     """
     Retrieve cached report from S3 if it exists.
 
     Args:
         country_code: ISO-3 country code (e.g., "USA")
         settings: Application settings
+        target_month: Optional target month in YYYY-MM format
 
     Returns:
         PDF bytes if cached report exists, None otherwise
@@ -56,7 +82,7 @@ def get_cached_report(country_code: str, settings: Settings) -> bytes | None:
         return None
 
     bucket_name = settings.s3_housing_pdf_bucket
-    s3_key = _get_cache_key(country_code)
+    s3_key = _get_cache_key(country_code, target_month)
 
     try:
         s3_client = _get_s3_client(settings)
@@ -95,7 +121,7 @@ def get_cached_report(country_code: str, settings: Settings) -> bytes | None:
 
 
 def upload_cached_report(
-    country_code: str, pdf_bytes: bytes, settings: Settings
+    country_code: str, pdf_bytes: bytes, settings: Settings, target_month: str | None = None
 ) -> None:
     """
     Upload generated report to S3 cache.
@@ -104,12 +130,13 @@ def upload_cached_report(
         country_code: ISO-3 country code (e.g., "USA")
         pdf_bytes: PDF file content as bytes
         settings: Application settings
+        target_month: Optional target month in YYYY-MM format
     """
     if not settings.s3_housing_pdf_bucket:
         return
 
     bucket_name = settings.s3_housing_pdf_bucket
-    s3_key = _get_cache_key(country_code)
+    s3_key = _get_cache_key(country_code, target_month)
 
     try:
         s3_client = _get_s3_client(settings)

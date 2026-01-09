@@ -53,6 +53,52 @@ def _expand_country_codes(codes: list[str], include_global: bool = True) -> list
     return list(expanded)
 
 
+@router.get("/countries", summary="List countries that have documents")
+async def list_countries_with_documents(
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    auth_context: Annotated[AuthContext, Depends(get_auth_context)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+    access_scope: Annotated[
+        str | None,
+        Query(description="Filter by access scope (e.g., 'base', 'user_private')"),
+    ] = None,
+    exclude_regions: Annotated[
+        bool,
+        Query(description="Exclude region codes (AFR, EAP, ECA, LAC, MNA, SAR, GLO)"),
+    ] = True,
+) -> JSONResponse:
+    """
+    Get a list of distinct country codes that have associated documents.
+    
+    Useful for scripts that need to generate reports for all available countries.
+    By default, excludes region codes to return only actual country codes.
+    """
+    _require_user(auth_context)
+    
+    stmt = select(Document.country_code).where(Document.country_code.isnot(None)).distinct()
+    
+    if access_scope:
+        stmt = stmt.where(Document.access_scope == access_scope)
+    
+    result = await db_session.execute(stmt)
+    country_codes = [row[0] for row in result.fetchall() if row[0]]
+    
+    if exclude_regions:
+        country_codes = [code for code in country_codes if code not in _REGION_CODES]
+    
+    # Sort alphabetically for consistency
+    country_codes.sort()
+    
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "countries": country_codes,
+            "count": len(country_codes),
+            "request_id": request_context.request_id,
+        },
+    )
+
+
 @router.get("", summary="List uploaded documents for the authenticated user")
 async def list_documents(
     request_context: Annotated[RequestContext, Depends(get_request_context)],

@@ -14,7 +14,7 @@ from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.schemas import ResponseMode, ChatMessagePayload
 from agent_api.models.chat import ChatRequestContext
-from agent_api.report_cache import get_cached_report, upload_cached_report
+from agent_api.report_cache import get_cached_report, upload_cached_report, validate_target_month
 from agent_api.services.conversations import ConversationService
 from agent_api.settings import Settings
 from shared_data_layer.repositories.documents import DocumentRepository
@@ -84,12 +84,18 @@ class ReportService:
         user_id: str,
         request_context: RequestContext,
         auth_context: AuthContext,
+        target_month: str | None = None,
+        skip_cache_lookup: bool = False,
     ) -> bytes:
+        validated_month = validate_target_month(target_month)
+        if target_month and not validated_month:
+            logger.warning(f"Invalid target_month format: {target_month}, ignoring")
+        
         # 0. Check for cached report in S3
-        if self._settings.s3_housing_pdf_bucket:
-            cached_report = get_cached_report(country_code, self._settings)
+        if self._settings.s3_housing_pdf_bucket and not skip_cache_lookup:
+            cached_report = get_cached_report(country_code, self._settings, validated_month)
             if cached_report is not None:
-                logger.info(f"Returning cached report for country {country_code}")
+                logger.info(f"Returning cached report for country {country_code} (month: {validated_month or 'current'})")
                 return cached_report
 
         # 1. Fetch all documents for the country
@@ -226,7 +232,8 @@ class ReportService:
         # 7. Upload to S3 cache (non-blocking)
         if self._settings.s3_housing_pdf_bucket:
             try:
-                upload_cached_report(country_code, pdf_bytes, self._settings)
+                upload_cached_report(country_code, pdf_bytes, self._settings, validated_month)
+                logger.info(f"Cached report for {country_code} (month: {validated_month or 'current'})")
             except Exception as e:
                 logger.warning(f"Failed to upload report to cache (non-fatal): {e}")
         
