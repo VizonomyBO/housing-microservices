@@ -92,6 +92,7 @@ class JobResultResponse(BaseModel):
     total_items: int
     succeeded_items: int
     failed_items: int
+    skipped_items: int
     failed_details: list[dict]
     error_message: str | None
 
@@ -185,6 +186,7 @@ def _result_to_response(result: JobResult) -> JobResultResponse:
         total_items=result.total_items,
         succeeded_items=result.succeeded_items,
         failed_items=result.failed_items,
+        skipped_items=result.skipped_items,
         failed_details=result.failed_details,
         error_message=result.error_message,
     )

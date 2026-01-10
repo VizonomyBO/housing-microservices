@@ -36,6 +36,7 @@ class AuthConfig:
     # Service account credentials for job execution
     email: str = ""
     password: str = ""
+    timeout_seconds: float = 60.0  # Auth request timeout
 
 
 @dataclass(slots=True)
@@ -58,6 +59,10 @@ class Settings:
     max_concurrent_reports: int = 1  # Sequential by default
     delay_between_reports_seconds: int = 5
 
+    # Job behavior
+    skip_cache: bool = True  # Whether to skip cache and regenerate reports
+    start_from_country: str = ""  # Resume from this country code (empty = start from beginning)
+
 
 def load_settings() -> Settings:
     """Load settings from environment variables."""
@@ -77,6 +82,7 @@ def load_settings() -> Settings:
         base_url=os.getenv("AUTH_BASE_URL", "http://auth-service:5001"),
         email=os.getenv("JOB_SERVICE_EMAIL", os.getenv("PROD_DEMO_EMAIL", "")),
         password=os.getenv("JOB_SERVICE_PASSWORD", os.getenv("PROD_DEMO_PASSWORD", "")),
+        timeout_seconds=float(os.getenv("JOB_AUTH_TIMEOUT_SECONDS", "60")),
     )
 
     return Settings(
@@ -89,8 +95,9 @@ def load_settings() -> Settings:
         report_access_scope=os.getenv("JOB_REPORT_ACCESS_SCOPE", "base"),
         max_concurrent_reports=int(os.getenv("JOB_MAX_CONCURRENT_REPORTS", "1")),
         delay_between_reports_seconds=int(os.getenv("JOB_DELAY_BETWEEN_REPORTS", "5")),
+        skip_cache=os.getenv("JOB_SKIP_CACHE", "true").lower() in ("1", "true", "yes"),
+        start_from_country=os.getenv("JOB_START_FROM_COUNTRY", "").upper().strip(),
     )
 
 
 __all__ = ["Settings", "load_settings"]
-

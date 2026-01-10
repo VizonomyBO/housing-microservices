@@ -28,10 +28,16 @@ class AuthClient:
         if not self.settings.auth.email or not self.settings.auth.password:
             raise RuntimeError(
                 "Job service credentials not configured. "
-                "Set JOB_SERVICE_EMAIL and JOB_SERVICE_PASSWORD."
+                "Set JOB_SERVICE_EMAIL and JOB_SERVICE_PASSWORD "
+                "(or SMOKE_USER_EMAIL and SMOKE_USER_PASSWORD)."
             )
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = httpx.Timeout(
+            self.settings.auth.timeout_seconds,
+            connect=30.0,
+        )
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
                 f"{self.settings.auth.base_url.rstrip('/')}/v1/auth/login",
                 json={
@@ -71,7 +77,9 @@ class AgentApiClient:
         if access_scope:
             params["access_scope"] = access_scope
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        timeout = httpx.Timeout(60.0, connect=30.0)
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(
                 f"{self.settings.agent_api.base_url.rstrip('/')}/v1/documents/countries",
                 params=params,
@@ -112,10 +120,14 @@ class AgentApiClient:
 
         url = f"{self.settings.agent_api.base_url.rstrip('/')}/v1/reports/housing/{country_code}"
 
+        # Use a long timeout with explicit connect timeout
+        timeout = httpx.Timeout(
+            self.settings.agent_api.timeout_seconds,
+            connect=30.0,
+        )
+
         try:
-            async with httpx.AsyncClient(
-                timeout=self.settings.agent_api.timeout_seconds
-            ) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(
                     url,
                     params=params,
@@ -138,13 +150,12 @@ class AgentApiClient:
                 )
                 return False, response.status_code, response.text[:200]
 
-        except httpx.TimeoutException:
-            logger.error(f"Timeout generating report for {country_code}")
-            return False, 504, "Request timed out"
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout generating report for {country_code}: {e}")
+            return False, 504, f"Request timed out after {self.settings.agent_api.timeout_seconds}s"
         except Exception as e:
             logger.error(f"Error generating report for {country_code}: {e}")
             return False, 500, str(e)
 
 
 __all__ = ["AuthClient", "AgentApiClient"]
-

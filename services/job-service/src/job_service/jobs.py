@@ -26,6 +26,7 @@ class JobResult:
     total_items: int = 0
     succeeded_items: int = 0
     failed_items: int = 0
+    skipped_items: int = 0
     failed_details: list[dict[str, Any]] = field(default_factory=list)
     error_message: str | None = None
 
@@ -69,8 +70,8 @@ class ReportPreGenerationJob:
         """
         Execute the report pre-generation job.
 
-        Regenerates all country reports with skip_cache=True,
-        overwriting the existing cached versions.
+        Regenerates all country reports with skip_cache setting from config,
+        overwriting the existing cached versions if skip_cache=True.
         """
         if self._is_running:
             logger.warning("Job is already running, skipping")
@@ -87,22 +88,47 @@ class ReportPreGenerationJob:
             started_at=datetime.now(),
         )
 
-        logger.info("Starting report regeneration job")
+        skip_cache = self.settings.skip_cache
+        start_from = self.settings.start_from_country
+
+        logger.info(
+            f"Starting report regeneration job "
+            f"(skip_cache={skip_cache}, start_from={start_from or 'beginning'})"
+        )
 
         try:
             # Use all ISO-3 country codes - regional/global docs provide content
             # even for countries without direct documents
             countries = list(ISO_ALPHA3_CODES)
             result.total_items = len(countries)
-            logger.info(f"Processing all {len(countries)} ISO-3 country codes")
+
+            # Find start index if resuming
+            start_index = 0
+            if start_from:
+                try:
+                    start_index = countries.index(start_from)
+                    logger.info(f"Resuming from {start_from} (index {start_index})")
+                except ValueError:
+                    logger.warning(
+                        f"Start country '{start_from}' not found in list, starting from beginning"
+                    )
+
+            logger.info(
+                f"Processing {len(countries) - start_index} of {len(countries)} ISO-3 country codes"
+            )
 
             # Generate reports sequentially
             for i, country_code in enumerate(countries, 1):
+                # Skip countries before start_from
+                if i - 1 < start_index:
+                    result.skipped_items += 1
+                    continue
+
                 logger.info(f"[{i}/{len(countries)}] Generating report for {country_code}...")
 
                 success, status, message = await self.agent_client.generate_report(
                     country_code=country_code,
-                    skip_cache=True,  # Always regenerate to refresh the cache
+                    skip_cache=skip_cache,
                 )
 
                 if success:
@@ -127,7 +153,8 @@ class ReportPreGenerationJob:
 
             logger.info(
                 f"Job completed: {result.succeeded_items}/{result.total_items} succeeded, "
-                f"{result.failed_items} failed, duration: {result.duration_seconds:.1f}s"
+                f"{result.failed_items} failed, {result.skipped_items} skipped, "
+                f"duration: {result.duration_seconds:.1f}s"
             )
 
         except Exception as e:
