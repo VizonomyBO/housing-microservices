@@ -1,6 +1,7 @@
 from .agents import AgentEvent, AgentRun
 from .conversations import (
     AgentStateCheckpoint,
+    ChatResponseCache,
     Conversation,
     Message,
     MessageCitation,
@@ -40,6 +41,7 @@ __all__ = [
     "MessageToolCall",
     "MessageCitation",
     "AgentStateCheckpoint",
+    "ChatResponseCache",
     "AgentRun",
     "AgentEvent",
     "Document",

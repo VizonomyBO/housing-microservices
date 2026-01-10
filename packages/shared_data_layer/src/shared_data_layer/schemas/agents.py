@@ -1,16 +1,16 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
 
 from .common import ORMBaseSchema
-from .countries import CountryISOAlpha3
+from .countries import CountryISOAlpha3, Region
 
 
 class AgentEventRead(ORMBaseSchema):
     id: UUID
     run_id: UUID
     owner_user_id: Optional[UUID] = None
-    country_code: Optional[CountryISOAlpha3] = None
+    country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     event_type: str
     sequence_index: int
     payload: dict
@@ -24,7 +24,7 @@ class AgentRunRead(ORMBaseSchema):
     id: UUID
     owner_user_id: Optional[UUID] = None
     conversation_id: Optional[UUID] = None
-    country_code: Optional[CountryISOAlpha3] = None
+    country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     planner_name: str
     planner_version: Optional[str] = None
     status: str

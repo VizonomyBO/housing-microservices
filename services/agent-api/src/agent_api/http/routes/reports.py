@@ -26,9 +26,6 @@ router = APIRouter(prefix="/v1/reports", tags=["reports"])
     
     Reports are cached in S3 and expire 30 days after generation.
     Use `skip_cache=true` to force regeneration (the new report will still be cached).
-    
-    The pre-generation job runs on the 25th of each month with `skip_cache=true`
-    to refresh all reports before they expire.
     """,
     status_code=200,
     responses={
@@ -66,7 +63,7 @@ async def generate_report(
         user_id=user_id or "anonymous", # Fallback if auth is loose, though usually required
         request_context=request_context,
         auth_context=auth_context,
-        skip_cache_lookup=skip_cache,
+        skip_cache=skip_cache,
     )
     
     filename = f"{country_code}_Housing_Assessment_Report.pdf"

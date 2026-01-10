@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
 
 from pydantic import model_validator
@@ -7,7 +7,7 @@ from pydantic import model_validator
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 
 from .common import ORMBaseSchema
-from .countries import CountryISOAlpha3
+from .countries import CountryISOAlpha3, Region
 from .retrieval import ChunkRead
 
 
@@ -38,7 +38,7 @@ class DocumentRead(ORMBaseSchema):
     owner_user_id: Optional[UUID] = None
     access_scope: str
     canonical_name: str
-    country_code: Optional[CountryISOAlpha3] = None
+    country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     language: Optional[str] = None
     tags: Optional[List[str]] = None
     status: str

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -172,3 +173,22 @@ Index(
     MessageCitation.chunk_id,
     MessageCitation.chunk_country_code,
 )
+
+
+class ChatResponseCache(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Cache for chat responses to pillar questions by country."""
+
+    __tablename__ = "chat_response_cache"
+
+    country_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    question_hash: Mapped[str] = mapped_column(String, nullable=False)
+    response: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "country_code",
+            "question_hash",
+            name="uq_chat_response_cache_country_hash",
+        ),
+    )

@@ -84,32 +84,18 @@ class ReportService:
         user_id: str,
         request_context: RequestContext,
         auth_context: AuthContext,
-        skip_cache_lookup: bool = False,
+        skip_cache: bool = False,
     ) -> bytes:
-        """
-        Generate a housing assessment report for a country.
-
-        Reports are cached in S3 and expire 30 days after generation.
-        The pre-generation job on the 25th uses skip_cache_lookup=True
-        to force regeneration, ensuring reports are refreshed monthly.
-
-        Args:
-            country_code: ISO-3 country code
-            user_id: User requesting the report
-            request_context: Request context for tracing
-            auth_context: Auth context for permissions
-            skip_cache_lookup: If True, skip cache and regenerate
-
-        Returns:
-            PDF bytes of the generated report
-        """
-        # 0. Check for cached report in S3 (expires after 30 days)
-        if self._settings.s3_housing_pdf_bucket and not skip_cache_lookup:
-            cached_report = get_cached_report(country_code, self._settings)
-            if cached_report is not None:
-                logger.info(f"Returning cached report for country {country_code}")
-                return cached_report
-
+        # Check S3 cache first unless skip_cache is requested
+        if not skip_cache and self._settings.s3_housing_pdf_bucket:
+            try:
+                cached_pdf = get_cached_report(country_code, self._settings)
+                if cached_pdf:
+                    logger.info(f"Returning cached report for {country_code}")
+                    return cached_pdf
+            except Exception as e:
+                logger.warning(f"Failed to fetch cached report (proceeding to generate): {e}")
+        
         # 1. Fetch all documents for the country
         documents = await self._doc_repo.list_documents_for_country(country_code)
         if not documents:
@@ -241,7 +227,7 @@ class ReportService:
 
         pdf_bytes = weasyprint.HTML(string=rendered_html).write_pdf()
         
-        # 7. Upload to S3 cache
+        # 7. Upload to S3 cache (non-blocking)
         if self._settings.s3_housing_pdf_bucket:
             try:
                 upload_cached_report(country_code, pdf_bytes, self._settings)

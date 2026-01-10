@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -27,6 +28,7 @@ from agent_api.http.routes.conversations import router as conversations_router
 from agent_api.http.routes.documents import router as documents_router
 from agent_api.http.routes.metrics import router as metrics_router
 from agent_api.http.routes.reports import router as reports_router
+from agent_api.services.preprocessing import run_preprocessing
 from agent_api.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -52,9 +54,26 @@ def create_app() -> FastAPI:
         if isinstance(get_runner(), UnconfiguredRunner):
             set_chat_runner(runner)
 
+        # Launch cache preprocessing if enabled
+        preprocessing_task = None
+        if settings.preprocess_cache_on_startup and db_initialized:
+            logger.info("Cache preprocessing enabled - launching background task")
+            preprocessing_task = asyncio.create_task(run_preprocessing(runner))
+        else:
+            if settings.preprocess_cache_on_startup:
+                logger.warning("Cache preprocessing enabled but DB not initialized")
+
         try:
             yield
         finally:
+            if preprocessing_task:
+                if not preprocessing_task.done():
+                    logger.info("Cancelling preprocessing task...")
+                    preprocessing_task.cancel()
+                    try:
+                        await preprocessing_task
+                    except asyncio.CancelledError:
+                        pass
             if db_initialized:
                 await DatabaseSessionManager.dispose()
 

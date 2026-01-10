@@ -1,18 +1,18 @@
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 from uuid import UUID
 
 from pydantic import field_validator
 
 from .common import ORMBaseSchema
-from .countries import CountryISOAlpha3
+from .countries import CountryISOAlpha3, Region
 
 
 class GraphEvidenceRead(ORMBaseSchema):
     id: UUID
     edge_id: UUID
     chunk_id: Optional[UUID] = None
-    chunk_country_code: Optional[CountryISOAlpha3] = None
+    chunk_country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     offsets: Optional[tuple[int, int]] = None
     confidence: Optional[float] = None
     metadata_: Optional[dict] = None
@@ -36,9 +36,9 @@ class GraphEvidenceRead(ORMBaseSchema):
 class GraphEdgeRead(ORMBaseSchema):
     id: UUID
     source_entity_id: UUID
-    source_entity_country_code: Optional[CountryISOAlpha3] = None
+    source_entity_country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     target_entity_id: UUID
-    target_entity_country_code: Optional[CountryISOAlpha3] = None
+    target_entity_country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     edge_type: str
     weight: Optional[float] = None
     directional: bool
@@ -57,10 +57,10 @@ class GraphEntityRead(ORMBaseSchema):
     labels: Optional[List[str]] = None
     properties: Optional[dict] = None
     score: Optional[float] = None
-    country_code: Optional[CountryISOAlpha3] = None
+    country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     owner_user_id: Optional[UUID] = None
     chunk_id: Optional[UUID] = None
-    chunk_country_code: Optional[CountryISOAlpha3] = None
+    chunk_country_code: Optional[Union[CountryISOAlpha3, Region]] = None
     first_seen_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
     edges_out: List[GraphEdgeRead] = []
@@ -74,4 +74,4 @@ class GraphCommunityRead(ORMBaseSchema):
     level: int
     entity_ids: Optional[List[UUID]] = None
     metrics: Optional[dict] = None
-    country_code: Optional[CountryISOAlpha3] = None
+    country_code: Optional[Union[CountryISOAlpha3, Region]] = None

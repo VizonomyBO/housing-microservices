@@ -63,6 +63,7 @@ class Settings:
     aws_access_key_id: str | None
     aws_secret_access_key: str | None
     s3_endpoint_url: str | None
+    preprocess_cache_on_startup: bool
 
 
 def load_settings() -> Settings:
@@ -149,6 +150,7 @@ def load_settings() -> Settings:
         aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key,
         s3_endpoint_url=s3_endpoint_url,
+        preprocess_cache_on_startup=_env_flag("PREPROCESS_CACHE_ON_STARTUP", False),
     )
 
 

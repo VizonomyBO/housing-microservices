@@ -311,7 +311,7 @@ EOF
 }
 
 stop_conflicts() {
-  local ports=("80" "5001" "5002" "8000" "8085" "3000" "5432")
+  local ports=("80" "5001" "5002" "8000" "8085" "3000" "5432" "8090")
   log "Stopping containers and processes bound to service ports (${ports[*]})"
   ssh $(ssh_opts) "$SSH_USER@$HOST" bash -s <<EOF
 set -euo pipefail
@@ -343,7 +343,7 @@ deploy_services() {
   stop_conflicts
 
   local compose_cmd="sudo docker compose --env-file $REMOTE_ENV_FILE -f $REMOTE_COMPOSE_FILE"
-  local services="postgres init-migrations agent-api auth-service user-service ingestion-service frontend-service nginx"
+  local services="postgres init-migrations agent-api auth-service user-service ingestion-service frontend-service job-service nginx"
   local up_flags="--remove-orphans -d"
   [[ "$NO_BUILD" -eq 1 ]] || up_flags="$up_flags --build --pull always"
 
@@ -366,6 +366,7 @@ EOF
   log "  curl -fsS http://$HOST:5002/v1/health"
   log "  curl -fsS http://$HOST:8000/health"
   log "  curl -fsS http://$HOST:8085/health"
+  log "  curl -fsS http://$HOST:8090/health"
   log "  curl -fsS http://$HOST:3000/health"
   log "  psql -h $HOST -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-vizonomy_user} -c 'select 1'"
 }
