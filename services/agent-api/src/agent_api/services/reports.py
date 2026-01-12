@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -77,7 +77,7 @@ class ReportService:
         self._doc_repo = DocumentRepository(db_session)
         self._convo_service = ConversationService(db_session)
 
-    async def generate_housing_report(
+    async def generate_housing_report(  # noqa: PLR0912
         self,
         country_code: str,
         user_id: str,
@@ -145,7 +145,7 @@ class ReportService:
                     attachments=[],
                 ),
                 hints={"country_code": country_code},
-                constraints={"country_code": country_code},
+                constraints={"country_code": country_code},  # type: ignore[arg-type]
                 owner_user_id=user_id,
                 workspace_id=None,
                 tenant_id=auth_context.tenant_id,
@@ -198,7 +198,7 @@ class ReportService:
 
         # 5. Build References section - group citations by document
         references = []
-        for doc_name, citation_info in all_citations.items():
+        for _doc_name, citation_info in all_citations.items():
             # Format citation numbers like [c1][c2][c4]
             citation_nums = sorted(citation_info["citation_numbers"])
             citations_str = "".join(f"[c{n}]" for n in citation_nums)
@@ -218,7 +218,7 @@ class ReportService:
 
         rendered_html = template.render(
             country=country_code,
-            date=datetime.now().strftime("%d %B %Y"),
+            date=datetime.now(UTC).strftime("%d %B %Y"),
             sections=sections_data,
             references=references,
         )

@@ -127,7 +127,7 @@ class MetricEvaluator:
         context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
-        return self.judge.score_rubric(
+        return self.judge.score_rubric(  # type: ignore[union-attr]
             metric_name=MetricName.LLM_GROUNDING,
             question=question,
             answer=chat_result.answer,
@@ -145,7 +145,7 @@ class MetricEvaluator:
         context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
-        return self.judge.score_rubric(
+        return self.judge.score_rubric(  # type: ignore[union-attr]
             metric_name=MetricName.LLM_TRUTHFULNESS,
             question=question,
             answer=chat_result.answer,
@@ -163,7 +163,7 @@ class MetricEvaluator:
         context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
-        return self.judge.score_rubric(
+        return self.judge.score_rubric(  # type: ignore[union-attr]
             metric_name=MetricName.LLM_BIAS,
             question=question,
             answer=chat_result.answer,

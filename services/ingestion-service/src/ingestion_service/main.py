@@ -65,7 +65,7 @@ app = FastAPI(title="Ingestion Service", version="0.1.0", lifespan=lifespan)
 try:
     cors_settings = get_settings()
     app.add_middleware(
-        CORSMiddleware,
+        CORSMiddleware,  # type: ignore[arg-type]
         allow_origins=cors_settings.cors_origins,
         allow_credentials=cors_settings.cors_allow_credentials,
         allow_methods=["*"],
@@ -477,7 +477,7 @@ async def download_document_by_name(
     Searches for documents owned by the authenticated user with the given canonical_name.
     """
     # Authenticate user
-    user = await _require_user(authorization, settings)
+    await _require_user(authorization, settings)
 
     # Check if S3 bucket is configured
     if not settings.s3_housing_pdf_bucket:

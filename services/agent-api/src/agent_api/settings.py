@@ -59,6 +59,8 @@ class Settings:
     cors_allow_credentials: bool
     pyodide: PyodideConfig
     s3_housing_pdf_bucket: str | None
+    s3_bucket_name: str | None
+    s3_region: str
     aws_region: str
     aws_access_key_id: str | None
     aws_secret_access_key: str | None
@@ -118,6 +120,8 @@ def load_settings() -> Settings:
 
     # S3 Configuration for report caching
     s3_housing_pdf_bucket = _env_str("S3_HOUSING_PDF_BUCKET")
+    s3_bucket_name = _env_str("S3_BUCKET_NAME")
+    s3_region = _env_str("S3_REGION", "us-east-1") or "us-east-1"
     aws_region = _env_str("AWS_REGION", "us-east-1") or "us-east-1"
     aws_access_key_id = _env_str("AWS_ACCESS_KEY_ID")
     aws_secret_access_key = _env_str("AWS_SECRET_ACCESS_KEY")
@@ -146,6 +150,8 @@ def load_settings() -> Settings:
         cors_allow_credentials=cors_allow_credentials,
         pyodide=pyodide,
         s3_housing_pdf_bucket=s3_housing_pdf_bucket,
+        s3_bucket_name=s3_bucket_name,
+        s3_region=s3_region,
         aws_region=aws_region,
         aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key,

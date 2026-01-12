@@ -1,9 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,
@@ -42,7 +41,7 @@ async def generate_report(
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
-    chat_runner: Annotated[list, Depends(get_runner)],  # get_runner returns Any (LangGraphRunner)
+    chat_runner: Annotated[Any, Depends(get_runner)],  # get_runner returns Any (LangGraphRunner)
     settings: Annotated[Settings, Depends(get_settings)],
     skip_cache: Annotated[
         bool,
@@ -52,7 +51,7 @@ async def generate_report(
         ),
     ] = False,
 ):
-    service = ReportService(db_session=db_session, runner=chat_runner, settings=settings)
+    service = ReportService(db_session=db_session, runner=chat_runner, settings=settings)  # type: ignore[arg-type]
 
     # User ID is required
     user_id = auth_context.user_id

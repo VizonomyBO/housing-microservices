@@ -32,18 +32,18 @@ async def test_compute_over_chunks_runs_pyodide(monkeypatch):
     runtime = ToolRuntime(
         conversation_id=str(uuid4()),
         owner_user_id=str(uuid4()),
-        auth=None,  # not used
-        db_session=None,  # not used
-        retrieval=None,  # not used
+        auth=None,  # type: ignore[arg-type]
+        db_session=None,  # type: ignore[arg-type]
+        retrieval=None,  # type: ignore[arg-type]
         request_id="req-1",
-        pyodide=SimpleNamespace(base_url="http://pyodide"),
-        last_retrieval=ctx,
+        pyodide=SimpleNamespace(base_url="http://pyodide"),  # type: ignore[arg-type]
+        last_retrieval=ctx,  # type: ignore[arg-type]
         metadata={},
     )
     set_runtime(runtime)
 
     user_code = "result = sum(1 for c in chunks if 'value' in c['text'])"
-    payload = await compute_over_chunks.ainvoke({"python_code": user_code})
+    payload = await compute_over_chunks.ainvoke({"python_code": user_code})  # type: ignore[typeddict-item]
     data = json.loads(payload)
 
     assert data["result"] == 20

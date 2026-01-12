@@ -73,6 +73,26 @@ class Settings(BaseSettings):
         default=None,
         description="S3 bucket name for housing PDF documents",
     )
+    s3_bucket_name: str | None = Field(
+        default=None,
+        description="S3 bucket name for general document storage",
+    )
+    s3_region: str = Field(
+        default="us-east-1",
+        description="AWS S3 region",
+    )
+    s3_endpoint_url: str | None = Field(
+        default=None,
+        description="Custom S3 endpoint URL (for LocalStack, MinIO, etc.)",
+    )
+    aws_access_key_id: str | None = Field(
+        default=None,
+        description="AWS access key ID for S3 authentication",
+    )
+    aws_secret_access_key: str | None = Field(
+        default=None,
+        description="AWS secret access key for S3 authentication",
+    )
     aws_region: str = Field(
         default="us-east-1",
         description="AWS region for S3 operations",

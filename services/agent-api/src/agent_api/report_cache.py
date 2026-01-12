@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -12,11 +13,8 @@ from agent_api.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Reports expire 30 days after generation
-REPORT_TTL_DAYS = 30
 
-
-def _get_s3_client(settings: Settings) -> boto3.client:
+def _get_s3_client(settings: Settings) -> Any:  # boto3.client type is not well-defined
     """Initialize and return S3 client with settings."""
     client_kwargs = {"region_name": settings.aws_region}
 
@@ -38,44 +36,22 @@ def _get_cache_key(country_code: str) -> str:
         country_code: ISO-3 country code (e.g., "USA")
 
     Returns:
-        S3 key in format: reports/report_{country_code}.pdf
+        S3 key in format: reports/report_{country_code}_{YYYY-MM}.pdf
     """
-    return f"reports/report_{country_code}.pdf"
+    current_month = datetime.now(UTC).strftime("%Y-%m")
+    return f"reports/report_{country_code}_{current_month}.pdf"
 
 
-def _is_report_expired(last_modified: datetime, ttl_days: int = REPORT_TTL_DAYS) -> bool:
+def get_cached_report(country_code: str, settings: Settings) -> bytes | None:
     """
-    Check if a report is expired based on its last modified date.
-
-    Args:
-        last_modified: The LastModified timestamp from S3
-        ttl_days: Number of days before a report expires (default: 30)
-
-    Returns:
-        True if the report is older than ttl_days, False otherwise
-    """
-    now = datetime.now(timezone.utc)
-    age_days = (now - last_modified).days
-    return age_days >= ttl_days
-
-
-def get_cached_report(
-    country_code: str, settings: Settings, skip_expiry_check: bool = False
-) -> bytes | None:
-    """
-    Retrieve cached report from S3 if it exists and is not expired.
-
-    Reports expire 30 days after generation. The pre-generation job on the 25th
-    uses skip_cache=True to force regeneration, ensuring reports are refreshed
-    before they expire.
+    Retrieve cached report from S3 if it exists.
 
     Args:
         country_code: ISO-3 country code (e.g., "USA")
         settings: Application settings
-        skip_expiry_check: If True, return the report regardless of age
 
     Returns:
-        PDF bytes if cached report exists and is not expired, None otherwise
+        PDF bytes if cached report exists, None otherwise
     """
     if not settings.s3_housing_pdf_bucket:
         return None
@@ -86,34 +62,13 @@ def get_cached_report(
     try:
         s3_client = _get_s3_client(settings)
         response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-        
-        # Check if report is expired (unless skip_expiry_check is True)
-        last_modified = response.get("LastModified")
-        if last_modified and not skip_expiry_check:
-            if _is_report_expired(last_modified):
-                age_days = (datetime.now(timezone.utc) - last_modified).days
-                logger.info(
-                    "Cached report expired (age: %d days, TTL: %d days): s3://%s/%s",
-                    age_days,
-                    REPORT_TTL_DAYS,
-                    bucket_name,
-                    s3_key,
-                )
-                return None
-        
         pdf_bytes = response["Body"].read()
 
-        age_info = ""
-        if last_modified:
-            age_days = (datetime.now(timezone.utc) - last_modified).days
-            age_info = f", age: {age_days} days"
-
         logger.info(
-            "Retrieved cached report from S3: s3://%s/%s (size: %d bytes%s)",
+            "Retrieved cached report from S3: s3://%s/%s (size: %d bytes)",
             bucket_name,
             s3_key,
             len(pdf_bytes),
-            age_info,
         )
         return pdf_bytes
 
@@ -144,10 +99,6 @@ def upload_cached_report(country_code: str, pdf_bytes: bytes, settings: Settings
     """
     Upload generated report to S3 cache.
 
-    The report will be stored without a month suffix - it's just the latest
-    version for that country. Expiration is based on the S3 object's LastModified
-    timestamp (30 days).
-
     Args:
         country_code: ISO-3 country code (e.g., "USA")
         pdf_bytes: PDF file content as bytes
@@ -167,10 +118,6 @@ def upload_cached_report(country_code: str, pdf_bytes: bytes, settings: Settings
             Body=pdf_bytes,
             ContentType="application/pdf",
             ServerSideEncryption="AES256",
-            Metadata={
-                "generated-at": datetime.now(timezone.utc).isoformat(),
-                "country-code": country_code,
-            },
         )
 
         logger.info(

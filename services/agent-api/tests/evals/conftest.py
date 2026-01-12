@@ -33,10 +33,10 @@ def _load_env_defaults() -> None:
         raise RuntimeError(msg)
 
     for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith("#") or "=" not in stripped_line:
             continue
-        key, value = line.split("=", 1)
+        key, value = stripped_line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if key:

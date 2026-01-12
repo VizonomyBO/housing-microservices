@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 from langchain_voyageai import VoyageAIEmbeddings
 
@@ -40,10 +41,22 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
     ) -> list[list[float]]:
         if not texts:
             return []
+        
+        # Set API key in environment for VoyageAIEmbeddings
+        os.environ["VOYAGE_API_KEY"] = self.api_key
+        
+        # Cast output_dimension to the expected Literal type
+        dim = output_dimension or self.output_dimension
+        valid_dims = (256, 512, 1024, 2048)
+        if dim not in valid_dims:
+            raise ValueError(f"output_dimension must be one of {valid_dims}, got {dim}")
+        
+        # Type-safe cast to Literal type
+        typed_dim = cast(Literal[256, 512, 1024, 2048], dim)
+        
         client = VoyageAIEmbeddings(
             model=self.model,
-            api_key=self.api_key,
-            output_dimension=output_dimension or self.output_dimension,
+            output_dimension=typed_dim,
             truncation=True,
         )
         return await asyncio.to_thread(client.embed_documents, list(texts))

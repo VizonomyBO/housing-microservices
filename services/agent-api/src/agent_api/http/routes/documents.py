@@ -367,8 +367,8 @@ async def download_document(
     if settings.ingestion_api_key:
         headers["Authorization"] = f"Bearer {settings.ingestion_api_key}"
     # Forward the user's auth token to ingestion service
-    if auth_context.token:
-        headers["Authorization"] = f"Bearer {auth_context.token}"
+    if auth_context.token:  # type: ignore[attr-defined]
+        headers["Authorization"] = f"Bearer {auth_context.token}"  # type: ignore[attr-defined]
 
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:

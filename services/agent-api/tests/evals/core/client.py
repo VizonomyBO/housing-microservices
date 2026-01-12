@@ -184,7 +184,7 @@ class AgentApiClient:
                     continue
                 raise HTTPStatusError(
                     f"{error}. response_text={resp.text}", request=resp.request, response=resp
-                )
+                ) from error
         raise RuntimeError(f"Chat failed after retries: {last_error}")
 
     def chat_stream(
