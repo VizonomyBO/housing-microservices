@@ -118,7 +118,7 @@ async def list_documents(
     include_global: Annotated[
         bool,
         Query(description="Include global (GLO) documents in country queries"),
-    ] = False,
+    ] = True,
     created_after: Annotated[
         datetime | None,
         Query(description="Return documents created after this timestamp"),
