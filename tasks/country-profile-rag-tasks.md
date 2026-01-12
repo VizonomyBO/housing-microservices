@@ -5,6 +5,7 @@ Use this task list for coding agents. Keep the structure (goal → scope → ste
 ## Task 1 — Backfill publication year metadata (do this first)
 - **Goal:** Enable reliable `publication_year` filters (>= 2000) on existing corpora.
 - **Scope:** `packages/shared_data_layer`, data/backfill script, optional ingestion metadata parsing helper.
+- **Status:** Completed (publication_year populated in prod; backfill script documented and rerunnable).
 - **Steps:**
   1. Add support in ingestion to accept `publication_year` in upload metadata and persist to `Document.metadata` (and chunks if cheap).
   2. Write a one-off backfill script: derive `publication_year` from `canonical_name`/`source_uri` patterns (e.g., `*_2016_*.pdf`), validate 4-digit year, and update `documents.metadata`.
