@@ -51,6 +51,6 @@ flowchart LR
 - **Init flow**: Base image `pgvector/pgvector:pg16` with `scripts/init-databases.sh` creating both DBs; a dedicated `init-migrations` container (built from `docker/init-migrations/Dockerfile`) waits for DB readiness and runs shared_data_layer Alembic migrations before app services start (compose uses `condition: service_completed_successfully` to gate agent/ingestion).
 
 ## Deployment Model
-- **Local reduced**: Agent API + Postgres (LocalStack optional/deferred) via Compose profiles; defaults are AWS-first. Dev reload available via `docker-compose.dev.yml` with bind mounts; rebuild only for dependency changes.
+- **Local dev (LocalStack-first)**: Full retained stack (agent-api, ingestion-service, auth-service, user-service, Postgres, LocalStack) via `env_file=$(scripts/use_env.sh local); docker compose --env-file "$env_file" up -d --build`. Dev reload available via `docker-compose.dev.yml` with bind mounts; rebuild only for dependency changes.
 - **Hybrid dev**: Local services pointing at cloud Postgres/S3 using `.env.dev` and `docker-compose.ec2.yml`.
-- **Prod/AWS**: EC2-hosted services via `ENV_FILE=.env.prod ./scripts/deploy_prod_stack.sh`; smoke with `./scripts/prod_smoke_check.sh`.
+- **Prod/AWS**: EC2-hosted services via `ENV_FILE=.env.prod ./scripts/deploy_stack.sh --mode services-only|full-redeploy`; smoke with `scripts/local_smoke.sh --target prod` or `scripts/prod_deploy_and_smoke.sh`.

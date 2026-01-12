@@ -23,8 +23,8 @@
 - **Logical DBs**: `housing` (Agent/shared data layer) and `auth_db` (auth/user).
 
 ## Infrastructure & DevOps
-- **Docker Compose** for local, dev-reload, hybrid (`docker-compose.ec2.yml`), and prod profiles (defaults AWS-first; LocalStack opt-in). `docker-compose.dev.yml` bind-mounts code and runs uvicorn reload so rebuilds are only needed on dependency changes.
-- **AWS**: EC2-hosted services; S3 used in prod (LocalStack mocked locally when available).
+- **Docker Compose** for local (LocalStack-first), dev-reload, and hybrid (`docker-compose.ec2.yml`) profiles. `docker-compose.dev.yml` bind-mounts code and runs uvicorn reload so rebuilds are only needed on dependency changes.
+- **AWS**: EC2-hosted services; S3 used in prod (LocalStack mocked locally for dev). Deploy via `scripts/deploy_stack.sh --mode services-only|full-redeploy`; smokes via `scripts/local_smoke.sh --target prod` or `scripts/prod_deploy_and_smoke.sh`.
 - **Patch deploys**: Hot-patch via `scp` + `docker cp` + compose restart (see AGENTS.md §7).
 - **Fail-fast defaults**: OPENAI + Voyage, Valkey, and rate limiting are required unless explicit test-only bypass flags are set.
 
