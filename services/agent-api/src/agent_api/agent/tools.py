@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent_api.agent.tool_runtime import get_runtime
+from agent_api.services.retrieval import RetrievalProfile
 from agent_api.services.retrieval_scope import ConversationDocumentRecord
 from agent_api.tools.pyodide import execute_in_pyodide
 
@@ -39,6 +40,8 @@ async def retrieve_documents(query: str) -> str:
     ctx = await runtime.retrieval.retrieve(
         user_query=query,
         conversation_id=runtime.conversation_id,
+        profile=runtime.retrieval_profile,
+        target_country_code=runtime.target_country_code,
     )
     runtime.last_retrieval = ctx
     attachments = [_serialize_attachment(att) for att in ctx.attachments]

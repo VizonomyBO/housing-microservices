@@ -52,6 +52,7 @@
 ## Recent Updates
 - Auth/user services aligned to cache-free stack; images built locally via `docker compose build auth-service user-service` (not pushed to any registry yet).
 - Publication year metadata backfill completed in prod (269 docs updated; HTI_2016_* ambiguous case set to 2016). Backfill script/documentation lives under `packages/shared_data_layer` with logs in `packages/logs/`.
+- Country-profile retrieval profile implemented: geo weighting (country/region/global), publication_year < 2000 filtered when present, and 3k character cap enforced for that profile.
 
 ## Agent Eval Suite (Prod, Pytest)
 - **Purpose**: Run RAG evals over the prod Agent API using the eval user and preloaded MEX corpus (no uploads). Artifacts are stored at `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored; flat).

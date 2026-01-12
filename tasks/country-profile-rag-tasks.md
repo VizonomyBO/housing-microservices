@@ -16,6 +16,7 @@ Use this task list for coding agents. Keep the structure (goal → scope → ste
 ## Task 2 — Add report/country-profile retrieval profile
 - **Goal:** For report/cache flows, prioritize country > region > global and exclude `publication_year < 2000`; 3k character cap on answers.
 - **Scope:** `services/agent-api` retrieval pipeline + agent runner; no new services.
+- **Status:** Completed
 - **Steps:**
   1. Add a retrieval profile flag (e.g., via `hints`/`constraints`) in `agent/runner.py` and pass it through `retrieve_documents`.
   2. In `RetrievalService`, apply filters (drop <2000 when present) and geo weighting: country *1.3, region (per `REGION_BY_COUNTRY_ALPHA3`) *1.1, global *0.9 (or bucketed ordering).
