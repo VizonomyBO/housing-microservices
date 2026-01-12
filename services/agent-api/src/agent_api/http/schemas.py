@@ -54,6 +54,7 @@ class ChatRequestBody(BaseModel):
     stream: bool | None = Field(default=None, description="Legacy boolean alias for response_mode")
     allow_stateless: bool = Field(default=False)
     constraints: ChatConstraints = Field(default_factory=ChatConstraints)
+    use_cache: bool = Field(default=False, description="Use cached response if available for this country/question")
 
     def resolved_response_mode(self) -> ResponseMode:
         if self.response_mode is not None:

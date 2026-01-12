@@ -39,13 +39,19 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        print("=" * 80)
+        print("LIFESPAN STARTUP BEGINNING")
+        print("=" * 80)
         app.state.settings = settings
         app.state.auth_validator = AuthTokenValidator(settings.auth)
 
         db_initialized = False
+        print(f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}...")
+        logger.info(f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}...")
         if settings.database_url:
             DatabaseSessionManager.init(settings.database_url)
             db_initialized = True
+            logger.info("Database initialized successfully")
         else:  # pragma: no cover
             logger.warning("DATABASE_URL not configured; database-backed operations are disabled")
         app.state.db_initialized = db_initialized
@@ -56,12 +62,35 @@ def create_app() -> FastAPI:
 
         # Launch cache preprocessing if enabled
         preprocessing_task = None
+        print(f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}")
+        logger.info(f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}")
+        
+        async def run_preprocessing_with_error_handling():
+            try:
+                print("About to call run_preprocessing...")
+                await run_preprocessing(runner)
+                print("run_preprocessing completed")
+            except Exception as e:
+                print(f"ERROR in preprocessing background task: {e}")
+                import traceback
+                traceback.print_exc()
+                logger.error(f"Error in preprocessing background task: {e}", exc_info=True)
+        
         if settings.preprocess_cache_on_startup and db_initialized:
+            print("Cache preprocessing enabled - launching background task")
             logger.info("Cache preprocessing enabled - launching background task")
-            preprocessing_task = asyncio.create_task(run_preprocessing(runner))
+            try:
+                preprocessing_task = asyncio.create_task(run_preprocessing_with_error_handling())
+                print("Preprocessing task created successfully")
+                logger.info("Preprocessing task created successfully")
+            except Exception as e:
+                print(f"ERROR: Failed to create preprocessing task: {e}")
+                logger.error(f"Failed to create preprocessing task: {e}", exc_info=True)
         else:
             if settings.preprocess_cache_on_startup:
                 logger.warning("Cache preprocessing enabled but DB not initialized")
+            else:
+                logger.info("Cache preprocessing is disabled (PREPROCESS_CACHE_ON_STARTUP=false)")
 
         try:
             yield

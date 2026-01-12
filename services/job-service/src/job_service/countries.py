@@ -34,4 +34,14 @@ ISO_ALPHA3_CODES: tuple[str, ...] = (
     "VIR", "VNM", "VUT", "WLF", "WSM", "YEM", "ZAF", "ZMB", "ZWE",
 )
 
-__all__ = ["ISO_ALPHA3_CODES"]
+# Priority countries for pre-generation (limited set)
+PRIORITY_COUNTRIES: tuple[str, ...] = (
+    "MEX",  # Mexico
+    "BRA",  # Brazil
+    "IDN",  # Indonesia
+    "GHA",  # Ghana
+    "KEN",  # Kenya
+    "VNM",  # Vietnam
+)
+
+__all__ = ["ISO_ALPHA3_CODES", "PRIORITY_COUNTRIES"]

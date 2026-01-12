@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from job_service.clients import AgentApiClient, AuthClient
-from job_service.countries import ISO_ALPHA3_CODES
+from job_service.countries import ISO_ALPHA3_CODES, PRIORITY_COUNTRIES
 from job_service.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -39,10 +39,10 @@ class JobResult:
 
 class ReportPreGenerationJob:
     """
-    Job that regenerates housing reports for all countries.
+    Job that regenerates housing reports for priority countries.
 
     This job runs on the 25th of each month and:
-    1. Iterates through all ISO-3 country codes
+    1. Iterates through priority country codes (MEX, BRA, IDN, GHA, KEN, VNM)
     2. Generates reports with skip_cache=True to force regeneration
     3. Each report overwrites the existing cached version
     4. Reports expire 30 days after generation
@@ -70,7 +70,7 @@ class ReportPreGenerationJob:
         """
         Execute the report pre-generation job.
 
-        Regenerates all country reports with skip_cache setting from config,
+        Regenerates priority country reports with skip_cache setting from config,
         overwriting the existing cached versions if skip_cache=True.
         """
         if self._is_running:
@@ -97,9 +97,8 @@ class ReportPreGenerationJob:
         )
 
         try:
-            # Use all ISO-3 country codes - regional/global docs provide content
-            # even for countries without direct documents
-            countries = list(ISO_ALPHA3_CODES)
+            # Use priority countries for pre-generation (limited to 6 key markets)
+            countries = list(PRIORITY_COUNTRIES)
             result.total_items = len(countries)
 
             # Find start index if resuming
@@ -114,7 +113,7 @@ class ReportPreGenerationJob:
                     )
 
             logger.info(
-                f"Processing {len(countries) - start_index} of {len(countries)} ISO-3 country codes"
+                f"Processing {len(countries) - start_index} of {len(countries)} priority countries"
             )
 
             # Generate reports sequentially

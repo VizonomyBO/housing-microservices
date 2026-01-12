@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,10 +17,22 @@ from agent_api.http.schemas import BlockingChatResponse, ChatMessagePayload, Cha
 from agent_api.http.streaming import run_blocking_chat
 from agent_api.models.chat import ChatRequestContext
 from agent_api.services.cache import ChatCacheService
+from agent_api.services.conversations import ConversationService
 from shared_data_layer.db.models import Document
 from shared_data_layer.db.session import DatabaseSessionManager
+from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
+
+# Priority countries for preprocessing (limited set)
+PRIORITY_COUNTRIES = {
+    "MEX",  # Mexico
+    "BRA",  # Brazil
+    "IDN",  # Indonesia
+    "GHA",  # Ghana
+    "KEN",  # Kenya
+    "VNM",  # Vietnam
+}
 
 # Pillar Questions - 47 total questions across 5 pillars
 PILLAR_QUESTIONS = {
@@ -121,6 +134,9 @@ async def preprocess_cache_for_country(
         Dictionary with statistics about the preprocessing
     """
     cache_service = ChatCacheService(db_session)
+    convo_service = ConversationService(db_session)
+    doc_repo = DocumentRepository(db_session)
+    
     stats = {
         "country_code": country_code,
         "total_questions": 0,
@@ -130,6 +146,32 @@ async def preprocess_cache_for_country(
     }
 
     logger.info(f"Starting cache preprocessing for country: {country_code}")
+    
+    # Create a temporary conversation for this country and attach documents
+    conversation = await convo_service.ensure_conversation(
+        owner_user_id="00000000-0000-0000-0000-000000000000",  # System user
+        country_code=country_code,
+        title=f"Preprocessing - {country_code}",
+        namespace="preprocessing",
+        tags=["preprocessing", country_code],
+    )
+    
+    # Get and attach all documents for this country
+    documents = await doc_repo.list_documents_for_country(country_code)
+    if not documents:
+        logger.warning(f"[{country_code}] No documents found, skipping preprocessing")
+        return stats
+    
+    for doc in documents:
+        try:
+            await doc_repo.attach_to_conversation(
+                conversation_id=conversation.id,
+                document_id=doc.id,
+                attach_source="preprocessing",
+                visibility_override="hidden",
+            )
+        except Exception as e:
+            logger.warning(f"[{country_code}] Failed to attach doc {doc.id}: {e}")
 
     for pillar_name, questions in PILLAR_QUESTIONS.items():
         for question in questions:
@@ -154,27 +196,29 @@ async def preprocess_cache_for_country(
                 auth = AuthContext(
                     user_id=None,
                     tenant_id=None,
-                    scopes=set(),
-                    claims={},
+                    roles=None,
+                    scopes=None,
+                    metadata=None,
                 )
 
                 # Create request context
                 request_context = RequestContext(
                     request_id=f"preprocess-{country_code}-{stats['total_questions']}",
-                    user_agent=None,
-                    client_ip=None,
+                    traceparent=None,
+                    idempotency_key=None,
+                    headers={},
                 )
 
-                # Create chat request
+                # Create chat request using the conversation with attached documents
                 chat_request = ChatRequestContext(
-                    conversation_id=f"preprocess-{country_code}",
-                    thread_id=f"preprocess-{country_code}",
+                    conversation_id=str(conversation.id),
+                    thread_id=str(uuid4()),
                     session_id=None,
-                    allow_stateless=True,
+                    allow_stateless=False,
                     message=ChatMessagePayload(content=question),
                     hints={},
                     constraints={"country_code": country_code},
-                    owner_user_id=None,
+                    owner_user_id="00000000-0000-0000-0000-000000000000",
                     workspace_id=None,
                     tenant_id=None,
                 )
@@ -239,18 +283,34 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
     Args:
         runner: Chat runner instance
     """
+    print("=" * 80)
+    print("STARTING CACHE PREPROCESSING SERVICE")
+    print("=" * 80)
     logger.info("=" * 80)
     logger.info("Starting cache preprocessing service")
     logger.info("=" * 80)
 
     try:
+        print("Fetching countries with documents...")
         # Get countries with documents
         countries = await get_countries_with_documents()
+        print(f"Found {len(countries)} countries with active documents: {countries}")
         logger.info(f"Found {len(countries)} countries with active documents: {countries}")
 
         if not countries:
             logger.info("No countries with documents found. Skipping preprocessing.")
             return
+
+        # Filter to priority countries only
+        countries = [c for c in countries if c in PRIORITY_COUNTRIES]
+        print(f"Filtered to priority countries: {countries}")
+        if not countries:
+            print(f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}")
+            logger.info(f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}")
+            return
+
+        print(f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}")
+        logger.info(f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}")
 
         total_stats = {
             "total_countries": len(countries),
@@ -282,7 +342,8 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         logger.info("=" * 80)
 
     except Exception as exc:
+        print(f"ERROR during cache preprocessing: {exc}")
         logger.exception("Error during cache preprocessing", exc_info=exc)
 
 
-__all__ = ["run_preprocessing", "PILLAR_QUESTIONS"]
+__all__ = ["run_preprocessing", "PILLAR_QUESTIONS", "PRIORITY_COUNTRIES"]

@@ -17,10 +17,12 @@ from agent_api.http.deps import (
     get_stream_settings,
 )
 from agent_api.http.errors import GatewayError
-from agent_api.http.schemas import ChatRequestBody, ResponseMode
+from agent_api.http.schemas import ChatRequestBody, ResponseMode, BlockingChatResponse
 from agent_api.http.streaming import build_streaming_response, run_blocking_chat
 from agent_api.models.chat import ChatRequestContext
+from agent_api.services.cache import ChatCacheService
 from agent_api.services.conversations import ConversationService
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
@@ -45,6 +47,35 @@ async def post_chat(
     hints = dict(payload.hints or {})
     prompt_overrides = dict(payload.prompt_overrides or {})
     mode = payload.resolved_response_mode()
+
+    # Check cache if explicitly requested with use_cache=true
+    print(f"DEBUG: use_cache={payload.use_cache}, mode={mode}, country_code={payload.constraints.country_code if payload.constraints else None}")
+    if (payload.use_cache and 
+        mode is ResponseMode.BLOCKING and 
+        payload.constraints and 
+        payload.constraints.country_code):
+        print(f"DEBUG: Checking cache for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+        cache_service = ChatCacheService(db_session)
+        cached_response = await cache_service.get_cached_response(
+            country_code=payload.constraints.country_code,
+            question=payload.message.content
+        )
+        print(f"DEBUG: cached_response = {cached_response is not None}")
+        if cached_response:
+            print(f"CACHE HIT for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+            # Return cached response directly
+            response_data = BlockingChatResponse(
+                thread_id=chat_request.thread_id,
+                request_id=request_context.request_id,
+                done=cached_response.get("done", {}),
+                messages=cached_response.get("messages", []),
+            )
+            return JSONResponse(
+                status_code=200,
+                content=response_data.model_dump(mode="json"),
+            )
+        else:
+            print(f"CACHE MISS for {payload.constraints.country_code}: {payload.message.content[:60]}...")
 
     if mode is ResponseMode.STREAM:
         return await build_streaming_response(
