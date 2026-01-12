@@ -143,9 +143,9 @@ async def compute_over_chunks(python_code: str) -> str:
 
 
 __all__ = [
+    "compute_over_chunks",
     "document_status",
     "list_attachments",
     "pyodide_sandbox",
     "retrieve_documents",
-    "compute_over_chunks",
 ]

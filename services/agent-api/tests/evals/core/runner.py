@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import pathlib
 import time
-from typing import List
 
 from .client import AgentApiClient
 from .metrics import MetricEvaluator
@@ -79,10 +78,10 @@ class EvalRunner:
     def _evaluate_metrics(
         self,
         chat_result: ChatResult,
-        metric_specs: List[MetricSpec],
+        metric_specs: list[MetricSpec],
         question: str,
         resolved: ResolvedScenario,
-    ) -> List[MetricResult]:
+    ) -> list[MetricResult]:
         return self.metrics.evaluate(
             chat_result=chat_result,
             metric_specs=metric_specs,

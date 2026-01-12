@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import pathlib
-from typing import Iterable, List
+from collections.abc import Iterable
 
 import pytest
 from fastapi.testclient import TestClient
+
+from agent_api.http.app import create_app
 
 from .core.client import AgentApiClient
 from .core.config import EvalConfig
@@ -13,8 +15,6 @@ from .core.judges import LLMJudge
 from .core.metrics import MetricEvaluator
 from .core.runner import EvalRunner
 from .core.scenarios import Dataset, ResolvedScenario, load_dataset, resolve_scenario
-from agent_api.http.app import create_app
-
 
 DATASET_PATH = pathlib.Path(__file__).parent / "datasets" / "shared_mex_arg.yaml"
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[4]
@@ -111,7 +111,7 @@ def documents_index(agent_client: AgentApiClient, eval_dataset: Dataset) -> dict
 
 
 @pytest.fixture(scope="session")
-def resolved_scenarios(eval_dataset: Dataset) -> List[ResolvedScenario]:
+def resolved_scenarios(eval_dataset: Dataset) -> list[ResolvedScenario]:
     return [resolve_scenario(eval_dataset, scenario) for scenario in eval_dataset.scenarios]
 
 
@@ -135,7 +135,7 @@ def artifact_dir() -> pathlib.Path:
     return path
 
 
-@pytest.fixture()
+@pytest.fixture
 def eval_runner(
     agent_client: AgentApiClient,
     metric_evaluator: MetricEvaluator,

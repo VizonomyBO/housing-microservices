@@ -18,7 +18,6 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import HttpUrl
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
@@ -419,9 +418,7 @@ async def download_document(
         has_access = True
 
     if not has_access:
-        raise HTTPException(
-            status_code=403, detail="Access denied to this document"
-        )
+        raise HTTPException(status_code=403, detail="Access denied to this document")
 
     # Get document name from canonical_name
     # The S3 key format is: document_id/document_name
@@ -449,7 +446,9 @@ async def download_document(
     except RuntimeError as exc:
         error_msg = str(exc)
         if "not found" in error_msg.lower():
-            raise HTTPException(status_code=404, detail="PDF file not found in S3") from exc
+            raise HTTPException(
+                status_code=404, detail="PDF file not found in S3"
+            ) from exc
         raise HTTPException(
             status_code=500, detail=f"Failed to download PDF: {error_msg}"
         ) from exc
@@ -492,10 +491,8 @@ async def download_document_by_name(
     from shared_data_layer.db.models.documents import Document
 
     # Search for ALL documents with matching canonical_name
-    stmt = select(Document).where(
-        Document.canonical_name == canonical_name
-    )
-    
+    stmt = select(Document).where(Document.canonical_name == canonical_name)
+
     result = await db.execute(stmt)
     documents = result.scalars().all()
 
@@ -512,7 +509,6 @@ async def download_document_by_name(
     last_error = None
 
     for doc in documents:
-
         # Try to download PDF from S3 for this document
         try:
             file_bytes = download_pdf_from_s3(

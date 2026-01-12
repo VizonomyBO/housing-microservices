@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 import httpx
 from fastapi.testclient import TestClient
@@ -14,8 +15,8 @@ from .telemetry import ChatResult, parse_sse_stream, parse_standard_response
 @dataclass
 class AuthTokens:
     access_token: str
-    refresh_token: Optional[str]
-    user_id: Optional[str]
+    refresh_token: str | None
+    user_id: str | None
 
 
 class AgentApiClient:
@@ -30,7 +31,7 @@ class AgentApiClient:
         base = agent_base_url or "http://testserver"
         self.agent_base_url = base.rstrip("/")
         self.auth_base_url = auth_base_url.rstrip("/")
-        mounts: Dict[str, httpx.BaseTransport] = {}
+        mounts: dict[str, httpx.BaseTransport] = {}
         if transport:
             mounts[self.agent_base_url] = transport
         self._agent = agent_test_client or TestClient(
@@ -41,7 +42,7 @@ class AgentApiClient:
             # If no explicit TestClient passed, build an httpx.Client for transport-based usage.
             self._agent = httpx.Client(timeout=timeout, base_url=self.agent_base_url, mounts=mounts)
         self._auth = httpx.Client(timeout=timeout)
-        self._tokens: Optional[AuthTokens] = None
+        self._tokens: AuthTokens | None = None
 
     def close(self) -> None:
         for client in (self._agent, self._auth):
@@ -51,7 +52,7 @@ class AgentApiClient:
             except Exception:
                 pass
 
-    def __enter__(self) -> "AgentApiClient":
+    def __enter__(self) -> AgentApiClient:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
@@ -73,13 +74,13 @@ class AgentApiClient:
         self._tokens = tokens
         return tokens
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         if not self._tokens:
             msg = "login must be called before using the AgentApiClient"
             raise RuntimeError(msg)
         return {"Authorization": f"Bearer {self._tokens.access_token}"}
 
-    def list_documents(self, page_size: int = 100) -> Dict[str, Any]:
+    def list_documents(self, page_size: int = 100) -> dict[str, Any]:
         resp = self._agent.get(
             f"{self.agent_base_url}/v1/documents",
             params={"page": 1, "page_size": page_size},
@@ -93,7 +94,7 @@ class AgentApiClient:
         country_code: str,
         namespace: str,
         title: str,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> str:
         payload = {
             "country_code": country_code,
@@ -133,7 +134,7 @@ class AgentApiClient:
         document_ids: Iterable[str],
         visibility: str = "visible",
         role: str = "primary",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload = {
             "document_ids": list(document_ids),
             "visibility": visibility,
@@ -151,10 +152,10 @@ class AgentApiClient:
         self,
         conversation_id: str,
         message: str,
-        constraints: Dict[str, Any],
+        constraints: dict[str, Any],
         response_mode: str = "blocking",
     ) -> ChatResult:
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for attempt in range(2):
             start = time.monotonic()
             resp = self._agent.post(
@@ -190,10 +191,10 @@ class AgentApiClient:
         self,
         conversation_id: str,
         message: str,
-        constraints: Dict[str, Any],
+        constraints: dict[str, Any],
     ) -> ChatResult:
         # Streaming tests are skipped; keep implementation for completeness.
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for attempt in range(2):
             start = time.monotonic()
             with self._agent.stream(

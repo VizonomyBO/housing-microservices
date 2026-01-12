@@ -158,9 +158,7 @@ def _get_config(request: Request):
 
 def _should_apply_guard(config: Config) -> bool:
     """Determine if in-process request guards should be enforced."""
-    return getattr(config, "ENABLE_SIMPLE_GUARDS", True) and not getattr(
-        config, "TESTING", False
-    )
+    return getattr(config, "ENABLE_SIMPLE_GUARDS", True) and not getattr(config, "TESTING", False)
 
 
 def _guard_request(scope: str, request: Request) -> None:

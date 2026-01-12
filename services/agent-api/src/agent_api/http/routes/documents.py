@@ -227,8 +227,7 @@ async def download_document(
 
     # Proxy to ingestion service
     ingestion_url = (
-        settings.ingestion_base_url.rstrip("/")
-        + f"/v1/documents/{document_id}/download"
+        settings.ingestion_base_url.rstrip("/") + f"/v1/documents/{document_id}/download"
     )
     timeout = httpx.Timeout(settings.ingestion_request_timeout_seconds)
     headers = {}
@@ -261,7 +260,7 @@ async def download_document(
                 media_type=response.headers.get("content-type", "application/pdf"),
                 headers={
                     "Content-Disposition": response.headers.get(
-                        "content-disposition", f'attachment; filename="document.pdf"'
+                        "content-disposition", 'attachment; filename="document.pdf"'
                     ),
                     "Content-Length": str(len(response.content)),
                 },

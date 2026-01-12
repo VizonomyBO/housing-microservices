@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, List, Optional
-
+from typing import Any
 
 CITATION_PATTERN = re.compile(r"\[c\d+]", flags=re.IGNORECASE)
 
@@ -12,26 +12,26 @@ CITATION_PATTERN = re.compile(r"\[c\d+]", flags=re.IGNORECASE)
 @dataclass
 class Citation:
     doc_id: str
-    chunk_id: Optional[str] = None
-    canonical_name: Optional[str] = None
-    score: Optional[float] = None
-    text: Optional[str] = None
+    chunk_id: str | None = None
+    canonical_name: str | None = None
+    score: float | None = None
+    text: str | None = None
 
 
 @dataclass
 class ChatResult:
     answer: str
-    citations: List[Citation] = field(default_factory=list)
+    citations: list[Citation] = field(default_factory=list)
     response_mode: str = "blocking"
     status_code: int = 200
     duration_ms: float = 0.0
     raw: Any = None
-    request_id: Optional[str] = None
-    tool_calls: Optional[List[dict]] = None
+    request_id: str | None = None
+    tool_calls: list[dict] | None = None
 
 
-def parse_citations(raw: Iterable[dict[str, Any]]) -> List[Citation]:
-    citations: List[Citation] = []
+def parse_citations(raw: Iterable[dict[str, Any]]) -> list[Citation]:
+    citations: list[Citation] = []
     for item in raw:
         citations.append(
             Citation(
@@ -75,8 +75,8 @@ def parse_sse_stream(
     duration_ms: float,
     lines: Iterable[str],
 ) -> ChatResult:
-    done_payload: Optional[dict[str, Any]] = None
-    request_id: Optional[str] = None
+    done_payload: dict[str, Any] | None = None
+    request_id: str | None = None
     for line in lines:
         if not line or not line.startswith("data:"):
             continue
@@ -122,5 +122,5 @@ def citation_coverage(answer: str) -> float:
     return len(cited) / len(sentences)
 
 
-def citation_doc_ids(result: ChatResult) -> List[str]:
+def citation_doc_ids(result: ChatResult) -> list[str]:
     return [citation.doc_id for citation in result.citations if citation.doc_id]

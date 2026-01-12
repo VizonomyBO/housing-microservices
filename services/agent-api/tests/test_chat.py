@@ -7,9 +7,9 @@ from shared_data_layer.repositories.documents import DocumentRepository
 from shared_data_layer.testing.factories.documents import DocumentFactory
 from sqlalchemy import select
 
-from agent_api.services.conversations import ConversationService
 from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.deps import get_runner
+from agent_api.services.conversations import ConversationService
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 

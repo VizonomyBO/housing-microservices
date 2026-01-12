@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
@@ -20,36 +20,36 @@ class MetricName:
 
 class MetricSpec(BaseModel):
     name: str
-    threshold: Optional[float] = None
+    threshold: float | None = None
 
 
 class Turn(BaseModel):
     role: str = "user"
     content: str
     response_mode: str = "blocking"
-    metrics: List[MetricSpec] = Field(default_factory=list)
+    metrics: list[MetricSpec] = Field(default_factory=list)
 
 
 class EvalScenario(BaseModel):
     name: str
     description: str
-    tags: List[str] = Field(default_factory=list)
-    constraints: Dict[str, Any] = Field(default_factory=dict)
-    attachments: List[str] = Field(default_factory=list)
-    turns: List[Turn]
+    tags: list[str] = Field(default_factory=list)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    attachments: list[str] = Field(default_factory=list)
+    turns: list[Turn]
 
 
 class DocumentRef(BaseModel):
     document_id: str
-    canonical_name: Optional[str] = None
-    country_code: Optional[str] = None
-    access_scope: Optional[str] = None
-    content_hash: Optional[str] = None
+    canonical_name: str | None = None
+    country_code: str | None = None
+    access_scope: str | None = None
+    content_hash: str | None = None
 
 
 class Dataset(BaseModel):
-    documents: List[DocumentRef]
-    scenarios: List[EvalScenario]
+    documents: list[DocumentRef]
+    scenarios: list[EvalScenario]
 
 
 def load_dataset(path: pathlib.Path) -> Dataset:
@@ -63,12 +63,12 @@ def load_dataset(path: pathlib.Path) -> Dataset:
 @dataclass
 class ResolvedScenario:
     scenario: EvalScenario
-    documents: List[DocumentRef]
+    documents: list[DocumentRef]
 
 
 def resolve_scenario(dataset: Dataset, scenario: EvalScenario) -> ResolvedScenario:
     document_map = {doc.document_id: doc for doc in dataset.documents}
-    resolved: List[DocumentRef] = []
+    resolved: list[DocumentRef] = []
     for doc_id in scenario.attachments:
         if doc_id not in document_map:
             msg = f"Scenario {scenario.name} references unknown document_id {doc_id}"

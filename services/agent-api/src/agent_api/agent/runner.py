@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol, cast, List, Dict
+from typing import Any, Protocol, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
@@ -198,7 +198,9 @@ class LangGraphRunner(ChatRunnerProtocol):
         if not ai_content:
             ai_content = "I'm sorry, I couldn't produce a response."
 
-        tool_calls = _extract_tool_history(result.get("messages") if isinstance(result, dict) else None)
+        tool_calls = _extract_tool_history(
+            result.get("messages") if isinstance(result, dict) else None
+        )
         citations = runtime.last_retrieval.citations if runtime.last_retrieval else []
         if not citations:
             raise GatewayError(

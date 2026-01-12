@@ -66,4 +66,3 @@ class S3StorageClient:
         except ClientError as exc:
             logger.exception("Failed to generate presigned URL for %s", storage_uri)
             raise RuntimeError(f"Failed to generate download URL: {exc}") from exc
-

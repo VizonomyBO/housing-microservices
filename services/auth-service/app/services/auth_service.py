@@ -172,7 +172,9 @@ class AuthService:
             expires = _get_jwt_access_token_expires(config)
             secret_key = _get_jwt_secret_key(config)
             issuer = getattr(config, "JWT_ISSUER", None) if config else os.getenv("AUTH_JWT_ISSUER")
-            audience = getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
+            audience = (
+                getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
+            )
 
             payload = {
                 "user_id": user_id_str,
