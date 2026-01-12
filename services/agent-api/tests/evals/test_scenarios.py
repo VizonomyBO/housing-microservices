@@ -6,6 +6,7 @@ from .core.runner import EvalRunner
 from .core.scenarios import ResolvedScenario
 from .core.telemetry import citation_doc_ids
 
+
 @pytest.fixture
 def blocking_scenarios(resolved_scenarios: list[ResolvedScenario]) -> list[ResolvedScenario]:
     return [
@@ -27,7 +28,9 @@ def streaming_scenarios(resolved_scenarios: list[ResolvedScenario]) -> list[Reso
 @pytest.mark.eval
 @pytest.mark.eval_api
 @pytest.mark.requires_prod
-def test_blocking_scenarios(blocking_scenarios: list[ResolvedScenario], eval_runner: EvalRunner) -> None:
+def test_blocking_scenarios(
+    blocking_scenarios: list[ResolvedScenario], eval_runner: EvalRunner
+) -> None:
     for resolved in blocking_scenarios:
         result = eval_runner.run(resolved)
         assert result.chat_result.status_code == 200
@@ -43,7 +46,9 @@ def test_blocking_scenarios(blocking_scenarios: list[ResolvedScenario], eval_run
 @pytest.mark.eval_heavy
 @pytest.mark.requires_prod
 @pytest.mark.skip(reason="Streaming evals temporarily disabled to avoid duplicate SSE outputs")
-def test_streaming_scenarios(streaming_scenarios: list[ResolvedScenario], eval_runner: EvalRunner) -> None:
+def test_streaming_scenarios(
+    streaming_scenarios: list[ResolvedScenario], eval_runner: EvalRunner
+) -> None:
     for resolved in streaming_scenarios:
         result = eval_runner.run(resolved)
         assert result.chat_result.status_code == 200

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 from .judges import LLMJudge
 from .results import MetricResult
@@ -9,7 +9,7 @@ from .telemetry import ChatResult, citation_coverage
 
 
 class MetricEvaluator:
-    def __init__(self, judge: Optional[LLMJudge] = None) -> None:
+    def __init__(self, judge: LLMJudge | None = None) -> None:
         self.judge = judge
 
     def evaluate(
@@ -17,9 +17,9 @@ class MetricEvaluator:
         chat_result: ChatResult,
         metric_specs: Iterable[MetricSpec],
         question: str,
-        context_docs: List[DocumentRef],
-    ) -> List[MetricResult]:
-        results: List[MetricResult] = []
+        context_docs: list[DocumentRef],
+    ) -> list[MetricResult]:
+        results: list[MetricResult] = []
         for spec in metric_specs:
             if spec.name == MetricName.CITATION_COVERAGE:
                 results.append(self._citation_coverage(chat_result, spec))
@@ -52,7 +52,7 @@ class MetricEvaluator:
         self,
         chat_result: ChatResult,
         spec: MetricSpec,
-        context_docs: List[DocumentRef],
+        context_docs: list[DocumentRef],
     ) -> MetricResult:
         attached_ids = {doc.document_id for doc in context_docs}
         if not chat_result.citations:
@@ -76,7 +76,7 @@ class MetricEvaluator:
         self,
         chat_result: ChatResult,
         spec: MetricSpec,
-        context_docs: List[DocumentRef],
+        context_docs: list[DocumentRef],
     ) -> MetricResult:
         attached_ids = {doc.document_id for doc in context_docs}
         if not attached_ids:
@@ -124,7 +124,7 @@ class MetricEvaluator:
         chat_result: ChatResult,
         spec: MetricSpec,
         question: str,
-        context_docs: List[DocumentRef],
+        context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
         return self.judge.score_rubric(
@@ -142,7 +142,7 @@ class MetricEvaluator:
         chat_result: ChatResult,
         spec: MetricSpec,
         question: str,
-        context_docs: List[DocumentRef],
+        context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
         return self.judge.score_rubric(
@@ -160,7 +160,7 @@ class MetricEvaluator:
         chat_result: ChatResult,
         spec: MetricSpec,
         question: str,
-        context_docs: List[DocumentRef],
+        context_docs: list[DocumentRef],
     ) -> MetricResult:
         threshold = spec.threshold if spec.threshold is not None else 0.7
         return self.judge.score_rubric(
@@ -174,8 +174,8 @@ class MetricEvaluator:
         )
 
 
-def _citation_snippets(chat_result: ChatResult) -> List[str]:
-    snippets: List[str] = []
+def _citation_snippets(chat_result: ChatResult) -> list[str]:
+    snippets: list[str] = []
     for citation in chat_result.citations:
         parts = [
             f"doc_id={citation.doc_id}",

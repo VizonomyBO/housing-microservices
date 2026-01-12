@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 import openai
 
 from .results import MetricResult
-from .scenarios import DocumentRef, MetricName
+from .scenarios import DocumentRef
 
 
 class LLMJudge:
@@ -23,9 +23,9 @@ class LLMJudge:
         contexts: Iterable[DocumentRef],
         rubric: str,
         threshold: float,
-        citation_snippets: Optional[List[str]] = None,
+        citation_snippets: list[str] | None = None,
     ) -> MetricResult:
-        doc_lines: List[str] = []
+        doc_lines: list[str] = []
         for doc in contexts:
             doc_lines.append(
                 f"- {doc.canonical_name or doc.document_id} (doc_id={doc.document_id}, country={doc.country_code})"

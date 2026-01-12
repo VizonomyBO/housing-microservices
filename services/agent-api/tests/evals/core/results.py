@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from .telemetry import ChatResult
 
@@ -10,7 +9,7 @@ from .telemetry import ChatResult
 class MetricResult:
     name: str
     passed: bool
-    score: Optional[float] = None
+    score: float | None = None
     detail: str = ""
     skipped: bool = False
 
@@ -19,7 +18,7 @@ class MetricResult:
 class EvalResult:
     scenario_name: str
     chat_result: ChatResult
-    metrics: List[MetricResult] = field(default_factory=list)
+    metrics: list[MetricResult] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:

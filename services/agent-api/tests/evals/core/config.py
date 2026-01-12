@@ -14,7 +14,7 @@ class EvalConfig:
     reasoning_effort: str = "high"
 
     @classmethod
-    def from_env(cls) -> "EvalConfig":
+    def from_env(cls) -> EvalConfig:
         return cls(
             auth_base_url=os.getenv("AUTH_BASE_URL"),
             eval_user_email=os.getenv("EVAL_USER_EMAIL"),

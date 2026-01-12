@@ -68,7 +68,9 @@ def verify_token_direct(token: str, config: "Config | None" = None) -> Validatio
             return None, "Token verification configuration error"
 
         # Decode and verify token
-        audience = getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
+        audience = (
+            getattr(config, "JWT_AUDIENCE", None) if config else os.getenv("AUTH_JWT_AUDIENCE")
+        )
         issuer = getattr(config, "JWT_ISSUER", None) if config else os.getenv("AUTH_JWT_ISSUER")
         try:
             payload = jwt.decode(

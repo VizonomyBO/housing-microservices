@@ -140,9 +140,7 @@ def get_cached_report(
         return None
 
 
-def upload_cached_report(
-    country_code: str, pdf_bytes: bytes, settings: Settings
-) -> None:
+def upload_cached_report(country_code: str, pdf_bytes: bytes, settings: Settings) -> None:
     """
     Upload generated report to S3 cache.
 

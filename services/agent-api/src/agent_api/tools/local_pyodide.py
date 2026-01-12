@@ -47,7 +47,7 @@ class PyodideSandbox:
         self.stateful = stateful
         self.permissions: list[str] = []
         try:
-            subprocess.run(["deno", "--version"], check=True, capture_output=True)  # noqa: S603, S607
+            subprocess.run(["deno", "--version"], check=True, capture_output=True)
         except FileNotFoundError as exc:  # pragma: no cover - environment issue
             msg = "Deno is not installed or not in PATH."
             raise RuntimeError(msg) from exc
@@ -105,7 +105,10 @@ class PyodideSandbox:
     ) -> CodeExecutionResult:
         start = time.time()
         cmd = self._build_command(
-            code, session_bytes=session_bytes, session_metadata=session_metadata, memory_limit_mb=memory_limit_mb
+            code,
+            session_bytes=session_bytes,
+            session_metadata=session_metadata,
+            memory_limit_mb=memory_limit_mb,
         )
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -113,7 +116,9 @@ class PyodideSandbox:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_seconds
+            )
             raw_stdout = stdout_bytes.decode("utf-8", errors="replace")
             raw_stderr = stderr_bytes.decode("utf-8", errors="replace")
             if raw_stdout:
@@ -135,7 +140,9 @@ class PyodideSandbox:
                     stderr=payload.get("stderr") or raw_stderr or None,
                     result=payload.get("result"),
                     session_metadata=payload.get("sessionMetadata"),
-                    session_bytes=bytes(payload["sessionBytes"]) if payload.get("sessionBytes") else None,
+                    session_bytes=bytes(payload["sessionBytes"])
+                    if payload.get("sessionBytes")
+                    else None,
                 )
             return CodeExecutionResult(
                 status="error",
@@ -144,7 +151,7 @@ class PyodideSandbox:
                 stderr=raw_stderr or "empty stdout from sandbox",
                 result=None,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             await process.wait()
             return CodeExecutionResult(

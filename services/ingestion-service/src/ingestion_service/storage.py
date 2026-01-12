@@ -139,4 +139,3 @@ class S3StorageClient:
         except ClientError as exc:
             logger.exception("Failed to delete document from S3: %s", storage_uri)
             raise RuntimeError(f"S3 delete failed: {exc}") from exc
-

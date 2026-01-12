@@ -303,10 +303,13 @@ class IngestionPipeline:
 
         try:
             import time
+
             t0 = time.perf_counter()
             logger.info(
                 "[%s] STEP 1/4: Converting %s to markdown (%d bytes)...",
-                document.id, request.source_type, len(file_bytes)
+                document.id,
+                request.source_type,
+                len(file_bytes),
             )
             markdown, conversion_meta = self._converter.convert(
                 data=file_bytes,
@@ -315,7 +318,9 @@ class IngestionPipeline:
             t1 = time.perf_counter()
             logger.info(
                 "[%s] STEP 1/4 DONE: Converted to %d chars markdown in %.1fs",
-                document.id, len(markdown), t1 - t0
+                document.id,
+                len(markdown),
+                t1 - t0,
             )
             await self._update_stage(
                 session=session,
@@ -332,7 +337,8 @@ class IngestionPipeline:
             )
             logger.info(
                 "[%s] STEP 4/4 DONE: Total ingestion completed in %.1fs",
-                document.id, time.perf_counter() - t0
+                document.id,
+                time.perf_counter() - t0,
             )
             # Skip view refresh during batch uploads to avoid disk bloat
             # Run REFRESH MATERIALIZED VIEW manually after batch completes
@@ -480,10 +486,10 @@ class IngestionPipeline:
         ingestion_id: UUID | None,
     ) -> IngestionJob:
         import time
+
         t_chunk_start = time.perf_counter()
         logger.info(
-            "[%s] STEP 2/4: Chunking markdown (%d chars)...",
-            document.id, len(markdown)
+            "[%s] STEP 2/4: Chunking markdown (%d chars)...", document.id, len(markdown)
         )
         chunks = self._chunker.chunk(str(document.id), markdown)
         if not chunks:
@@ -492,7 +498,10 @@ class IngestionPipeline:
         total_tokens = sum(c.token_count for c in chunks)
         logger.info(
             "[%s] STEP 2/4 DONE: Created %d chunks (%d tokens) in %.1fs",
-            document.id, len(chunks), total_tokens, t_chunk_end - t_chunk_start
+            document.id,
+            len(chunks),
+            total_tokens,
+            t_chunk_end - t_chunk_start,
         )
 
         output_dimension = self._resolve_output_dimension(request.output_dimension)
@@ -509,11 +518,13 @@ class IngestionPipeline:
             stage="embed",
             metadata={"embedding": embedding_meta},
         )
-        
+
         t_embed_start = time.perf_counter()
         logger.info(
             "[%s] STEP 3/4: Embedding %d chunks via Voyage API (dim=%d)...",
-            document.id, len(chunks), output_dimension
+            document.id,
+            len(chunks),
+            output_dimension,
         )
         embeddings: Sequence[Sequence[float]] | None = None
         if self._voyage:
@@ -532,7 +543,9 @@ class IngestionPipeline:
         t_embed_end = time.perf_counter()
         logger.info(
             "[%s] STEP 3/4 DONE: Got %d embeddings in %.1fs",
-            document.id, len(embeddings), t_embed_end - t_embed_start
+            document.id,
+            len(embeddings),
+            t_embed_end - t_embed_start,
         )
 
         owner_id = document.owner_user_id
@@ -556,9 +569,11 @@ class IngestionPipeline:
         total_chunks = len(chunks)
         logger.info(
             "[%s] STEP 4/4: Writing %d chunks to database (batch size=%d)...",
-            document.id, total_chunks, BATCH_SIZE
+            document.id,
+            total_chunks,
+            BATCH_SIZE,
         )
-        
+
         for idx, chunk in enumerate(chunks):
             chunk_id = uuid4()
             embedding = embeddings[idx] if embeddings else None
@@ -592,29 +607,32 @@ class IngestionPipeline:
                     retrieval_count=0,
                 )
             )
-            
+
             # Commit every BATCH_SIZE chunks to prevent disk saturation
             if (idx + 1) % BATCH_SIZE == 0:
                 await session.commit()
                 logger.info(
                     "[%s]   ... committed batch %d/%d (%d chunks)",
-                    document.id, (idx + 1) // BATCH_SIZE, 
-                    (total_chunks + BATCH_SIZE - 1) // BATCH_SIZE, idx + 1
+                    document.id,
+                    (idx + 1) // BATCH_SIZE,
+                    (total_chunks + BATCH_SIZE - 1) // BATCH_SIZE,
+                    idx + 1,
                 )
-        
+
         # Commit any remaining chunks
         remaining = total_chunks % BATCH_SIZE
         if remaining > 0:
             await session.commit()
             logger.info(
-                "[%s]   ... committed final batch (%d chunks)",
-                document.id, remaining
+                "[%s]   ... committed final batch (%d chunks)", document.id, remaining
             )
-        
+
         t_db_end = time.perf_counter()
         logger.info(
             "[%s] STEP 4/4: All %d chunks written in %.1fs",
-            document.id, total_chunks, t_db_end - t_db_start
+            document.id,
+            total_chunks,
+            t_db_end - t_db_start,
         )
 
         now = datetime.now(UTC)

@@ -1,7 +1,7 @@
 import pytest
 
-from agent_api.services.retrieval import RetrievalService, RetrievedChunk
 from agent_api.http.errors import GatewayError
+from agent_api.services.retrieval import RetrievalService, RetrievedChunk
 
 
 class _FakeScopeRepo:
@@ -46,7 +46,9 @@ class _FakeScopeRepo:
     async def load_document_chunk_previews(self, *args, **kwargs):
         return {}
 
-    async def hybrid_chunk_search(self, *, query, document_ids, embedding, top_k, hybrid_weight, chunk_types):
+    async def hybrid_chunk_search(
+        self, *, query, document_ids, embedding, top_k, hybrid_weight, chunk_types
+    ):
         return {"doc1": self._chunks}
 
     async def list_conversation_documents(self, conversation_id: str):
