@@ -198,6 +198,17 @@ PostgreSQL no longer enforces Row-Level Security or custom `POLICY` objects for 
 
 - Each environment provisions a dedicated database user/password; services authenticate using that credential and enforce per-tenant/base visibility in their own logic.
 
+## Publication Year Backfill
+
+- New uploads can pass `metadata.publication_year` (4-digit year) and ingestion will persist it on documents and chunks; invalid values are rejected.
+- Existing documents can be populated via `shared_data_layer.scripts.backfill_publication_year` (dry-run by default, idempotent, uses filenames/URIs first and falls back to limited chunk text search).
+- Recommended run path (from `packages/shared_data_layer`):
+  - **Prod dry-run:**  
+    `env_file=$(../../scripts/use_env.sh prod); set -a && source "$env_file" && set +a; uv run python -m shared_data_layer.scripts.backfill_publication_year --log-file ../../logs/publication_year_backfill_$(date +%s).log`
+  - **Prod apply:** add `--apply` to the above command to commit changes.
+  - **Local:** swap `use_env.sh local` and point `--database-url` if needed.
+- Logs are written to the path passed via `--log-file`; prefer `logs/publication_year_backfill_<timestamp>.log` at the repo root for auditability.
+
 ## Embeddings, Deprecations, and Ownership Updates
 
 - **Embedding dimension**: voyage-context-3 embeddings default to **1024** dims, configurable via `VOYAGE_EMBEDDING_DIM`/`VOYAGE_OUTPUT_DIMENSION`. The `Vector` columns, factories, and indexes reuse this shared dimension.

@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import (
     get_auth_context,

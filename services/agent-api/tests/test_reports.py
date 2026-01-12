@@ -48,12 +48,12 @@ async def test_generate_housing_report_logic(
 ):
     # Mock DocumentRepository and ConversationService
     with (
-        patch("agent_api.services.reports.DocumentRepository") as MockDocRepo,
-        patch("agent_api.services.reports.ConversationService") as MockConvoService,
+        patch("agent_api.services.reports.DocumentRepository") as mock_doc_repo,
+        patch("agent_api.services.reports.ConversationService") as mock_convo_service,
     ):
         # Setup DB mocks
-        doc_repo = MockDocRepo.return_value
-        convo_service = MockConvoService.return_value
+        doc_repo = mock_doc_repo.return_value
+        convo_service = mock_convo_service.return_value
 
         # Mock list_documents_for_country
         mock_doc = MagicMock(spec=Document)
@@ -69,7 +69,9 @@ async def test_generate_housing_report_logic(
         doc_repo.attach_to_conversation = AsyncMock()
 
         # Initialize Service
-        service = ReportService(mock_db_session, mock_runner)
+        settings = MagicMock()
+        settings.s3_housing_pdf_bucket = None
+        service = ReportService(mock_db_session, mock_runner, settings)
 
         # Run method
         pdf_bytes = await service.generate_housing_report(
