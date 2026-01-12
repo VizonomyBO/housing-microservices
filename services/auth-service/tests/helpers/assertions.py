@@ -23,9 +23,9 @@ def assert_error_response(
     Returns:
         Response JSON data for further assertions
     """
-    assert response.status_code == expected_status, (
-        f"Expected status {expected_status}, got {response.status_code}"
-    )
+    assert (
+        response.status_code == expected_status
+    ), f"Expected status {expected_status}, got {response.status_code}"
 
     data = response.get_json()
     assert data is not None, "Response should contain JSON data"
@@ -36,17 +36,17 @@ def assert_error_response(
 
     if expected_code:
         assert "code" in error_data, "Error response should contain 'code' field"
-        assert error_data["code"] == expected_code.value, (
-            f"Expected error code {expected_code.value}, got {error_data.get('code')}"
-        )
+        assert (
+            error_data["code"] == expected_code.value
+        ), f"Expected error code {expected_code.value}, got {error_data.get('code')}"
 
     if expected_message:
         assert "message" in error_data, "Error response should contain 'message' field"
         message = error_data["message"].lower()
         expected = expected_message.lower()
-        assert expected in message, (
-            f"Expected message to contain '{expected_message}', got '{error_data['message']}'"
-        )
+        assert (
+            expected in message
+        ), f"Expected message to contain '{expected_message}', got '{error_data['message']}'"
 
     return data
 
@@ -67,9 +67,9 @@ def assert_success_response(
     Returns:
         Response JSON data for further assertions
     """
-    assert response.status_code == expected_status, (
-        f"Expected status {expected_status}, got {response.status_code}"
-    )
+    assert (
+        response.status_code == expected_status
+    ), f"Expected status {expected_status}, got {response.status_code}"
 
     data = response.get_json()
     assert data is not None, "Response should contain JSON data"
@@ -78,9 +78,9 @@ def assert_success_response(
         assert "message" in data, "Success response should contain 'message' field"
         message = data["message"].lower()
         expected = expected_message.lower()
-        assert expected in message, (
-            f"Expected message to contain '{expected_message}', got '{data['message']}'"
-        )
+        assert (
+            expected in message
+        ), f"Expected message to contain '{expected_message}', got '{data['message']}'"
 
     return data
 
@@ -118,14 +118,14 @@ def assert_user_data(
         assert field in data, f"User data should contain '{field}' field"
 
     if expected_email:
-        assert data["email"] == expected_email, (
-            f"Expected email {expected_email}, got {data['email']}"
-        )
+        assert (
+            data["email"] == expected_email
+        ), f"Expected email {expected_email}, got {data['email']}"
 
     if expected_status:
-        assert data["status"] == expected_status, (
-            f"Expected status {expected_status}, got {data['status']}"
-        )
+        assert (
+            data["status"] == expected_status
+        ), f"Expected status {expected_status}, got {data['status']}"
 
 
 def assert_has_keys(data: dict[str, Any], *keys: str) -> None:

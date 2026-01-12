@@ -54,3 +54,18 @@ def test_output_dimension_mismatch_rejected() -> None:
     pipeline = IngestionPipeline(_make_settings())
     with pytest.raises(IngestionError):
         pipeline._resolve_output_dimension(2048)
+
+
+def test_chunk_metadata_preserves_publication_year() -> None:
+    payload = {"publication_year": 2018, "other": "value"}
+    embedding_meta = {"model": "voyage-context-3", "output_dimension": 1024}
+    chunk_strategy = {"method": "unit-test"}
+
+    result = IngestionPipeline._chunk_metadata(
+        payload,
+        embedding_meta=embedding_meta,
+        chunk_strategy=chunk_strategy,
+    )
+
+    assert result["publication_year"] == 2018
+    assert result["ingestion"]["embedding"] == embedding_meta

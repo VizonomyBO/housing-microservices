@@ -20,6 +20,9 @@ from shared_data_layer.db.maintenance import (
 )
 from shared_data_layer.db.models.documents import Document, IngestionJob
 from shared_data_layer.db.models.retrieval import Chunk, ChunkMetrics
+from shared_data_layer.utils.publication_year import (
+    normalize_metadata_publication_year,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import RetryError
@@ -418,7 +421,26 @@ class IngestionPipeline:
                 "Base documents cannot set owner_user_id (except shared sentinel)"
             )
 
-        metadata = dict(request.metadata)
+        raw_publication_year = (
+            request.metadata.get("publication_year")
+            if isinstance(request.metadata, dict)
+            else None
+        )
+        metadata, publication_year, provided_year = normalize_metadata_publication_year(
+            request.metadata
+        )
+        if (
+            provided_year
+            and publication_year is None
+            and raw_publication_year
+            not in (
+                None,
+                "",
+                " ",
+            )
+        ):
+            raise IngestionError("publication_year must be a 4-digit year (e.g., 2016)")
+
         ingestion_meta = metadata.setdefault("ingestion", {})  # type: ignore[assignment]
         if isinstance(ingestion_meta, dict):
             ingestion_meta.setdefault("mode", "text_sync_contextual")

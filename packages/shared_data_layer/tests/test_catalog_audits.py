@@ -152,11 +152,11 @@ async def test_partition_catalog_expectations(db_session, expectation):
 async def test_index_catalog_expectations(db_session, expectation):
     index_map = await fetch_index_catalog(db_session, expectation.table_name)
     for index_name, tokens in expectation.required_indexes.items():
-        assert index_name in index_map, (
-            f"{index_name} missing for {expectation.table_name}"
-        )
+        assert (
+            index_name in index_map
+        ), f"{index_name} missing for {expectation.table_name}"
         definition = index_map[index_name].upper()
         for token in tokens:
-            assert token.upper() in definition, (
-                f"{token} missing from {index_name} definition"
-            )
+            assert (
+                token.upper() in definition
+            ), f"{token} missing from {index_name} definition"

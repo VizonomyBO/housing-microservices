@@ -19,7 +19,10 @@ class UploadInitRequest(BaseModel):
     file_size_bytes: int = Field(..., gt=0)
     access_scope: str = Field(default="user_private")
     callback_url: HttpUrl | None = Field(default=None)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional metadata payload (e.g., publication_year, source hints)",
+    )
     trace_id: str | None = None
     output_dimension: int | None = Field(
         default=None,
