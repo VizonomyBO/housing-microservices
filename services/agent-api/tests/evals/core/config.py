@@ -16,9 +16,9 @@ class EvalConfig:
     @classmethod
     def from_env(cls) -> EvalConfig:
         return cls(
-            auth_base_url=os.getenv("AUTH_BASE_URL"),
-            eval_user_email=os.getenv("EVAL_USER_EMAIL"),
-            eval_user_password=os.getenv("EVAL_USER_PASSWORD"),
+            auth_base_url=os.getenv("AUTH_BASE_URL") or "",  # type: ignore[arg-type]
+            eval_user_email=os.getenv("EVAL_USER_EMAIL") or "",  # type: ignore[arg-type]
+            eval_user_password=os.getenv("EVAL_USER_PASSWORD") or "",  # type: ignore[arg-type]
             eval_user_id=os.getenv("EVAL_USER_ID"),
             openai_model=os.getenv("EVAL_JUDGE_MODEL", "gpt-5.1"),
             reasoning_effort=os.getenv("EVAL_REASONING_EFFORT", "high"),

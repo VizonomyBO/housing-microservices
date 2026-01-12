@@ -28,7 +28,7 @@ def build_agent_graph(
     """Build a LangGraph that guarantees tool use and loops until the model stops."""
 
     tool_list = list(tools)
-    graph = StateGraph(MessagesState)
+    graph = StateGraph(MessagesState)  # type: ignore[arg-type]
 
     def _call_model(state: MessagesState):
         messages = state.get("messages", [])

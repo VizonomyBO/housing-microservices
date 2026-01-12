@@ -116,7 +116,7 @@ def _split_scopes(raw: Any) -> list[str]:
         return []
     if isinstance(raw, str):
         return [segment for segment in raw.replace(",", " ").split() if segment]
-    if isinstance(raw, (list, tuple)):
+    if isinstance(raw, list | tuple):
         return [str(item) for item in raw if item]
     return []
 

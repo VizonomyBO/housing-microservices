@@ -71,7 +71,7 @@ async def test_generate_housing_report_logic(
         # Initialize Service
         settings = MagicMock()
         settings.s3_housing_pdf_bucket = None
-        service = ReportService(mock_db_session, mock_runner, settings)
+        service = ReportService(mock_db_session, mock_runner, settings)  # type: ignore[arg-type]
 
         # Run method
         pdf_bytes = await service.generate_housing_report(

@@ -51,24 +51,6 @@ class _FakeScopeRepo:
     ):
         return {"doc1": self._chunks}
 
-    async def list_conversation_documents(self, conversation_id: str):
-        return [
-            type(
-                "Att",
-                (),
-                {
-                    "document_id": "doc1",
-                    "attach_source": "test",
-                    "role": "primary",
-                    "visibility": "visible",
-                    "canonical_name": "doc1",
-                    "access_scope": "user_private",
-                    "country_code": "USA",
-                    "metadata": {},
-                },
-            )()
-        ]
-
 
 class _FakeEmbed:
     async def embed(self, texts):
@@ -97,10 +79,10 @@ async def test_retrieval_builds_citations_without_network():
         canonical_name="doc1",
     )
     service = RetrievalService(
-        scope_repo=_FakeScopeRepo([chunk]),
-        embedding_client=_FakeEmbed(),
-        rerank_client=_FakeRerank(),
-        chat_client=_FakeChat(),
+        scope_repo=_FakeScopeRepo([chunk]),  # type: ignore[arg-type]
+        embedding_client=_FakeEmbed(),  # type: ignore[arg-type]
+        rerank_client=_FakeRerank(),  # type: ignore[arg-type]
+        chat_client=_FakeChat(),  # type: ignore[arg-type]
         top_k=3,
     )
 
@@ -119,10 +101,10 @@ async def test_retrieval_raises_without_attachments():
             return []
 
     service = RetrievalService(
-        scope_repo=EmptyScope([]),
-        embedding_client=_FakeEmbed(),
-        rerank_client=_FakeRerank(),
-        chat_client=_FakeChat(),
+        scope_repo=EmptyScope([]),  # type: ignore[arg-type]
+        embedding_client=_FakeEmbed(),  # type: ignore[arg-type]
+        rerank_client=_FakeRerank(),  # type: ignore[arg-type]
+        chat_client=_FakeChat(),  # type: ignore[arg-type]
         top_k=3,
     )
 

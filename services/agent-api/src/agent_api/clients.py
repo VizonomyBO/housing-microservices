@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_voyageai import VoyageAIEmbeddings, VoyageAIRerank
 from openai import AsyncOpenAI
+from pydantic import SecretStr
 
 
 class OpenAIChatClient:
@@ -30,7 +32,9 @@ class OpenAIChatClient:
 
 class VoyageEmbeddingClient:
     def __init__(self, *, api_key: str, model: str):
-        self._client = VoyageAIEmbeddings(model=model, api_key=api_key)
+        # Set API key in environment for VoyageAIEmbeddings
+        os.environ["VOYAGE_API_KEY"] = api_key
+        self._client = VoyageAIEmbeddings(model=model)
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return await asyncio.to_thread(self._client.embed_documents, list(texts))
@@ -47,7 +51,7 @@ class VoyageRerankClient:
     def _rerank_sync(self, query: str, documents: Sequence[str], top_k: int) -> list[float]:
         reranker = VoyageAIRerank(
             model=self._model,
-            voyage_api_key=self._api_key,
+            voyage_api_key=SecretStr(self._api_key),
             top_k=top_k,
         )
         doc_objs = [

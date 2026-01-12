@@ -50,7 +50,7 @@ def _disable_speech_recognition_import() -> Any:
             )
         return original_import(name, globals, locals, fromlist, level)
 
-    builtins.__import__ = _guard
+    builtins.__import__ = _guard  # type: ignore[assignment]
     try:
         yield
     finally:

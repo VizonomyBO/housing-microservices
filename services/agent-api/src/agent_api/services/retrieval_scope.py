@@ -392,9 +392,9 @@ def _normalize_visibility(raw: str) -> Literal["visible", "hidden", "read_only"]
 
 
 def _coerce_embedding(embedding: Sequence[float]) -> list[float]:
-    if isinstance(embedding, (str, bytes, dict)):
+    if isinstance(embedding, str | bytes | dict):
         raise ValueError(f"embedding must be a 1D sequence of floats, received {type(embedding)}")
-    if any(isinstance(item, Sequence) and not isinstance(item, (str, bytes)) for item in embedding):
+    if any(isinstance(item, Sequence) and not isinstance(item, str | bytes) for item in embedding):
         raise ValueError("embedding must be flat (1D) and cannot contain nested sequences")
     try:
         vector = [float(x) for x in embedding]

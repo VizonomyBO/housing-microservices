@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -13,7 +14,7 @@ from agent_api.settings import Settings
 logger = logging.getLogger(__name__)
 
 
-def _get_s3_client(settings: Settings) -> boto3.client:
+def _get_s3_client(settings: Settings) -> Any:  # boto3.client type is not well-defined
     """Initialize and return S3 client with settings."""
     client_kwargs = {"region_name": settings.aws_region}
 
@@ -37,7 +38,7 @@ def _get_cache_key(country_code: str) -> str:
     Returns:
         S3 key in format: reports/report_{country_code}_{YYYY-MM}.pdf
     """
-    current_month = datetime.now().strftime("%Y-%m")
+    current_month = datetime.now(UTC).strftime("%Y-%m")
     return f"reports/report_{country_code}_{current_month}.pdf"
 
 
