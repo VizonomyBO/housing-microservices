@@ -26,13 +26,16 @@ from agent_api.http.errors import GatewayError
 from agent_api.http.schemas import ResponseMode
 from agent_api.models.chat import ChatRequestContext
 from agent_api.services.conversations import ConversationService
-from agent_api.services.retrieval import RetrievalService
+from agent_api.services.retrieval import RetrievalProfile, RetrievalService
 from agent_api.services.retrieval_scope import ConversationScopeRepository
 from agent_api.settings import Settings
 from streaming.events import SSEEventType, TaskLifecyclePayload
 from streaming.sse_emitter import SSEEmitter
 
 logger = logging.getLogger(__name__)
+
+_PROFILE_CHAR_LIMIT = 3000
+_PROFILE_MAX_TOKENS = 900
 
 
 @dataclass(slots=True)
@@ -79,10 +82,15 @@ class LangGraphRunner(ChatRunnerProtocol):
     def __init__(self, *, settings: Settings):
         self._settings = settings
         llm_factory: Any = cast(Any, ChatOpenAI)
-        self._llm: ChatOpenAI = llm_factory(
-            api_key=settings.openai_api_key,
-            model=settings.openai_chat_model,
-            temperature=0.1,
+        base_llm_kwargs = {
+            "api_key": settings.openai_api_key,
+            "model": settings.openai_chat_model,
+            "temperature": 0.1,
+        }
+        self._llm: ChatOpenAI = llm_factory(**base_llm_kwargs)
+        self._profile_llm: ChatOpenAI = llm_factory(
+            **base_llm_kwargs,
+            max_tokens=_PROFILE_MAX_TOKENS,
         )
         self._chat_client = OpenAIChatClient(
             api_key=settings.openai_api_key or "", model=settings.openai_chat_model
@@ -96,15 +104,21 @@ class LangGraphRunner(ChatRunnerProtocol):
             model=settings.voyage_rerank_model,
         )
         self._system_prompt = DEFAULT_SYSTEM_PROMPT
+        self._tools = [
+            retrieve_documents,
+            document_status,
+            list_attachments,
+            pyodide_sandbox,
+            compute_over_chunks,
+        ]
         self._agent = build_agent_graph(
             llm=self._llm,
-            tools=[
-                retrieve_documents,
-                document_status,
-                list_attachments,
-                pyodide_sandbox,
-                compute_over_chunks,
-            ],
+            tools=self._tools,
+            system_prompt=self._system_prompt,
+        )
+        self._profile_agent = build_agent_graph(
+            llm=self._profile_llm,
+            tools=self._tools,
             system_prompt=self._system_prompt,
         )
 
@@ -132,6 +146,12 @@ class LangGraphRunner(ChatRunnerProtocol):
                 message="Message content is required",
                 status_code=400,
             )
+        merged_hints = dict(request.hints or {})
+        merged_hints.update(hints or {})
+        retrieval_profile = _resolve_retrieval_profile(merged_hints)
+        target_country = _resolve_target_country_hint(
+            merged_hints, getattr(request, "constraints", None)
+        )
 
         if sse_emitter:
             await sse_emitter.emit(
@@ -170,7 +190,14 @@ class LangGraphRunner(ChatRunnerProtocol):
             retrieval=retrieval_service,
             request_id=request_context.request_id,
             pyodide=self._settings.pyodide,
-            metadata={"hints": hints},
+            metadata={
+                "hints": merged_hints,
+                "retrieval_profile": retrieval_profile.value,
+                "target_country_code": target_country,
+            },
+            retrieval_profile=retrieval_profile,
+            target_country_code=target_country,
+            hints=merged_hints,
         )
         set_runtime(runtime)
 
@@ -184,7 +211,12 @@ class LangGraphRunner(ChatRunnerProtocol):
         human = HumanMessage(content=request.message.content)
         system = SystemMessage(content=self._system_prompt)
         config = {"configurable": {"thread_id": request.thread_id}}
-        result = await self._agent.ainvoke({"messages": [system, human]}, config=config)
+        agent = (
+            self._profile_agent
+            if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE
+            else self._agent
+        )
+        result = await agent.ainvoke({"messages": [system, human]}, config=config)
 
         ai_content = ""
         if isinstance(result, dict):
@@ -197,6 +229,8 @@ class LangGraphRunner(ChatRunnerProtocol):
                     ai_content = last.get("content") or ""
         if not ai_content:
             ai_content = "I'm sorry, I couldn't produce a response."
+        if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE:
+            ai_content = _cap_answer_length(ai_content, _PROFILE_CHAR_LIMIT)
 
         tool_calls = _extract_tool_history(
             result.get("messages") if isinstance(result, dict) else None
@@ -266,6 +300,67 @@ def _extract_tool_history(messages: Any) -> list[dict[str, Any]]:
                 }
             )
     return history
+
+
+def _resolve_retrieval_profile(hints: dict[str, Any]) -> RetrievalProfile:
+    if not hints:
+        return RetrievalProfile.DEFAULT
+    raw_profile = hints.get("retrieval_profile") or hints.get("profile")
+    if isinstance(raw_profile, str):
+        normalized = raw_profile.strip().lower()
+        if normalized in {"country_profile", "report_profile", "report"}:
+            return RetrievalProfile.COUNTRY_PROFILE
+    for key in ("country_profile", "report_profile"):
+        value = hints.get(key)
+        if isinstance(value, bool) and value:
+            return RetrievalProfile.COUNTRY_PROFILE
+        if isinstance(value, str) and value.strip().lower() in {"true", "1", "yes"}:
+            return RetrievalProfile.COUNTRY_PROFILE
+    return RetrievalProfile.DEFAULT
+
+
+def _resolve_target_country_hint(hints: dict[str, Any], constraints: Any) -> str | None:
+    if hints:
+        raw = hints.get("country_code")
+        if isinstance(raw, str):
+            code = raw.strip().upper()
+            if code:
+                return code
+    if constraints and getattr(constraints, "country_code", None):
+        code = (constraints.country_code or "").strip().upper()
+        if code:
+            return code
+    return None
+
+
+def _cap_answer_length(content: str, limit: int) -> str:
+    if len(content) <= limit:
+        return content
+    truncated = content[:limit]
+    sentence_breaks = [
+        truncated.rfind(". "),
+        truncated.rfind("! "),
+        truncated.rfind("? "),
+        truncated.rfind("\n\n"),
+        truncated.rfind("\n"),
+    ]
+    cutoff = max((pos for pos in sentence_breaks if pos != -1), default=-1)
+    if cutoff >= limit // 2:
+        truncated = truncated[: cutoff + 1]
+    else:
+        space_cutoff = truncated.rfind(" ")
+        if space_cutoff >= limit // 2:
+            truncated = truncated[:space_cutoff]
+    truncated = _strip_incomplete_citation(truncated.rstrip())
+    return truncated or content[:limit]
+
+
+def _strip_incomplete_citation(text: str) -> str:
+    last_open = text.rfind("[c")
+    last_close = text.rfind("]")
+    if last_open != -1 and last_open > last_close:
+        return text[:last_open].rstrip()
+    return text
 
 
 __all__ = [

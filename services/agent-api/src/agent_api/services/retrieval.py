@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from agent_api.clients import OpenAIChatClient, VoyageEmbeddingClient, VoyageRerankClient
@@ -13,8 +15,15 @@ from agent_api.services.retrieval_scope import (
     ConversationDocumentRecord,
     ConversationScopeRepository,
 )
+from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
+from shared_data_layer.utils.publication_year import coerce_publication_year
 
 logger = logging.getLogger(__name__)
+
+
+class RetrievalProfile(str, Enum):
+    DEFAULT = "default"
+    COUNTRY_PROFILE = "country_profile"
 
 
 @dataclass(slots=True)
@@ -61,6 +70,8 @@ class RetrievalService:
         *,
         user_query: str,
         conversation_id: str,
+        profile: RetrievalProfile = RetrievalProfile.DEFAULT,
+        target_country_code: str | None = None,
     ) -> RetrievalContext:
         attachments = await self._scope_repo.list_conversation_documents(conversation_id)
         if not attachments:
@@ -79,16 +90,38 @@ class RetrievalService:
                 message="Attached documents are not active yet; wait for ingestion to complete.",
                 status_code=409,
             )
+        focus_country = await self._resolve_target_country(
+            conversation_id=conversation_id,
+            provided_country=target_country_code,
+            attachments=attachments,
+        )
+        candidate_doc_ids = self._apply_profile_filters(
+            doc_ids=active_doc_ids, summaries=summaries, profile=profile
+        )
+        if profile is RetrievalProfile.COUNTRY_PROFILE:
+            attachments = [att for att in attachments if att.document_id in candidate_doc_ids]
+        if not candidate_doc_ids:
+            raise GatewayError(
+                code="NO_RESULTS",
+                message="Retrieval returned no eligible documents after applying filters.",
+                status_code=502,
+            )
 
         expanded_queries = await self._build_query_set(user_query)
         embeddings = await self._embedding_client.embed(expanded_queries)
         retrieved = await self._run_retrieval(
             queries=expanded_queries,
             embeddings=embeddings,
-            document_ids=active_doc_ids,
+            document_ids=candidate_doc_ids,
             summaries=summaries,
         )
         reranked = await self._rerank_chunks(query=user_query, chunks=retrieved)
+        reranked = self._apply_profile_weighting(
+            chunks=reranked,
+            summaries=summaries,
+            profile=profile,
+            target_country=focus_country,
+        )
         context_blocks = reranked[: self._top_k]
         context_text = self._format_context(context_blocks)
         citations = [
@@ -235,6 +268,101 @@ class RetrievalService:
         lines = [line.strip(" -\t") for line in text.splitlines() if line.strip()]
         return [line for line in lines if line]
 
+    async def _resolve_target_country(
+        self,
+        *,
+        conversation_id: str,
+        provided_country: str | None,
+        attachments: list[ConversationDocumentRecord],
+    ) -> str | None:
+        if provided_country:
+            return provided_country.strip().upper()
+        try:
+            conversation = await self._scope_repo.fetch_conversation(conversation_id)
+        except Exception:
+            conversation = None
+        if conversation and conversation.country_code:
+            return conversation.country_code.strip().upper()
+        country_counts = Counter(
+            (att.country_code or "").strip().upper()
+            for att in attachments
+            if att.country_code
+        )
+        if country_counts:
+            most_common = country_counts.most_common(1)[0][0]
+            return most_common or None
+        return None
+
+    def _apply_profile_filters(
+        self,
+        *,
+        doc_ids: Sequence[str],
+        summaries,
+        profile: RetrievalProfile,
+    ) -> list[str]:
+        if profile is not RetrievalProfile.COUNTRY_PROFILE:
+            return list(doc_ids)
+        filtered: list[str] = []
+        for doc_id in doc_ids:
+            summary = summaries.get(doc_id)
+            if summary is None:
+                filtered.append(doc_id)
+                continue
+            metadata = summary.metadata or {}
+            year = coerce_publication_year(metadata.get("publication_year"))
+            if year is not None and year < 2000:
+                continue
+            filtered.append(doc_id)
+        return filtered
+
+    def _apply_profile_weighting(
+        self,
+        *,
+        chunks: list[RetrievedChunk],
+        summaries,
+        profile: RetrievalProfile,
+        target_country: str | None,
+    ) -> list[RetrievedChunk]:
+        if profile is not RetrievalProfile.COUNTRY_PROFILE:
+            return chunks
+        weight_map = self._build_geo_weight_map(summaries, target_country)
+        if not weight_map:
+            return chunks
+        weighted: list[RetrievedChunk] = []
+        for chunk in chunks:
+            weight = weight_map.get(chunk.document_id, 1.0)
+            weighted.append(
+                RetrievedChunk(
+                    chunk_id=chunk.chunk_id,
+                    document_id=chunk.document_id,
+                    text=chunk.text,
+                    score=chunk.score * weight,
+                    page_number=chunk.page_number,
+                    position=chunk.position,
+                    canonical_name=chunk.canonical_name,
+                )
+            )
+        return sorted(weighted, key=lambda c: c.score, reverse=True)
+
+    def _build_geo_weight_map(self, summaries, target_country: str | None) -> dict[str, float]:
+        if not target_country:
+            return {}
+        target_country = target_country.strip().upper()
+        target_region = REGION_BY_COUNTRY_ALPHA3.get(target_country)
+        weights: dict[str, float] = {}
+        for doc_id, summary in summaries.items():
+            country_code = (summary.country_code or "").strip().upper()
+            region = REGION_BY_COUNTRY_ALPHA3.get(country_code)
+            weight = 1.0
+            if country_code == target_country:
+                weight = 1.3
+            elif target_region and (country_code == target_region.value or region == target_region):
+                weight = 1.1
+            elif country_code == Region.GLO.value or region == Region.GLO:
+                weight = 0.9
+            weights[doc_id] = weight
+        return weights
+
     def _format_context(self, chunks: list[RetrievedChunk]) -> str:
         lines: list[str] = []
         for idx, chunk in enumerate(chunks, start=1):
@@ -250,4 +378,4 @@ class RetrievalService:
         return "\n\n".join(lines)
 
 
-__all__ = ["RetrievalContext", "RetrievalService", "RetrievedChunk"]
+__all__ = ["RetrievalContext", "RetrievalProfile", "RetrievalService", "RetrievedChunk"]
