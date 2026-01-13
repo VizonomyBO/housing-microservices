@@ -5,7 +5,7 @@ from typing import Any, ClassVar, TypeVar
 import factory
 from sqlalchemy.orm import DeclarativeMeta
 
-from app import db
+from app.db import get_session
 
 ModelType = TypeVar("ModelType", bound=DeclarativeMeta)
 
@@ -37,8 +37,9 @@ class BaseFactory(factory.Factory):
         Overrides the default factory creation to persist to database.
         """
         instance = model_class(**kwargs)
-        db.session.add(instance)
-        db.session.commit()
+        session = get_session()
+        session.add(instance)
+        session.commit()
         return instance
 
     @classmethod

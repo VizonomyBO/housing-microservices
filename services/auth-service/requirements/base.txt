@@ -9,6 +9,7 @@ psycopg2-binary==2.9.11
 # Authentication & Security
 PyJWT==2.8.0
 argon2-cffi==23.1.0
+flask-cors==6.0.2
 
 # Validation
 pydantic==2.10.5

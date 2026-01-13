@@ -40,6 +40,7 @@ class TestUserService:
             db_session, sample_user.user_id, {"first_name": "Jane"}
         )
         assert error is None
+        assert user is not None
         assert user.first_name == "Jane"
 
     def test_update_user_invalid_email(self, db_session, sample_user):
@@ -48,6 +49,7 @@ class TestUserService:
             db_session, sample_user.user_id, {"email": "invalid-email"}
         )
         assert user is None
+        assert error is not None
         assert "Invalid email" in error
 
     def test_update_user_duplicate_email(self, db_session, sample_user):
@@ -70,6 +72,7 @@ class TestUserService:
             db_session, sample_user.user_id, {"email": "other@example.com"}
         )
         assert user is None
+        assert error is not None
         assert "already in use" in error
 
     def test_update_user_invalid_role(self, db_session, sample_user):
@@ -78,6 +81,7 @@ class TestUserService:
             db_session, sample_user.user_id, {"role": "invalid_role"}
         )
         assert user is None
+        assert error is not None
         assert "Role must be one of" in error
 
     def test_delete_user(self, db_session, sample_user):
@@ -95,6 +99,7 @@ class TestUserService:
         """Test deleting non-existent user"""
         success, error = UserService.delete_user(db_session, uuid4())
         assert success is False
+        assert error is not None
         assert "not found" in error
 
     def test_search_users(self, db_session, sample_user):

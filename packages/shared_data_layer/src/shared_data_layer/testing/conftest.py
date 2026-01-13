@@ -11,16 +11,6 @@ from shared_data_layer.testing.containers import PostgresContainerWithVector
 
 
 @pytest.fixture(scope="session")
-def event_loop():
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
 def postgres_container() -> Generator[PostgresContainerWithVector, None, None]:
     with PostgresContainerWithVector() as container:
         yield container

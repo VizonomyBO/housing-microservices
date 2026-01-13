@@ -5,6 +5,7 @@ FastAPI application for the user-service.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +59,7 @@ def create_api_app(config_class: type[Config] = Config) -> FastAPI:
     fastapi_app.state.config = config_obj
 
     cors_kwargs = _create_cors_kwargs(config_obj)
-    fastapi_app.add_middleware(CORSMiddleware, **cors_kwargs)
+    fastapi_app.add_middleware(cast(Any, CORSMiddleware), **cors_kwargs)
 
     fastapi_app.include_router(system.router)
     fastapi_app.include_router(users.router)

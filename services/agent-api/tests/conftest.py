@@ -8,14 +8,14 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from shared_data_layer.db.session import DatabaseSessionManager
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from agent_api.auth.validator import AuthContext
 from agent_api.http.app import create_app
 from agent_api.http.deps import get_auth_context, get_runner
 from agent_api.services.conversations import ConversationService
 from agent_api.settings import Settings, load_settings
-
-pytest_plugins = ["shared_data_layer.testing.conftest"]
 
 
 @pytest.fixture(scope="session")
@@ -83,9 +83,14 @@ class FakeRunner:
 
 
 @pytest.fixture
-def app(configure_env: None, test_user_id: str, database_url: str) -> FastAPI:
+def app(
+    configure_env: None,
+    test_user_id: str,
+    database_url: str,
+    engine: AsyncEngine,
+) -> FastAPI:
     settings = load_settings()
-    DatabaseSessionManager.init(database_url)
+    DatabaseSessionManager.override_engine(engine)
     app = create_app()
     app.state.settings = settings
     app.state.db_initialized = True
@@ -108,3 +113,13 @@ async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 @pytest.fixture(scope="session")
 def settings(configure_env: None) -> Settings:
     return load_settings()
+
+
+@pytest.fixture(autouse=True, scope="function")
+async def clear_documents_table(
+    app: FastAPI, session_factory: async_sessionmaker
+) -> AsyncIterator[None]:
+    yield
+    async with session_factory() as session:
+        await session.execute(text("TRUNCATE documents CASCADE"))
+        await session.commit()

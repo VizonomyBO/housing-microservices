@@ -74,7 +74,7 @@ def client(fastapi_app):
             session = get_session()
             try:
                 user = session.query(User).filter_by(user_id=user_id).first()
-                country_code = user.country_code if user else "USA"
+                country_code = str(user.country_code) if user else "USA"
             finally:
                 session.close()
 

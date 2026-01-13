@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,12 +71,12 @@ def create_api_app(config_class: type[Config] = Config) -> FastAPI:
 
     # Add CORS middleware
     cors_kwargs = _create_cors_kwargs(config_obj)
-    fastapi_app.add_middleware(CORSMiddleware, **cors_kwargs)
+    fastapi_app.add_middleware(cast(Any, CORSMiddleware), **cors_kwargs)
 
     # Add authentication middleware
     # This will protect all /v1/* routes EXCEPT public paths defined in middleware
     fastapi_app.add_middleware(
-        AuthMiddleware,
+        cast(Any, AuthMiddleware),
         auth_service_url=_resolve_auth_base_url(),
         mock_validation=os.getenv("MOCK_AUTH_VALIDATION", "false").lower() == "true",
         use_direct_validation=True,  # Use direct validation since we're in the same service

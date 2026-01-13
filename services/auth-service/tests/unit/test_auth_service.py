@@ -267,7 +267,8 @@ class TestVerifyRefreshToken:
             "exp": datetime.utcnow() + timedelta(days=1),
             "type": "refresh",
         }
-        fake_token = jwt.encode(fake_payload, config.JWT_SECRET_KEY, algorithm="HS256")
+        encoded = jwt.encode(fake_payload, config.JWT_SECRET_KEY, algorithm="HS256")
+        fake_token = encoded.decode("utf-8") if isinstance(encoded, bytes) else encoded
 
         result, error = AuthService.verify_refresh_token(db_session, fake_token, config)
 

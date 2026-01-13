@@ -1,16 +1,19 @@
 from types import SimpleNamespace
+from typing import Any, cast
 
 from agent_api.agent.runner import _cap_answer_length
+from agent_api.clients import OpenAIChatClient, VoyageEmbeddingClient, VoyageRerankClient
 from agent_api.services.retrieval import RetrievalProfile, RetrievalService
-from agent_api.services.retrieval_scope import DocumentSummary
+from agent_api.services.retrieval_scope import ConversationScopeRepository, DocumentSummary
 
 
 def _make_service() -> RetrievalService:
+    dummy: Any = SimpleNamespace()
     return RetrievalService(
-        scope_repo=SimpleNamespace(),
-        embedding_client=SimpleNamespace(),
-        rerank_client=SimpleNamespace(),
-        chat_client=SimpleNamespace(),
+        scope_repo=cast(ConversationScopeRepository, dummy),
+        embedding_client=cast(VoyageEmbeddingClient, dummy),
+        rerank_client=cast(VoyageRerankClient, dummy),
+        chat_client=cast(OpenAIChatClient, dummy),
     )
 
 

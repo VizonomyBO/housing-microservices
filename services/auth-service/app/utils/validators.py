@@ -105,7 +105,7 @@ def validate_username(username: str) -> tuple[bool, str]:
     return True, ""
 
 
-def sanitize_string(value: str, max_length: int = 255) -> str:
+def sanitize_string(value: str | None, max_length: int = 255) -> str:
     """
     Sanitize a string input by trimming and limiting length.
 

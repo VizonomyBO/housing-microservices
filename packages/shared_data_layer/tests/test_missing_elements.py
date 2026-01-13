@@ -1,3 +1,4 @@
+from typing import Sequence, cast
 from uuid import uuid4
 
 import pytest
@@ -136,7 +137,8 @@ async def test_graph_entity_embedding(db_session: AsyncSession):
     fetched_entity = result.scalar_one()
     # Ensure the embedding round-trips from the database
     assert fetched_entity.embedding is not None
-    assert len(fetched_entity.embedding) == EMBEDDING_DIMENSION
+    embedding = list(cast(Sequence[float], fetched_entity.embedding))
+    assert len(embedding) == EMBEDDING_DIMENSION
 
 
 @pytest.mark.asyncio

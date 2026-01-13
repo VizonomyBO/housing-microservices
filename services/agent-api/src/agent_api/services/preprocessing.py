@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
+from typing import TypedDict
 from uuid import uuid4
 
+from shared_data_layer.db.models import Document
+from shared_data_layer.db.session import DatabaseSessionManager
+from shared_data_layer.repositories.documents import DocumentRepository
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.agent.runner import ChatRunnerProtocol
 from agent_api.auth.validator import AuthContext
 from agent_api.http.context import RequestContext
-from agent_api.http.schemas import BlockingChatResponse, ChatMessagePayload, ChatRequestBody, ResponseMode
-from agent_api.http.streaming import run_blocking_chat
+from agent_api.http.schemas import ChatConstraints, ChatMessagePayload, ResponseMode
 from agent_api.models.chat import ChatRequestContext
 from agent_api.services.cache import ChatCacheService
 from agent_api.services.conversations import ConversationService
-from shared_data_layer.db.models import Document
-from shared_data_layer.db.session import DatabaseSessionManager
-from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -107,21 +105,25 @@ async def get_countries_with_documents() -> list[str]:
         List of ISO-3 country codes
     """
     async with DatabaseSessionManager.session() as session:
-        stmt = (
-            select(Document.country_code)
-            .where(Document.status == "active")
-            .distinct()
-        )
+        stmt = select(Document.country_code).where(Document.status == "active").distinct()
         result = await session.execute(stmt)
         countries = [row[0] for row in result.fetchall() if row[0]]
         return sorted(countries)
+
+
+class PreprocessingStats(TypedDict):
+    country_code: str
+    total_questions: int
+    cache_hits: int
+    cache_generated: int
+    errors: int
 
 
 async def preprocess_cache_for_country(
     country_code: str,
     runner: ChatRunnerProtocol,
     db_session: AsyncSession,
-) -> dict[str, Any]:
+) -> PreprocessingStats:
     """
     Preprocess cache for all pillar questions for a given country.
 
@@ -136,8 +138,8 @@ async def preprocess_cache_for_country(
     cache_service = ChatCacheService(db_session)
     convo_service = ConversationService(db_session)
     doc_repo = DocumentRepository(db_session)
-    
-    stats = {
+
+    stats: PreprocessingStats = {
         "country_code": country_code,
         "total_questions": 0,
         "cache_hits": 0,
@@ -146,7 +148,7 @@ async def preprocess_cache_for_country(
     }
 
     logger.info(f"Starting cache preprocessing for country: {country_code}")
-    
+
     # Create a temporary conversation for this country and attach documents
     conversation = await convo_service.ensure_conversation(
         owner_user_id="00000000-0000-0000-0000-000000000000",  # System user
@@ -155,13 +157,13 @@ async def preprocess_cache_for_country(
         namespace="preprocessing",
         tags=["preprocessing", country_code],
     )
-    
+
     # Get and attach all documents for this country
     documents = await doc_repo.list_documents_for_country(country_code)
     if not documents:
         logger.warning(f"[{country_code}] No documents found, skipping preprocessing")
         return stats
-    
+
     for doc in documents:
         try:
             await doc_repo.attach_to_conversation(
@@ -173,7 +175,7 @@ async def preprocess_cache_for_country(
         except Exception as e:
             logger.warning(f"[{country_code}] Failed to attach doc {doc.id}: {e}")
 
-    for pillar_name, questions in PILLAR_QUESTIONS.items():
+    for _pillar_name, questions in PILLAR_QUESTIONS.items():
         for question in questions:
             stats["total_questions"] += 1
 
@@ -182,15 +184,11 @@ async def preprocess_cache_for_country(
                 cached = await cache_service.get_cached_response(country_code, question)
                 if cached:
                     stats["cache_hits"] += 1
-                    logger.debug(
-                        f"[{country_code}] Cache hit for: {question[:50]}..."
-                    )
+                    logger.debug(f"[{country_code}] Cache hit for: {question[:50]}...")
                     continue
 
                 # Generate response
-                logger.info(
-                    f"[{country_code}] Generating response for: {question[:60]}..."
-                )
+                logger.info(f"[{country_code}] Generating response for: {question[:60]}...")
 
                 # Create a minimal auth context (system/internal)
                 auth = AuthContext(
@@ -217,7 +215,7 @@ async def preprocess_cache_for_country(
                     allow_stateless=False,
                     message=ChatMessagePayload(content=question),
                     hints={},
-                    constraints={"country_code": country_code},
+                    constraints=ChatConstraints(country_code=country_code),
                     owner_user_id="00000000-0000-0000-0000-000000000000",
                     workspace_id=None,
                     tenant_id=None,
@@ -245,13 +243,9 @@ async def preprocess_cache_for_country(
                             "done": result.done_payload,
                             "messages": result.messages or [],
                         }
-                        await cache_service.store_response(
-                            country_code, question, response_data
-                        )
+                        await cache_service.store_response(country_code, question, response_data)
                         stats["cache_generated"] += 1
-                        logger.info(
-                            f"[{country_code}] ✓ Cached response for: {question[:60]}..."
-                        )
+                        logger.info(f"[{country_code}] ✓ Cached response for: {question[:60]}...")
                 except Exception as inner_exc:
                     # Expected errors like "no documents attached" - skip
                     logger.warning(
@@ -306,11 +300,15 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         print(f"Filtered to priority countries: {countries}")
         if not countries:
             print(f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}")
-            logger.info(f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}")
+            logger.info(
+                f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}"
+            )
             return
 
         print(f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}")
-        logger.info(f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}")
+        logger.info(
+            f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}"
+        )
 
         total_stats = {
             "total_countries": len(countries),
@@ -323,9 +321,7 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         # Process each country
         for country_code in countries:
             async with DatabaseSessionManager.session() as session:
-                stats = await preprocess_cache_for_country(
-                    country_code, runner, session
-                )
+                stats = await preprocess_cache_for_country(country_code, runner, session)
                 total_stats["total_questions"] += stats["total_questions"]
                 total_stats["total_generated"] += stats["cache_generated"]
                 total_stats["total_hits"] += stats["cache_hits"]
@@ -346,4 +342,4 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         logger.exception("Error during cache preprocessing", exc_info=exc)
 
 
-__all__ = ["run_preprocessing", "PILLAR_QUESTIONS", "PRIORITY_COUNTRIES"]
+__all__ = ["PILLAR_QUESTIONS", "PRIORITY_COUNTRIES", "run_preprocessing"]
