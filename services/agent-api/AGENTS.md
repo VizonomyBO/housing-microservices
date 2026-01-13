@@ -38,6 +38,11 @@ Use targeted tests during development (e.g., `uv run pytest tests/http/test_chat
 - If schema or repo changes are required, update `packages/shared_data_layer` per its AGENTS guide and run its suite in addition to this service’s tests.
 - Keep logical DB separation: `housing` for Agent/shared, `auth_db` for auth/user.
 
+## Country/Profile Retrieval Mode
+- Trigger the country/report retrieval profile by passing `hints.retrieval_profile="country_profile"` (aliases: `report_profile`, `report`, or `country_profile=true`) in `POST /v1/chat`. Optional `hints.country_code` or `constraints.country_code` sets the geo focus; fallback is conversation/attachment metadata.
+- Behavior: drops documents with `metadata.publication_year < 2000` when present, weights country > region > global, and caps answers at ~3k characters (via max_tokens + post-trim) while preserving citations. Default chats stay unchanged.
+- Local smoke (validated): `env_file=$(scripts/use_env.sh local); set -a && source "$env_file" && set +a && scripts/local_smoke.sh --target local --smoke-output /tmp/local_smoke_report_country_profile.json`
+
 ## 5) Runtime Safety (Fail Fast)
 - No fallbacks, no mocks/stubs in production or eval paths: require real Voyage/OpenAI, Valkey (unless `ALLOW_IN_MEMORY_VALKEY=1` for tests), rate limiter (bypass only with `ALLOW_RATE_LIMITER_BYPASS=1` for tests), and real ingestion. Surface failures via errors; do not silently degrade.
 - Unit tests may patch clients; keep patches in tests/fixtures only.
