@@ -36,6 +36,15 @@ logger = logging.getLogger(__name__)
 
 _PROFILE_CHAR_LIMIT = 3000
 _PROFILE_MAX_TOKENS = 900
+_COUNTRY_PROFILE_SYSTEM_PROMPT = (
+    "You are a retrieval-first country profile analyst. Use the retrieved evidence to write one or "
+    "two concise paragraphs (no bullets or numbered lists) that directly answer the user’s "
+    "country-focused policy questions. Weave the points together like a textbook section for an "
+    "information system: clear topic sentences, coherent flow across sub-questions, and short "
+    "sentences when possible. Cite specific facts with [c#] references immediately after each "
+    "claim. If retrieval is thin, restate only what is supported. Stay within the response length "
+    "limit and never cut off mid-sentence."
+)
 
 
 @dataclass(slots=True)
@@ -104,6 +113,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             model=settings.voyage_rerank_model,
         )
         self._system_prompt = DEFAULT_SYSTEM_PROMPT
+        self._profile_system_prompt = _COUNTRY_PROFILE_SYSTEM_PROMPT
         self._tools = [
             retrieve_documents,
             document_status,
@@ -209,7 +219,12 @@ class LangGraphRunner(ChatRunnerProtocol):
         )
 
         human = HumanMessage(content=request.message.content)
-        system = SystemMessage(content=self._system_prompt)
+        system_prompt = (
+            self._profile_system_prompt
+            if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE
+            else self._system_prompt
+        )
+        system = SystemMessage(content=system_prompt)
         config = {"configurable": {"thread_id": request.thread_id}}
         agent = (
             self._profile_agent

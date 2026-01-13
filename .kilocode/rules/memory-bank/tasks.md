@@ -54,6 +54,8 @@
 - Publication year metadata backfill completed in prod (269 docs updated; HTI_2016_* ambiguous case set to 2016). Backfill script/documentation lives under `packages/shared_data_layer` with logs in `packages/logs/`.
 - Country-profile retrieval profile implemented: geo weighting (country/region/global), publication_year < 2000 filtered when present, and 3k character cap enforced for that profile.
 - Local smoke (target=local) succeeded: `scripts/local_smoke.sh --target local --smoke-output /tmp/local_smoke_report_country_profile.json` (run_id=1768262999).
+- Restored missing Alembic revision `40072d62267b` (chat_response_cache); `init-migrations` now reaches head in prod (DB at 40072d62267b).
+- Country-profile system prompt updated to produce narrative paragraph answers (no bullet lists) with [c#] citations while respecting the 3k coherent cap.
 
 ## Agent Eval Suite (Prod, Pytest)
 - **Purpose**: Run RAG evals over the prod Agent API using the eval user and preloaded MEX corpus (no uploads). Artifacts are stored at `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored; flat).
