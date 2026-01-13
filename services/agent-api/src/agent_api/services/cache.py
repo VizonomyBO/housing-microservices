@@ -6,10 +6,9 @@ import hashlib
 import logging
 from typing import Any
 
+from shared_data_layer.db.models import ChatResponseCache
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from shared_data_layer.db.models import ChatResponseCache
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +24,7 @@ class ChatCacheService:
         """Generate SHA256 hash of the question for cache key."""
         return hashlib.sha256(question.encode("utf-8")).hexdigest()
 
-    async def get_cached_response(
-        self, country_code: str, question: str
-    ) -> dict[str, Any] | None:
+    async def get_cached_response(self, country_code: str, question: str) -> dict[str, Any] | None:
         """
         Retrieve cached response for a given country and question.
 
@@ -156,4 +153,3 @@ class ChatCacheService:
 
 
 __all__ = ["ChatCacheService"]
-

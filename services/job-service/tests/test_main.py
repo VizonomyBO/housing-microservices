@@ -45,4 +45,3 @@ def test_last_result_not_found(client):
     response = client.get("/v1/jobs/report-pregeneration/last-result")
     # May return 404 if no job has run yet
     assert response.status_code in (200, 404)
-

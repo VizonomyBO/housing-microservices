@@ -40,12 +40,16 @@ COPY packages/shared_data_layer /app/packages/shared_data_layer
 
 COPY services/agent-api/src /app/services/agent-api/src
 
-RUN uv venv /app/.venv && \
-    . /app/.venv/bin/activate && \
-    uv sync --all-extras
+# Create the virtualenv inside the project directory to match uv's defaults
+ENV VENV_PATH=/app/services/agent-api/.venv
+RUN uv venv ${VENV_PATH} && \
+    . ${VENV_PATH}/bin/activate && \
+    uv sync --all-extras --frozen && \
+    ${VENV_PATH}/bin/python -m ensurepip && \
+    ${VENV_PATH}/bin/pip install --no-cache-dir python-multipart
 
 ENV PYTHONPATH=/app/services/agent-api/src:/app/packages
 
 EXPOSE 8000
 
-CMD ["/bin/sh", "-c", ". /app/.venv/bin/activate && uv run uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["/bin/sh", "-c", ". ${VENV_PATH}/bin/activate && uv run uvicorn main:app --host 0.0.0.0 --port 8000"]

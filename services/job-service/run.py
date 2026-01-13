@@ -12,6 +12,7 @@ from main import *
 
 if __name__ == "__main__":
     import uvicorn
+
     from job_service.settings import load_settings
 
     settings = load_settings()
@@ -22,4 +23,3 @@ if __name__ == "__main__":
         reload=True,
         log_level=settings.log_level.lower(),
     )
-

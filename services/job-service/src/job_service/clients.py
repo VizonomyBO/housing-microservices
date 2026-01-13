@@ -67,9 +67,7 @@ class AgentApiClient:
     settings: Settings
     auth_client: AuthClient
 
-    async def get_countries_with_documents(
-        self, access_scope: str | None = None
-    ) -> list[str]:
+    async def get_countries_with_documents(self, access_scope: str | None = None) -> list[str]:
         """Fetch list of countries that have documents."""
         token = await self.auth_client.get_access_token()
 
@@ -87,9 +85,7 @@ class AgentApiClient:
             )
 
             if response.status_code != 200:
-                logger.error(
-                    f"Failed to fetch countries: {response.status_code} - {response.text}"
-                )
+                logger.error(f"Failed to fetch countries: {response.status_code} - {response.text}")
                 raise RuntimeError(f"Failed to fetch countries: {response.status_code}")
 
             data = response.json()
@@ -139,9 +135,7 @@ class AgentApiClient:
                     content_type = response.headers.get("content-type", "")
                     if "application/pdf" in content_type:
                         size = len(response.content)
-                        logger.info(
-                            f"Generated report for {country_code}: {size} bytes"
-                        )
+                        logger.info(f"Generated report for {country_code}: {size} bytes")
                         return True, 200, f"Generated ({size} bytes)"
 
                 logger.error(
@@ -158,4 +152,4 @@ class AgentApiClient:
             return False, 500, str(e)
 
 
-__all__ = ["AuthClient", "AgentApiClient"]
+__all__ = ["AgentApiClient", "AuthClient"]

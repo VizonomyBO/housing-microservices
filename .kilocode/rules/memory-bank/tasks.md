@@ -56,6 +56,7 @@
 - Local smoke (target=local) succeeded: `scripts/local_smoke.sh --target local --smoke-output /tmp/local_smoke_report_country_profile.json` (run_id=1768262999).
 - Restored missing Alembic revision `40072d62267b` (chat_response_cache); `init-migrations` now reaches head in prod (DB at 40072d62267b).
 - Country-profile system prompt updated to produce narrative paragraph answers (no bullet lists) with [c#] citations while respecting the 3k coherent cap.
+- Added prod manual smoke helper `scripts/prod_manual_smoke.sh` with runbook `docs/runbooks/prod_manual_smoke.md`; FSAP docs `a91ff5f5-69ed-4615-9311-003b44003df5` and `2146bf98-e0c2-4897-b302-797c4e2fced0` are active in prod (2026-01-13).
 
 ## Agent Eval Suite (Prod, Pytest)
 - **Purpose**: Run RAG evals over the prod Agent API using the eval user and preloaded MEX corpus (no uploads). Artifacts are stored at `services/agent-api/tests/evals/artifacts/<timestamp>_<scenario>.json` (gitignored; flat).

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from job_service.clients import AgentApiClient, AuthClient
-from job_service.countries import ISO_ALPHA3_CODES, PRIORITY_COUNTRIES
+from job_service.countries import PRIORITY_COUNTRIES
 from job_service.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -135,11 +135,13 @@ class ReportPreGenerationJob:
                     logger.info(f"[{i}/{len(countries)}] {country_code}: OK")
                 else:
                     result.failed_items += 1
-                    result.failed_details.append({
-                        "country_code": country_code,
-                        "status": status,
-                        "message": message,
-                    })
+                    result.failed_details.append(
+                        {
+                            "country_code": country_code,
+                            "status": status,
+                            "message": message,
+                        }
+                    )
                     logger.error(f"[{i}/{len(countries)}] {country_code}: FAILED ({status})")
 
                 # Delay between reports
@@ -169,4 +171,4 @@ class ReportPreGenerationJob:
         return result
 
 
-__all__ = ["ReportPreGenerationJob", "JobResult"]
+__all__ = ["JobResult", "ReportPreGenerationJob"]

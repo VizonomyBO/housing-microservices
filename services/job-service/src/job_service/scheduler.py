@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class JobScheduler:
     """Manages scheduled jobs using APScheduler."""
 
-    def __init__(self, settings: "Settings", report_job: "ReportPreGenerationJob"):
+    def __init__(self, settings: Settings, report_job: ReportPreGenerationJob):
         self.settings = settings
         self.report_job = report_job
         self.scheduler = AsyncIOScheduler()
@@ -87,12 +87,14 @@ class JobScheduler:
         jobs = []
         for job in self.scheduler.get_jobs():
             next_run = job.next_run_time
-            jobs.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run": next_run.isoformat() if next_run else None,
-                "trigger": str(job.trigger),
-            })
+            jobs.append(
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run": next_run.isoformat() if next_run else None,
+                    "trigger": str(job.trigger),
+                }
+            )
         return jobs
 
     def trigger_job(self, job_id: str) -> bool:
@@ -106,4 +108,3 @@ class JobScheduler:
 
 
 __all__ = ["JobScheduler"]
-

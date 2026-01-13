@@ -47,7 +47,7 @@ async def generate_report(
         bool,
         Query(
             description="Skip cache lookup and force regeneration. "
-                        "The new report will still be uploaded to the cache."
+            "The new report will still be uploaded to the cache."
         ),
     ] = False,
 ):

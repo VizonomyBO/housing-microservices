@@ -70,26 +70,26 @@ async def list_countries_with_documents(
 ) -> JSONResponse:
     """
     Get a list of distinct country codes that have associated documents.
-    
+
     Useful for scripts that need to generate reports for all available countries.
     By default, excludes region codes to return only actual country codes.
     """
     _require_user(auth_context)
-    
+
     stmt = select(Document.country_code).where(Document.country_code.isnot(None)).distinct()
-    
+
     if access_scope:
         stmt = stmt.where(Document.access_scope == access_scope)
-    
+
     result = await db_session.execute(stmt)
     country_codes = [row[0] for row in result.fetchall() if row[0]]
-    
+
     if exclude_regions:
         country_codes = [code for code in country_codes if code not in _REGION_CODES]
-    
+
     # Sort alphabetically for consistency
     country_codes.sort()
-    
+
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
@@ -184,22 +184,22 @@ async def upload_pdf_to_s3_endpoint(
 ) -> JSONResponse:
     """
     Upload a PDF file directly to S3 without ingestion.
-    
+
     This endpoint is useful for batch uploads where you want to store files
     in S3 first and process them later.
-    
+
     Returns:
         JSON with document_id (UUID) and s3_uri
     """
     _require_user(auth_context)
-    
+
     if not settings.s3_housing_pdf_bucket:
         raise GatewayError(
             code="S3_NOT_CONFIGURED",
             message="S3 housing PDF bucket is not configured",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-    
+
     # Validate file type
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise GatewayError(
@@ -207,12 +207,13 @@ async def upload_pdf_to_s3_endpoint(
             message="Only PDF files are supported",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    
+
     # Generate document ID
     from uuid import uuid4
+
     document_id = uuid4()
     document_name = file.filename
-    
+
     # Read file content
     try:
         file_bytes = await file.read()
@@ -228,7 +229,7 @@ async def upload_pdf_to_s3_endpoint(
             message=f"Failed to read file: {exc}",
             status_code=status.HTTP_400_BAD_REQUEST,
         ) from exc
-    
+
     # Upload to S3
     try:
         s3_uri = upload_pdf_to_s3(
@@ -249,7 +250,7 @@ async def upload_pdf_to_s3_endpoint(
             message=str(exc),
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         ) from exc
-    
+
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={

@@ -9,7 +9,6 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent_api.agent.tool_runtime import get_runtime
-from agent_api.services.retrieval import RetrievalProfile
 from agent_api.services.retrieval_scope import ConversationDocumentRecord
 from agent_api.tools.pyodide import execute_in_pyodide
 

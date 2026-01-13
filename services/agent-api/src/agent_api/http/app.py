@@ -46,8 +46,12 @@ def create_app() -> FastAPI:
         app.state.auth_validator = AuthTokenValidator(settings.auth)
 
         db_initialized = False
-        print(f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}...")
-        logger.info(f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}...")
+        print(
+            f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}..."
+        )
+        logger.info(
+            f"Initializing database with URL: {settings.database_url[:50] if settings.database_url else 'None'}..."
+        )
         if settings.database_url:
             DatabaseSessionManager.init(settings.database_url)
             db_initialized = True
@@ -62,9 +66,13 @@ def create_app() -> FastAPI:
 
         # Launch cache preprocessing if enabled
         preprocessing_task = None
-        print(f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}")
-        logger.info(f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}")
-        
+        print(
+            f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}"
+        )
+        logger.info(
+            f"Preprocessing check: preprocess_cache_on_startup={settings.preprocess_cache_on_startup}, db_initialized={db_initialized}"
+        )
+
         async def run_preprocessing_with_error_handling():
             try:
                 print("About to call run_preprocessing...")
@@ -73,9 +81,10 @@ def create_app() -> FastAPI:
             except Exception as e:
                 print(f"ERROR in preprocessing background task: {e}")
                 import traceback
+
                 traceback.print_exc()
                 logger.error(f"Error in preprocessing background task: {e}", exc_info=True)
-        
+
         if settings.preprocess_cache_on_startup and db_initialized:
             print("Cache preprocessing enabled - launching background task")
             logger.info("Cache preprocessing enabled - launching background task")
@@ -86,11 +95,10 @@ def create_app() -> FastAPI:
             except Exception as e:
                 print(f"ERROR: Failed to create preprocessing task: {e}")
                 logger.error(f"Failed to create preprocessing task: {e}", exc_info=True)
+        elif settings.preprocess_cache_on_startup:
+            logger.warning("Cache preprocessing enabled but DB not initialized")
         else:
-            if settings.preprocess_cache_on_startup:
-                logger.warning("Cache preprocessing enabled but DB not initialized")
-            else:
-                logger.info("Cache preprocessing is disabled (PREPROCESS_CACHE_ON_STARTUP=false)")
+            logger.info("Cache preprocessing is disabled (PREPROCESS_CACHE_ON_STARTUP=false)")
 
         try:
             yield

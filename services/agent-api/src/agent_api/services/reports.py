@@ -94,7 +94,7 @@ class ReportService:
                     return cached_pdf
             except Exception as e:
                 logger.warning(f"Failed to fetch cached report (proceeding to generate): {e}")
-        
+
         # 1. Fetch all documents for the country
         documents = await self._doc_repo.list_documents_for_country(country_code)
         if not documents:

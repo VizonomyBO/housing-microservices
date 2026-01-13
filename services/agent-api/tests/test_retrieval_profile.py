@@ -104,9 +104,7 @@ def test_build_geo_weight_map_prioritizes_country_region_and_global():
 
 
 def test_cap_answer_length_prefers_sentence_breaks_and_preserves_citations():
-    content = (
-        "First sentence. Second sentence with cite [c1]. Third sentence with cite [c2] trailing text."
-    )
+    content = "First sentence. Second sentence with cite [c1]. Third sentence with cite [c2] trailing text."
     limit = content.find("[c2") + 2  # Force truncation inside the final citation
     trimmed = _cap_answer_length(content, limit)
     assert len(trimmed) <= limit

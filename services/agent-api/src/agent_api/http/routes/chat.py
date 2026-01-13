@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
@@ -17,12 +18,11 @@ from agent_api.http.deps import (
     get_stream_settings,
 )
 from agent_api.http.errors import GatewayError
-from agent_api.http.schemas import ChatRequestBody, ResponseMode, BlockingChatResponse
+from agent_api.http.schemas import BlockingChatResponse, ChatRequestBody, ResponseMode
 from agent_api.http.streaming import build_streaming_response, run_blocking_chat
 from agent_api.models.chat import ChatRequestContext
 from agent_api.services.cache import ChatCacheService
 from agent_api.services.conversations import ConversationService
-from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 
@@ -49,20 +49,27 @@ async def post_chat(
     mode = payload.resolved_response_mode()
 
     # Check cache if explicitly requested with use_cache=true
-    print(f"DEBUG: use_cache={payload.use_cache}, mode={mode}, country_code={payload.constraints.country_code if payload.constraints else None}")
-    if (payload.use_cache and 
-        mode is ResponseMode.BLOCKING and 
-        payload.constraints and 
-        payload.constraints.country_code):
-        print(f"DEBUG: Checking cache for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+    print(
+        f"DEBUG: use_cache={payload.use_cache}, mode={mode}, country_code={payload.constraints.country_code if payload.constraints else None}"
+    )
+    if (
+        payload.use_cache
+        and mode is ResponseMode.BLOCKING
+        and payload.constraints
+        and payload.constraints.country_code
+    ):
+        print(
+            f"DEBUG: Checking cache for {payload.constraints.country_code}: {payload.message.content[:60]}..."
+        )
         cache_service = ChatCacheService(db_session)
         cached_response = await cache_service.get_cached_response(
-            country_code=payload.constraints.country_code,
-            question=payload.message.content
+            country_code=payload.constraints.country_code, question=payload.message.content
         )
         print(f"DEBUG: cached_response = {cached_response is not None}")
         if cached_response:
-            print(f"CACHE HIT for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+            print(
+                f"CACHE HIT for {payload.constraints.country_code}: {payload.message.content[:60]}..."
+            )
             # Return cached response directly
             response_data = BlockingChatResponse(
                 thread_id=chat_request.thread_id,
@@ -74,8 +81,9 @@ async def post_chat(
                 status_code=200,
                 content=response_data.model_dump(mode="json"),
             )
-        else:
-            print(f"CACHE MISS for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+        print(
+            f"CACHE MISS for {payload.constraints.country_code}: {payload.message.content[:60]}..."
+        )
 
     if mode is ResponseMode.STREAM:
         return await build_streaming_response(
@@ -101,28 +109,34 @@ async def post_chat(
     )
 
     # Store response in cache if use_cache was requested
-    if (payload.use_cache and 
-        payload.constraints and 
-        payload.constraints.country_code and
-        response.status_code == 200):
+    if (
+        payload.use_cache
+        and payload.constraints
+        and payload.constraints.country_code
+        and response.status_code == 200
+    ):
         try:
             # Access response body properly - response.body is bytes
             response_body = response.body
             if isinstance(response_body, bytes):
                 import json
-                response_data = json.loads(response_body.decode('utf-8'))
+
+                response_data = json.loads(response_body.decode("utf-8"))
                 cache_service = ChatCacheService(db_session)
-                await cache_service.store_cached_response(
+                await cache_service.store_response(
                     country_code=payload.constraints.country_code,
                     question=payload.message.content,
-                    response=response_data
+                    response=response_data,
                 )
-                print(f"CACHE STORED for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+                print(
+                    f"CACHE STORED for {payload.constraints.country_code}: {payload.message.content[:60]}..."
+                )
         except Exception as e:
             import traceback
+
             print(f"Failed to store cache (non-fatal): {e}")
             print(traceback.format_exc())
-    
+
     return response
 
 

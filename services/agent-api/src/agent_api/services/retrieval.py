@@ -9,14 +9,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
+from shared_data_layer.utils.publication_year import coerce_publication_year
+
 from agent_api.clients import OpenAIChatClient, VoyageEmbeddingClient, VoyageRerankClient
 from agent_api.http.errors import GatewayError
 from agent_api.services.retrieval_scope import (
     ConversationDocumentRecord,
     ConversationScopeRepository,
 )
-from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
-from shared_data_layer.utils.publication_year import coerce_publication_year
 
 logger = logging.getLogger(__name__)
 
@@ -284,9 +285,7 @@ class RetrievalService:
         if conversation and conversation.country_code:
             return conversation.country_code.strip().upper()
         country_counts = Counter(
-            (att.country_code or "").strip().upper()
-            for att in attachments
-            if att.country_code
+            (att.country_code or "").strip().upper() for att in attachments if att.country_code
         )
         if country_counts:
             most_common = country_counts.most_common(1)[0][0]

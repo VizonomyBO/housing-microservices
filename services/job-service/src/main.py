@@ -1,6 +1,5 @@
 """Entry point for the job service."""
 
-import os
 
 import uvicorn
 
@@ -15,4 +14,3 @@ if __name__ == "__main__":
         port=settings.http_port,
         log_level=settings.log_level.lower(),
     )
-

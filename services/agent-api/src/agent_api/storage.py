@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 if TYPE_CHECKING:
     from agent_api.settings import Settings
@@ -66,3 +66,52 @@ class S3StorageClient:
         except ClientError as exc:
             logger.exception("Failed to generate presigned URL for %s", storage_uri)
             raise RuntimeError(f"Failed to generate download URL: {exc}") from exc
+
+
+def upload_pdf_to_s3(
+    file_bytes: bytes,
+    document_id: str,
+    document_name: str,
+    settings: Settings,
+) -> str:
+    """
+    Upload a PDF to the housing documents bucket and return its S3 URI.
+
+    Mirrors the ingestion-service upload helper so the API can proxy uploads.
+    """
+    if not settings.s3_housing_pdf_bucket:
+        raise ValueError("S3 housing PDF bucket is not configured")
+
+    bucket_name = settings.s3_housing_pdf_bucket
+    region = settings.aws_region
+    s3_key = f"{document_id}/{document_name}"
+
+    try:
+        s3_client = boto3.client("s3", region_name=region)
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=file_bytes,
+            ContentType="application/pdf",
+            ServerSideEncryption="AES256",
+        )
+        s3_uri = f"s3://{bucket_name}/{s3_key}"
+        logger.info("Uploaded PDF to S3: %s (size: %d bytes)", s3_uri, len(file_bytes))
+        return s3_uri
+    except ClientError as exc:  # pragma: no cover - network I/O
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        error_message = exc.response.get("Error", {}).get("Message", str(exc))
+        logger.error(
+            "S3 upload failed: %s - %s (bucket: %s, key: %s)",
+            error_code,
+            error_message,
+            bucket_name,
+            s3_key,
+        )
+        raise RuntimeError(f"S3 upload failed: {error_code} - {error_message}") from exc
+    except BotoCoreError as exc:  # pragma: no cover - network I/O
+        logger.error("S3 client error: %s", exc)
+        raise RuntimeError(f"S3 client error: {exc}") from exc
+    except Exception as exc:  # pragma: no cover - network I/O
+        logger.exception("Unexpected error during S3 upload")
+        raise RuntimeError(f"Unexpected S3 upload error: {exc}") from exc
