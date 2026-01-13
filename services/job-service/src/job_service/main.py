@@ -144,8 +144,9 @@ async def trigger_report_pregeneration(background_tasks: BackgroundTasks):
     """
     Manually trigger the report regeneration job.
 
-    This will regenerate reports for all countries with skip_cache=True,
-    overwriting existing cached reports. Reports expire 30 days after generation.
+    This will regenerate reports for priority countries (MEX, BRA, IDN, GHA, KEN, VNM)
+    with skip_cache=True, overwriting existing cached reports.
+    Reports expire 30 days after generation.
     """
     if not report_job:
         raise HTTPException(status_code=503, detail="Job not initialized")

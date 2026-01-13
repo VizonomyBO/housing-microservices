@@ -89,7 +89,7 @@ async def post_chat(
             db_session=db_session,
         )
 
-    return await run_blocking_chat(
+    response = await run_blocking_chat(
         runner=chat_runner,
         chat_request=chat_request,
         auth=auth_context,
@@ -99,6 +99,31 @@ async def post_chat(
         stream_settings=stream_settings,
         db_session=db_session,
     )
+
+    # Store response in cache if use_cache was requested
+    if (payload.use_cache and 
+        payload.constraints and 
+        payload.constraints.country_code and
+        response.status_code == 200):
+        try:
+            # Access response body properly - response.body is bytes
+            response_body = response.body
+            if isinstance(response_body, bytes):
+                import json
+                response_data = json.loads(response_body.decode('utf-8'))
+                cache_service = ChatCacheService(db_session)
+                await cache_service.store_cached_response(
+                    country_code=payload.constraints.country_code,
+                    question=payload.message.content,
+                    response=response_data
+                )
+                print(f"CACHE STORED for {payload.constraints.country_code}: {payload.message.content[:60]}...")
+        except Exception as e:
+            import traceback
+            print(f"Failed to store cache (non-fatal): {e}")
+            print(traceback.format_exc())
+    
+    return response
 
 
 def _build_request_context(

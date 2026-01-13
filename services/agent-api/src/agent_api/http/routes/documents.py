@@ -8,7 +8,7 @@ from typing import Annotated
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.repositories.documents import UploadedFileRepository
@@ -21,6 +21,7 @@ from agent_api.http.deps import get_auth_context, get_db_session, get_request_co
 from agent_api.http.errors import GatewayError
 from agent_api.http.schemas import DocumentListItem, DocumentListResponse, PaginationMetadata
 from agent_api.settings import Settings
+from agent_api.storage import upload_pdf_to_s3
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,92 @@ async def list_documents(
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content=response.model_dump(mode="json"),
+    )
+
+
+@router.post("/upload-s3", summary="Upload PDF file to S3 only (no ingestion)")
+async def upload_pdf_to_s3_endpoint(
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    auth_context: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    """
+    Upload a PDF file directly to S3 without ingestion.
+    
+    This endpoint is useful for batch uploads where you want to store files
+    in S3 first and process them later.
+    
+    Returns:
+        JSON with document_id (UUID) and s3_uri
+    """
+    _require_user(auth_context)
+    
+    if not settings.s3_housing_pdf_bucket:
+        raise GatewayError(
+            code="S3_NOT_CONFIGURED",
+            message="S3 housing PDF bucket is not configured",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise GatewayError(
+            code="VALIDATION_ERROR",
+            message="Only PDF files are supported",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    
+    # Generate document ID
+    from uuid import uuid4
+    document_id = uuid4()
+    document_name = file.filename
+    
+    # Read file content
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise GatewayError(
+                code="VALIDATION_ERROR",
+                message="File is empty",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    except Exception as exc:
+        raise GatewayError(
+            code="UPLOAD_ERROR",
+            message=f"Failed to read file: {exc}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+    
+    # Upload to S3
+    try:
+        s3_uri = upload_pdf_to_s3(
+            file_bytes=file_bytes,
+            document_id=document_id,
+            document_name=document_name,
+            settings=settings,
+        )
+    except ValueError as exc:
+        raise GatewayError(
+            code="S3_NOT_CONFIGURED",
+            message=str(exc),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
+    except RuntimeError as exc:
+        raise GatewayError(
+            code="S3_UPLOAD_FAILED",
+            message=str(exc),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ) from exc
+    
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "document_id": str(document_id),
+            "document_name": document_name,
+            "s3_uri": s3_uri,
+            "request_id": request_context.request_id,
+        },
     )
 
 
