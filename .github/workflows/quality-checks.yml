@@ -62,7 +62,7 @@ jobs:
       - name: Type Check
         run: uv run ty check src
       - name: Run Tests
-        run: uv run pytest tests -n auto -m "not requires_prod"
+        run: uv run pytest tests --ignore=tests/evals -n auto
 
   # Ingestion Service: Lint, Format, Type Check & Test
   check-ingestion-service:
