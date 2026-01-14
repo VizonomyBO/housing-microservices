@@ -8,8 +8,21 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from shared_data_layer.db.session import DatabaseSessionManager
+from shared_data_layer.testing.conftest import (
+    database_url,
+    db_session,
+    engine,
+    postgres_container,
+    session_factory,
+)
 
-# Import fixtures from shared_data_layer
+__all__ = [
+    "database_url",
+    "db_session",
+    "engine",
+    "postgres_container",
+    "session_factory",
+]
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
