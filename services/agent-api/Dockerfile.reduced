@@ -45,8 +45,7 @@ ENV VENV_PATH=/app/services/agent-api/.venv
 RUN uv venv ${VENV_PATH} && \
     . ${VENV_PATH}/bin/activate && \
     uv sync --all-extras --frozen && \
-    ${VENV_PATH}/bin/python -m ensurepip && \
-    ${VENV_PATH}/bin/pip install --no-cache-dir python-multipart
+    uv pip install --no-cache-dir python-multipart
 
 ENV PYTHONPATH=/app/services/agent-api/src:/app/packages
 
