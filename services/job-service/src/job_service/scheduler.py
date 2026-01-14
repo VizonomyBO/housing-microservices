@@ -75,7 +75,7 @@ class JobScheduler:
         # Run on startup if configured
         if self.settings.schedule.run_on_startup:
             logger.info("Run-on-startup enabled, triggering job...")
-            asyncio.create_task(self._run_report_pregeneration())
+            self._startup_task = asyncio.create_task(self._run_report_pregeneration())
 
     def shutdown(self) -> None:
         """Shutdown the scheduler."""

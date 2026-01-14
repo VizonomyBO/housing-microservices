@@ -180,7 +180,7 @@ async def upload_pdf_to_s3_endpoint(
     request_context: Annotated[RequestContext, Depends(get_request_context)],
     auth_context: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File(...)],
 ) -> JSONResponse:
     """
     Upload a PDF file directly to S3 without ingestion.
@@ -234,7 +234,7 @@ async def upload_pdf_to_s3_endpoint(
     try:
         s3_uri = upload_pdf_to_s3(
             file_bytes=file_bytes,
-            document_id=document_id,
+            document_id=str(document_id),
             document_name=document_name,
             settings=settings,
         )

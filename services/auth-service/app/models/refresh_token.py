@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
@@ -22,7 +22,7 @@ class RefreshToken(Base):  # type: ignore[misc,valid-type]
 
     # Token metadata
     is_revoked = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     expires_at = Column(DateTime, nullable=False)
 
     # Device/session tracking
@@ -34,7 +34,7 @@ class RefreshToken(Base):  # type: ignore[misc,valid-type]
 
     def is_expired(self):
         """Check if token is expired"""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(UTC).replace(tzinfo=None) > self.expires_at
 
     def is_valid(self):
         """Check if token is valid (not revoked and not expired)"""

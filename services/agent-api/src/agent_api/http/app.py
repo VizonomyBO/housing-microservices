@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -103,14 +104,11 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            if preprocessing_task:
-                if not preprocessing_task.done():
-                    logger.info("Cancelling preprocessing task...")
-                    preprocessing_task.cancel()
-                    try:
-                        await preprocessing_task
-                    except asyncio.CancelledError:
-                        pass
+            if preprocessing_task and not preprocessing_task.done():
+                logger.info("Cancelling preprocessing task...")
+                preprocessing_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await preprocessing_task
             if db_initialized:
                 await DatabaseSessionManager.dispose()
 

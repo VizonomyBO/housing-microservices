@@ -115,7 +115,7 @@ def settings(configure_env: None) -> Settings:
     return load_settings()
 
 
-@pytest.fixture(autouse=True, scope="function")
+@pytest.fixture(autouse=True)
 async def clear_documents_table(
     app: FastAPI, session_factory: async_sessionmaker
 ) -> AsyncIterator[None]:

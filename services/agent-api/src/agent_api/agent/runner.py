@@ -38,7 +38,7 @@ _PROFILE_CHAR_LIMIT = 3000
 _PROFILE_MAX_TOKENS = 900
 _COUNTRY_PROFILE_SYSTEM_PROMPT = (
     "You are a retrieval-first country profile analyst. Use the retrieved evidence to write one or "
-    "two concise paragraphs (no bullets or numbered lists) that directly answer the user’s "
+    "two concise paragraphs (no bullets or numbered lists) that directly answer the user's "
     "country-focused policy questions. Weave the points together like a textbook section for an "
     "information system: clear topic sentences, coherent flow across sub-questions, and short "
     "sentences when possible. Cite specific facts with [c#] references immediately after each "
@@ -132,7 +132,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             system_prompt=self._system_prompt,
         )
 
-    async def run_chat(
+    async def run_chat(  # noqa: PLR0912
         self,
         *,
         request: ChatRequestContext,
