@@ -1,9 +1,10 @@
-"""S3 storage client for document downloads."""
+"""S3 storage client for document downloads and uploads."""
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
