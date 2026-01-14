@@ -150,7 +150,7 @@ class TestUsernameValidation:
         invalid_usernames = ["test@user", "user name", "user.name", "user!"]
 
         for username in invalid_usernames:
-            is_valid, error = validate_username(username)
+            is_valid, _error = validate_username(username)
             assert is_valid is False
 
     def test_validate_username_empty(self):

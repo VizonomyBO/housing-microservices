@@ -77,7 +77,7 @@ class ReportService:
         self._doc_repo = DocumentRepository(db_session)
         self._convo_service = ConversationService(db_session)
 
-    async def generate_housing_report(  # noqa: PLR0912
+    async def generate_housing_report(
         self,
         country_code: str,
         user_id: str,

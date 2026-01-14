@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass

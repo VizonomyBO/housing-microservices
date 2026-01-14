@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import CHAR, Boolean, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import relationship
@@ -33,9 +33,12 @@ class User(Base):  # type: ignore[misc,valid-type]
     status = Column(String(20), nullable=False, default="pending", index=True)
     country_code = Column(CHAR(3), nullable=False, default="USA", index=True)
 
-    date_created = Column(DateTime, default=datetime.utcnow, nullable=False)
+    date_created = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     date_modified = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
 
     created_by = Column(

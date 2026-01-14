@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from shared_data_layer.config import DEFAULT_VOYAGE_EMBEDDING_DIMENSION
+
 # ruff: noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -14,8 +15,8 @@ from ingestion_service.pipeline import (
     IngestionError,
     IngestionPipeline,
     MarkdownChunker,
-)  # noqa: E402
-from ingestion_service.settings import Settings  # noqa: E402
+)
+from ingestion_service.settings import Settings
 
 
 def _make_settings(**overrides) -> Settings:

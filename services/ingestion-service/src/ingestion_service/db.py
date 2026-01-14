@@ -4,10 +4,10 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends
+from shared_data_layer.db.session import DatabaseSessionManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ingestion_service.settings import Settings, get_settings
-from shared_data_layer.db.session import DatabaseSessionManager
 
 
 async def init_engine(settings: Settings) -> None:

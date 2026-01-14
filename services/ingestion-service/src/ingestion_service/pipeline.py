@@ -6,10 +6,11 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any
 from uuid import UUID, uuid4
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -31,8 +32,8 @@ from ingestion_service.embeddings import (
     VoyageEmbeddingClient,
     VoyageEmbeddingClientProtocol,
 )
-from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 from ingestion_service.schemas import UploadInitRequest
+from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,7 @@ def _disable_speech_recognition_import() -> Any:
 
     def _guard(name: str, globals=None, locals=None, fromlist=(), level: int = 0):
         if name == "speech_recognition":
-            raise ModuleNotFoundError(
-                "speech_recognition disabled for text-only ingestion"
-            )
+            raise ModuleNotFoundError("speech_recognition disabled for text-only ingestion")
         return original_import(name, globals, locals, fromlist, level)
 
     builtins.__import__ = _guard  # type: ignore[assignment]
@@ -122,9 +121,7 @@ class MarkdownChunker:
             header, page_number = self._extract_metadata(normalized)
             propositions = self._propositionize(normalized)
             token_count = min(self._token_estimate(normalized), self.MAX_TOKENS)
-            content_hash = hashlib.sha256(
-                f"{document_id}:{idx}:{normalized}".encode()
-            ).hexdigest()
+            content_hash = hashlib.sha256(f"{document_id}:{idx}:{normalized}".encode()).hexdigest()
 
             chunks.append(
                 ChunkPayload(
@@ -348,9 +345,7 @@ class IngestionPipeline:
             if not self._settings.skip_view_refresh:
                 await refresh_active_chunks_view(session)
                 if document.access_scope == "base" and document.country_code:
-                    await refresh_base_documents_cache_for_country(
-                        session, document.country_code
-                    )
+                    await refresh_base_documents_cache_for_country(session, document.country_code)
             else:
                 logger.info(
                     "Skipping view refresh (skip_view_refresh=True). "
@@ -417,14 +412,10 @@ class IngestionPipeline:
             None,
             SYSTEM_OWNER_SENTINEL,
         ):
-            raise IngestionError(
-                "Base documents cannot set owner_user_id (except shared sentinel)"
-            )
+            raise IngestionError("Base documents cannot set owner_user_id (except shared sentinel)")
 
         raw_publication_year = (
-            request.metadata.get("publication_year")
-            if isinstance(request.metadata, dict)
-            else None
+            request.metadata.get("publication_year") if isinstance(request.metadata, dict) else None
         )
         metadata, publication_year, provided_year = normalize_metadata_publication_year(
             request.metadata
@@ -510,9 +501,7 @@ class IngestionPipeline:
         import time
 
         t_chunk_start = time.perf_counter()
-        logger.info(
-            "[%s] STEP 2/4: Chunking markdown (%d chars)...", document.id, len(markdown)
-        )
+        logger.info("[%s] STEP 2/4: Chunking markdown (%d chars)...", document.id, len(markdown))
         chunks = self._chunker.chunk(str(document.id), markdown)
         if not chunks:
             raise IngestionError("No chunks produced from markdown")
@@ -573,9 +562,7 @@ class IngestionPipeline:
         owner_id = document.owner_user_id
         country_code = (document.country_code or request.country_code or "UNK").upper()
         base_metadata = self._chunk_metadata(
-            document.metadata_
-            if isinstance(document.metadata_, dict)
-            else request.metadata,
+            document.metadata_ if isinstance(document.metadata_, dict) else request.metadata,
             embedding_meta=embedding_meta,
             chunk_strategy={
                 "method": "markdown_headers_with_overlap",
@@ -645,9 +632,7 @@ class IngestionPipeline:
         remaining = total_chunks % BATCH_SIZE
         if remaining > 0:
             await session.commit()
-            logger.info(
-                "[%s]   ... committed final batch (%d chunks)", document.id, remaining
-            )
+            logger.info("[%s]   ... committed final batch (%d chunks)", document.id, remaining)
 
         t_db_end = time.perf_counter()
         logger.info(

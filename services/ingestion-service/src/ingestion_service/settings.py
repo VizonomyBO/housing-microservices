@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, Sequence
+from typing import Any
 
 from pydantic import AnyUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from shared_data_layer.config import (
-    EMBEDDING_DIMENSION,
     DEFAULT_VOYAGE_EMBEDDING_DIMENSION,
+    EMBEDDING_DIMENSION,
 )
 
 ALLOWED_VOYAGE_OUTPUT_DIMENSIONS: tuple[int, ...] = (256, 512, 1024, 2048)
@@ -28,9 +29,7 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="Async SQLAlchemy database URL")
 
     # Auth/token validation
-    jwt_secret_key: str | None = Field(
-        default=None, description="JWT secret for access tokens"
-    )
+    jwt_secret_key: str | None = Field(default=None, description="JWT secret for access tokens")
     jwt_audience: str | None = Field(
         default=None, alias="AUTH_JWT_AUDIENCE", description="Expected JWT audience"
     )

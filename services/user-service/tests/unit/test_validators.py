@@ -72,7 +72,7 @@ class TestValidators:
         is_valid, msg = validate_name("John")
         assert is_valid is True
 
-        is_valid, msg = validate_name("Mary Jane")
+        is_valid, _msg = validate_name("Mary Jane")
         assert is_valid is True
 
     def test_validate_name_too_short(self):
@@ -99,7 +99,7 @@ class TestValidators:
         is_valid, msg = validate_country_code("USA")
         assert is_valid is True
 
-        is_valid, msg = validate_country_code("GBR")
+        is_valid, _msg = validate_country_code("GBR")
         assert is_valid is True
 
     def test_validate_country_code_invalid_length(self):
@@ -123,7 +123,7 @@ class TestValidators:
     def test_validate_role_valid(self):
         """Test valid roles"""
         for role in ["admin", "public", "government", "staff"]:
-            is_valid, msg = validate_role(role)
+            is_valid, _msg = validate_role(role)
             assert is_valid is True
 
     def test_validate_role_invalid(self):
@@ -135,7 +135,7 @@ class TestValidators:
     def test_validate_status_valid(self):
         """Test valid statuses"""
         for status in ["pending", "active", "inactive", "suspended"]:
-            is_valid, msg = validate_status(status)
+            is_valid, _msg = validate_status(status)
             assert is_valid is True
 
     def test_validate_status_invalid(self):
