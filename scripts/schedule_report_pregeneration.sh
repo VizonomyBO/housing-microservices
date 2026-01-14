@@ -2,6 +2,26 @@
 # ==============================================================================
 # schedule_report_pregeneration.sh
 # ==============================================================================
+# 
+# *** DEPRECATED - DO NOT USE ***
+#
+# This script has been deprecated as of January 2026.
+# 
+# Reports are now cached indefinitely in S3 without month-based expiration.
+# There is no longer a need to pre-generate reports for the next month.
+#
+# To regenerate a report for a specific country, use:
+#   ./scripts/generate_reports_batch.sh --codes "MEX" --skip-cache
+#
+# To regenerate reports for all countries:
+#   ./scripts/generate_reports_batch.sh --all --skip-cache
+#
+# If you have a cron job configured for the 25th of each month, please remove it:
+#   crontab -e  # then remove the line referencing this script
+#
+# ==============================================================================
+# ORIGINAL DESCRIPTION (kept for reference):
+# ------------------------------------------------------------------------------
 # Scheduled job that pre-generates housing reports for the NEXT month.
 # 
 # This script should be run via cron/systemd timer before the end of each month
@@ -38,6 +58,22 @@
 #   AUTH_BASE_URL    Auth service URL for login
 #   SMOKE_USER_EMAIL / SMOKE_USER_PASSWORD  Credentials for API access
 #   PROD_DEMO_EMAIL / PROD_DEMO_PASSWORD    Alternative credential names
+# ==============================================================================
+
+echo "ERROR: This script (schedule_report_pregeneration.sh) has been DEPRECATED."
+echo ""
+echo "Reports are now cached indefinitely without month-based expiration."
+echo "There is no longer a need to pre-generate reports monthly."
+echo ""
+echo "To regenerate reports, use generate_reports_batch.sh with --skip-cache:"
+echo "  ./scripts/generate_reports_batch.sh --codes \"MEX\" --skip-cache"
+echo "  ./scripts/generate_reports_batch.sh --all --skip-cache"
+echo ""
+echo "Please remove any cron jobs that reference this script."
+exit 1
+
+# ============================================================================== 
+# The code below is kept for reference but will never execute
 # ==============================================================================
 
 set -euo pipefail

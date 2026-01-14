@@ -23,8 +23,8 @@ router = APIRouter(prefix="/v1/reports", tags=["reports"])
     description="""
     Generate a PDF housing assessment report for a country.
     
-    Reports are cached in S3 and expire 30 days after generation.
-    Use `skip_cache=true` to force regeneration (the new report will still be cached).
+    Reports are cached in S3 indefinitely (no automatic expiration).
+    Use `skip_cache=true` to force regeneration (the new report will replace the cached one).
     """,
     status_code=200,
     responses={

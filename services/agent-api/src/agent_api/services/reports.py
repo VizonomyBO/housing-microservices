@@ -144,7 +144,10 @@ class ReportService:
                     content=section_def["prompt"],
                     attachments=[],
                 ),
-                hints={"country_code": country_code},
+                hints={
+                    "country_code": country_code,
+                    "retrieval_profile": "country_profile",
+                },
                 constraints={"country_code": country_code},  # type: ignore[arg-type]
                 owner_user_id=user_id,
                 workspace_id=None,

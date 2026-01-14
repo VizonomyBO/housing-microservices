@@ -216,7 +216,9 @@ services:
     environment:
       JOB_SERVICE_PORT: 8090
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # Schedule: day 25, 2:00 AM
+      # Schedule disabled - reports are now cached indefinitely
+      # Set JOB_SCHEDULE_ENABLED=true to re-enable monthly pre-generation
+      JOB_SCHEDULE_ENABLED: ${JOB_SCHEDULE_ENABLED:-false}
       JOB_SCHEDULE_DAY: ${JOB_SCHEDULE_DAY:-25}
       JOB_SCHEDULE_HOUR: ${JOB_SCHEDULE_HOUR:-2}
       JOB_SCHEDULE_MINUTE: ${JOB_SCHEDULE_MINUTE:-0}

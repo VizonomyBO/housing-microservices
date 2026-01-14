@@ -5,17 +5,18 @@
 # Generate housing assessment PDF reports for a list of country codes.
 # Reports are generated sequentially (one at a time) to avoid overwhelming the API.
 #
+# Reports are cached indefinitely in S3. Use --skip-cache to force regeneration.
+#
 # Usage:
 #   ./scripts/generate_reports_batch.sh --codes "MEX,BRA,ARG"
-#   ./scripts/generate_reports_batch.sh --codes "MEX,BRA" --target-month 2026-02
 #   ./scripts/generate_reports_batch.sh --codes "USA" --skip-cache
 #   ./scripts/generate_reports_batch.sh --all --limit 10
+#   ./scripts/generate_reports_batch.sh --all --skip-cache  # regenerate all
 #
 # Options:
 #   --codes          Comma-separated list of ISO-3 country codes
 #   --all            Process all ISO-3 country codes (alternative to --codes)
-#   --target-month   Target month in YYYY-MM format for caching (optional)
-#   --skip-cache     Force regeneration even if cached (optional)
+#   --skip-cache     Force regeneration even if cached (use to update a country's report)
 #   --output-dir     Directory to save downloaded PDFs (optional, default: ./reports)
 #   --env-file       Path to env file (optional, uses scripts/use_env.sh)
 #   --target         Target environment: local|dev|prod (default: local)
@@ -80,7 +81,6 @@ ISO_ALPHA3_CODES=(
 # Defaults
 COUNTRY_CODES=""
 USE_ALL="false"
-TARGET_MONTH=""
 SKIP_CACHE="false"
 OUTPUT_DIR="$ROOT_DIR/reports"
 ENV_FILE=""
@@ -101,7 +101,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --target-month)
-            TARGET_MONTH="$2"
+            # DEPRECATED: target-month is no longer used (reports cached indefinitely)
+            log_warn "--target-month is deprecated and will be ignored. Reports are now cached indefinitely."
             shift 2
             ;;
         --skip-cache)
@@ -211,24 +212,12 @@ generate_report() {
     local output_file
     
     # Build query parameters
-    if [[ -n "$TARGET_MONTH" ]]; then
-        query_params="?target_month=$TARGET_MONTH"
-    fi
     if [[ "$SKIP_CACHE" == "true" ]]; then
-        if [[ -n "$query_params" ]]; then
-            query_params="${query_params}&skip_cache=true"
-        else
-            query_params="?skip_cache=true"
-        fi
+        query_params="?skip_cache=true"
     fi
     
     local url="${AGENT_BASE_URL%/}/v1/reports/housing/${country_code}${query_params}"
-    
-    if [[ -n "$TARGET_MONTH" ]]; then
-        output_file="${OUTPUT_DIR}/${country_code}_Housing_Report_${TARGET_MONTH}.pdf"
-    else
-        output_file="${OUTPUT_DIR}/${country_code}_Housing_Report_$(date +%Y-%m).pdf"
-    fi
+    output_file="${OUTPUT_DIR}/${country_code}_Housing_Report.pdf"
     
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "[DRY-RUN] Would generate: $country_code -> $output_file"
@@ -266,8 +255,7 @@ log_info "=== Housing Report Batch Generator ==="
 log_info "Target: $TARGET"
 log_info "Agent API: $AGENT_BASE_URL"
 log_info "Output directory: $OUTPUT_DIR"
-[[ -n "$TARGET_MONTH" ]] && log_info "Target month: $TARGET_MONTH"
-[[ "$SKIP_CACHE" == "true" ]] && log_info "Skip cache: enabled"
+[[ "$SKIP_CACHE" == "true" ]] && log_info "Skip cache: enabled (forcing regeneration)"
 [[ -n "$LIMIT" ]] && log_info "Limit: $LIMIT"
 [[ -n "$START_FROM" ]] && log_info "Starting from: $START_FROM"
 [[ "$DRY_RUN" == "true" ]] && log_warn "DRY RUN MODE - no reports will be generated"

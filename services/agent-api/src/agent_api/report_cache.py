@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -36,10 +35,13 @@ def _get_cache_key(country_code: str) -> str:
         country_code: ISO-3 country code (e.g., "USA")
 
     Returns:
-        S3 key in format: reports/report_{country_code}_{YYYY-MM}.pdf
+        S3 key in format: reports/report_{country_code}.pdf
+        
+    Note:
+        Reports are cached indefinitely (no month-based expiration).
+        Use skip_cache=true to force regeneration when needed.
     """
-    current_month = datetime.now(UTC).strftime("%Y-%m")
-    return f"reports/report_{country_code}_{current_month}.pdf"
+    return f"reports/report_{country_code}.pdf"
 
 
 def get_cached_report(country_code: str, settings: Settings) -> bytes | None:
