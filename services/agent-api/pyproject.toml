@@ -89,10 +89,18 @@ ignore = [
   "ARG002",
   "ARG003",
   "RUF012",
+  "PLC0415",  # Allow imports inside functions (lazy imports to avoid circular deps)
+  "B008",     # Allow Depends() and File() in FastAPI function defaults
+  "A002",     # Allow shadowing builtins in specific contexts (globals, locals params)
+  "PLR0912",  # Allow many branches in complex validation functions
+  "PLW2901",  # Allow loop variable reassignment
+  "N806",     # Allow uppercase variable names for constants in functions (BATCH_SIZE)
+  "PTH108",   # Allow os.unlink() usage
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003"]
+"tests/**/*" = ["PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003", "RUF059"]
+"**/tests/**/*" = ["PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003", "RUF059"]
 
 [tool.uv.sources]
 shared-data-layer = { path = "../../packages/shared_data_layer", editable = true }

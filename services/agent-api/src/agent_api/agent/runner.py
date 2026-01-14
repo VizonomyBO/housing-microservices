@@ -132,7 +132,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             system_prompt=self._system_prompt,
         )
 
-    async def run_chat(  # noqa: PLR0912
+    async def run_chat(
         self,
         *,
         request: ChatRequestContext,

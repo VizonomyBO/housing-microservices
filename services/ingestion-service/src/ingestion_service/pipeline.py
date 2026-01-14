@@ -6,10 +6,11 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any
 from uuid import UUID, uuid4
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -31,8 +32,8 @@ from ingestion_service.embeddings import (
     VoyageEmbeddingClient,
     VoyageEmbeddingClientProtocol,
 )
-from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 from ingestion_service.schemas import UploadInitRequest
+from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 
 logger = logging.getLogger(__name__)
 

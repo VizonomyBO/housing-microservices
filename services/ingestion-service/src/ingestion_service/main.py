@@ -19,6 +19,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import HttpUrl
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
+from shared_data_layer.repositories.documents import DocumentRepository
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -26,9 +28,9 @@ from ingestion_service.pipeline import IngestionError, IngestionPipeline
 from ingestion_service.s3 import download_pdf_from_s3, upload_pdf_to_s3
 from ingestion_service.schemas import (
     UploadCompleteResponse,
+    UploadInfo,
     UploadInitRequest,
     UploadInitResponse,
-    UploadInfo,
 )
 from ingestion_service.settings import (
     ALLOWED_VOYAGE_OUTPUT_DIMENSIONS,
@@ -36,8 +38,6 @@ from ingestion_service.settings import (
     get_settings,
 )
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
-from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
-from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -463,8 +463,8 @@ async def download_document_by_name(
 
     # Find document by canonical_name
     # ALL documents are accessible to any authenticated user (no access restrictions)
-    from sqlalchemy import select
     from shared_data_layer.db.models.documents import Document
+    from sqlalchemy import select
 
     # Search for ALL documents with matching canonical_name
     stmt = select(Document).where(Document.canonical_name == canonical_name)

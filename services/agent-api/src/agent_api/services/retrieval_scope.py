@@ -209,7 +209,7 @@ class ConversationScopeRepository:
             chunk_counts[doc_id] = chunk_counts.get(doc_id, 0) + 1
         return previews
 
-    async def hybrid_chunk_search(  # noqa: PLR0912
+    async def hybrid_chunk_search(
         self,
         *,
         query: str,

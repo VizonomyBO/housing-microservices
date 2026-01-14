@@ -21,6 +21,8 @@ ignore = [
     "N818",  # Exception name should end with Error (legacy naming)
     "PLW1508",  # Invalid type for env var default (acceptable pattern)
     "PLW0603",  # Global statement for database initialization (acceptable pattern)
+    "PLC0415",  # Allow imports inside functions (lazy imports to avoid circular deps)
+    "RUF059",  # Allow unused unpacking in tests (common pattern)
 ]
 
 [tool.ruff.format]
