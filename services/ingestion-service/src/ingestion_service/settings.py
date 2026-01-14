@@ -28,9 +28,7 @@ class Settings(BaseSettings):
     database_url: str = Field(..., description="Async SQLAlchemy database URL")
 
     # Auth/token validation
-    jwt_secret_key: str | None = Field(
-        default=None, description="JWT secret for access tokens"
-    )
+    jwt_secret_key: str | None = Field(default=None, description="JWT secret for access tokens")
     jwt_audience: str | None = Field(
         default=None, alias="AUTH_JWT_AUDIENCE", description="Expected JWT audience"
     )

@@ -8,18 +8,14 @@ from typing import Any
 
 
 def _canonicalize(payload: dict[str, Any]) -> str:
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def sign_payload(payload: dict[str, Any], secret: str) -> str:
     """Create an HMAC-SHA256 signature for the given payload."""
 
     data = _canonicalize(payload)
-    digest = hmac.new(
-        secret.encode("utf-8"), data.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    digest = hmac.new(secret.encode("utf-8"), data.encode("utf-8"), hashlib.sha256).hexdigest()
     return digest
 
 

@@ -39,9 +39,7 @@ class UploadInitRequest(BaseModel):
     def validate_access_scope(cls, value: str) -> str:
         allowed = {"user_private", "user_shared", "base"}
         if value not in allowed:
-            raise ValueError(
-                f"Invalid access_scope '{value}', expected one of {sorted(allowed)}"
-            )
+            raise ValueError(f"Invalid access_scope '{value}', expected one of {sorted(allowed)}")
         return value
 
     @field_validator("output_dimension")
@@ -50,9 +48,7 @@ class UploadInitRequest(BaseModel):
         if value is None:
             return value
         if value not in ALLOWED_VOYAGE_OUTPUT_DIMENSIONS:
-            raise ValueError(
-                f"output_dimension must be one of {ALLOWED_VOYAGE_OUTPUT_DIMENSIONS}"
-            )
+            raise ValueError(f"output_dimension must be one of {ALLOWED_VOYAGE_OUTPUT_DIMENSIONS}")
         return value
 
     @field_validator("country_code")
