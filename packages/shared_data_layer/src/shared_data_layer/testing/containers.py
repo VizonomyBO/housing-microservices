@@ -23,7 +23,8 @@ class PostgresContainerWithVector(PostgresContainer):
             [
                 "sh",
                 "-c",
-                f"PGPASSWORD='{escaped_password}' psql --username {self.username} --dbname {self.dbname} --host 127.0.0.1 -c 'select version();'",
+                f"PGPASSWORD='{escaped_password}' psql --username {self.username} "
+                f"--dbname {self.dbname} --host 127.0.0.1 -c 'select version();'",
             ]
         ).wait_until_ready(self)
 

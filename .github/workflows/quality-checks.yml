@@ -1,0 +1,234 @@
+name: Quality Checks
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+
+jobs:
+  # Detect which services have changes
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      agent-api: ${{ steps.filter.outputs.agent-api }}
+      auth-service: ${{ steps.filter.outputs.auth-service }}
+      ingestion-service: ${{ steps.filter.outputs.ingestion-service }}
+      job-service: ${{ steps.filter.outputs.job-service }}
+      user-service: ${{ steps.filter.outputs.user-service }}
+      shared-data-layer: ${{ steps.filter.outputs.shared-data-layer }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            agent-api:
+              - 'services/agent-api/**'
+            auth-service:
+              - 'services/auth-service/**'
+            ingestion-service:
+              - 'services/ingestion-service/**'
+            job-service:
+              - 'services/job-service/**'
+            user-service:
+              - 'services/user-service/**'
+            shared-data-layer:
+              - 'packages/shared_data_layer/**'
+
+  # Agent API: Lint, Format, Type Check & Test
+  check-agent-api:
+    name: Agent API Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.agent-api == 'true' || needs.detect-changes.outputs.shared-data-layer == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: services/agent-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Ruff linter
+        run: uv run ruff check .
+      - name: Type Check
+        run: uv run ty check src
+      - name: Run Tests
+        run: uv run pytest tests --ignore=tests/evals -n auto
+
+  # Ingestion Service: Lint, Format, Type Check & Test
+  check-ingestion-service:
+    name: Ingestion Service Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ingestion-service == 'true' || needs.detect-changes.outputs.shared-data-layer == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: services/ingestion-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Ruff linter
+        run: uv run ruff check .
+      - name: Type Check
+        run: uv run ty check src
+      - name: Run Tests
+        run: uv run pytest tests -n auto
+
+  # Job Service: Lint, Format, Type Check & Test
+  check-job-service:
+    name: Job Service Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.job-service == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: services/job-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Ruff linter
+        run: uv run ruff check .
+      - name: Type Check
+        run: uv run ty check src
+      - name: Run Tests
+        run: uv run pytest tests -n auto
+
+  # Shared Data Layer: Lint, Format, Type Check & Test
+  check-shared-data-layer:
+    name: Shared Data Layer Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.shared-data-layer == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: packages/shared_data_layer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Ruff linter
+        run: uv run ruff check .
+      - name: Type Check
+        run: uv run ty check src
+      - name: Run Tests
+        run: uv run pytest tests -n auto
+
+  # Auth Service: Lint, Format & Tests (uses pip, not uv)
+  check-auth-service:
+    name: Auth Service Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.auth-service == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    defaults:
+      run:
+        working-directory: services/auth-service
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-xdist mypy types-python-dateutil types-requests factory-boy ruff pytest-cov freezegun
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Ruff linter
+        run: ruff check .
+      - name: Run Tests
+        run: pytest tests -n auto
+
+  # User Service: Lint, Format & Tests (uses pip, not uv)
+  check-user-service:
+    name: User Service Checks
+    needs: detect-changes
+    if: needs.detect-changes.outputs.user-service == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    defaults:
+      run:
+        working-directory: services/user-service
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-xdist ruff pytest-cov
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Ruff linter
+        run: ruff check .
+      - name: Run Tests
+        run: pytest tests -n auto

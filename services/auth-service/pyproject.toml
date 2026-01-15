@@ -25,6 +25,7 @@ ignore = [
     "RUF015",  # Prefer next() over slice (minor style preference)
     "B017",  # pytest.raises(Exception) (acceptable in tests)
     "PT011",  # pytest.raises too broad (acceptable in tests)
+    "PLC0415",  # Allow imports inside functions (lazy imports to avoid circular deps)
 ]
 
 [tool.ruff.format]

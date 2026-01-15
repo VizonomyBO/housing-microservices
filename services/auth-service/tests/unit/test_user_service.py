@@ -107,7 +107,7 @@ class TestCreateUser:
 
     def test_create_user_normalizes_email(self, db_session):
         """Test that email is normalized"""
-        user, error = UserService.create_user(
+        user, _error = UserService.create_user(
             db_session, email="TEST@EXAMPLE.COM", username="testuser", password="TestPass123!"
         )
 

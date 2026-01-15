@@ -109,4 +109,4 @@ def test_cap_answer_length_prefers_sentence_breaks_and_preserves_citations():
     trimmed = _cap_answer_length(content, limit)
     assert len(trimmed) <= limit
     assert "[c2" not in trimmed
-    assert trimmed.endswith("]") or trimmed.endswith(".")
+    assert trimmed.endswith(("]", "."))

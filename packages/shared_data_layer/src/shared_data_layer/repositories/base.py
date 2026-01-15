@@ -16,7 +16,7 @@ class BaseRepository(Generic[ModelType]):
 
     async def get(self, id: UUID) -> Optional[ModelType]:
         result = await self.session.execute(
-            select(self.model).where(self.model.id == id)
+            select(self.model).where(self.model.id == id)  # type: ignore[attr-defined]
         )
         return result.scalar_one_or_none()
 

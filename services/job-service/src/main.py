@@ -1,6 +1,5 @@
 """Entry point for the job service."""
 
-
 import uvicorn
 
 from job_service.main import app

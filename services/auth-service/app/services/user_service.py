@@ -1,7 +1,7 @@
 """User management service layer."""
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -123,7 +123,7 @@ class UserService:
         try:
             # Update via query to ensure it works across sessions
             session.query(User).filter_by(user_id=user.user_id).update(
-                {"last_login": datetime.utcnow()}
+                {"last_login": datetime.now(UTC)}
             )
             session.commit()
         except Exception:

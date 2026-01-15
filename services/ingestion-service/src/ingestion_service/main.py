@@ -19,6 +19,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import HttpUrl
+from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
+from shared_data_layer.repositories.documents import DocumentRepository
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -26,9 +28,9 @@ from ingestion_service.pipeline import IngestionError, IngestionPipeline
 from ingestion_service.s3 import download_pdf_from_s3, upload_pdf_to_s3
 from ingestion_service.schemas import (
     UploadCompleteResponse,
+    UploadInfo,
     UploadInitRequest,
     UploadInitResponse,
-    UploadInfo,
 )
 from ingestion_service.settings import (
     ALLOWED_VOYAGE_OUTPUT_DIMENSIONS,
@@ -36,8 +38,6 @@ from ingestion_service.settings import (
     get_settings,
 )
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
-from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
-from shared_data_layer.repositories.documents import DocumentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -252,14 +252,10 @@ async def complete_upload(
         raise HTTPException(status_code=400, detail="Invalid identifiers") from exc
 
     if source_type not in settings.allowed_source_types:
-        raise HTTPException(
-            status_code=400, detail=f"Unsupported source_type '{source_type}'"
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported source_type '{source_type}'")
     owner_uuid = _parse_owner(owner_user_id)
     if access_scope != "base" and owner_uuid is None:
-        raise HTTPException(
-            status_code=400, detail="owner_user_id required for non-base uploads"
-        )
+        raise HTTPException(status_code=400, detail="owner_user_id required for non-base uploads")
 
     tags_list = _parse_json_field(tags, [])
     metadata_obj = _parse_json_field(metadata, {})
@@ -269,9 +265,7 @@ async def complete_upload(
         declared_size = 0
     try:
         resolved_dimension = (
-            int(output_dimension)
-            if output_dimension
-            else settings.voyage_output_dimension
+            int(output_dimension) if output_dimension else settings.voyage_output_dimension
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid output_dimension") from exc
@@ -305,9 +299,7 @@ async def complete_upload(
         raise HTTPException(status_code=400, detail="File is empty")
     actual_size = len(body)
     if declared_size and actual_size > declared_size + 1024:
-        raise HTTPException(
-            status_code=400, detail="Uploaded file exceeds declared size"
-        )
+        raise HTTPException(status_code=400, detail="Uploaded file exceeds declared size")
     if actual_size > settings.max_file_size_bytes:
         raise HTTPException(status_code=413, detail="File exceeds max_file_size_bytes")
     payload.file_size_bytes = actual_size
@@ -325,9 +317,7 @@ async def complete_upload(
             logger.info("PDF uploaded to S3: %s", s3_uri)
         except Exception as exc:
             # Log error but don't fail the upload - ingestion can proceed without S3
-            logger.warning(
-                "Failed to upload PDF to S3 (continuing with ingestion): %s", exc
-            )
+            logger.warning("Failed to upload PDF to S3 (continuing with ingestion): %s", exc)
 
     try:
         pipeline: IngestionPipeline = request.app.state.pipeline
@@ -347,18 +337,14 @@ async def complete_upload(
     except Exception as exc:  # pragma: no cover - defensive
         await db.rollback()
         logger.exception("Unexpected failure")
-        raise HTTPException(
-            status_code=500, detail="Unexpected ingestion failure"
-        ) from exc
+        raise HTTPException(status_code=500, detail="Unexpected ingestion failure") from exc
 
     return UploadCompleteResponse(
         document_id=document.id,
         ingestion_id=job.id,
         status=document.status,
         content_hash=document.content_hash,
-        message="Ingestion completed"
-        if document.status == "active"
-        else "Ingestion failed",
+        message="Ingestion completed" if document.status == "active" else "Ingestion failed",
     )
 
 
@@ -389,9 +375,7 @@ async def download_document(
 
     # Check if S3 bucket is configured
     if not settings.s3_housing_pdf_bucket:
-        raise HTTPException(
-            status_code=500, detail="S3 housing PDF bucket is not configured"
-        )
+        raise HTTPException(status_code=500, detail="S3 housing PDF bucket is not configured")
 
     # Get document from database
     doc_repo = DocumentRepository(db)
@@ -446,17 +430,11 @@ async def download_document(
     except RuntimeError as exc:
         error_msg = str(exc)
         if "not found" in error_msg.lower():
-            raise HTTPException(
-                status_code=404, detail="PDF file not found in S3"
-            ) from exc
-        raise HTTPException(
-            status_code=500, detail=f"Failed to download PDF: {error_msg}"
-        ) from exc
+            raise HTTPException(status_code=404, detail="PDF file not found in S3") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to download PDF: {error_msg}") from exc
     except Exception as exc:
         logger.exception("Unexpected error during PDF download")
-        raise HTTPException(
-            status_code=500, detail="Unexpected error during download"
-        ) from exc
+        raise HTTPException(status_code=500, detail="Unexpected error during download") from exc
 
 
 @app.get(
@@ -481,14 +459,12 @@ async def download_document_by_name(
 
     # Check if S3 bucket is configured
     if not settings.s3_housing_pdf_bucket:
-        raise HTTPException(
-            status_code=500, detail="S3 housing PDF bucket is not configured"
-        )
+        raise HTTPException(status_code=500, detail="S3 housing PDF bucket is not configured")
 
     # Find document by canonical_name
     # ALL documents are accessible to any authenticated user (no access restrictions)
-    from sqlalchemy import select
     from shared_data_layer.db.models.documents import Document
+    from sqlalchemy import select
 
     # Search for ALL documents with matching canonical_name
     stmt = select(Document).where(Document.canonical_name == canonical_name)

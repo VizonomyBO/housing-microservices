@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -77,7 +78,7 @@ class ReportService:
         self._doc_repo = DocumentRepository(db_session)
         self._convo_service = ConversationService(db_session)
 
-    async def generate_housing_report(  # noqa: PLR0912
+    async def generate_housing_report(
         self,
         country_code: str,
         user_id: str,
@@ -169,21 +170,20 @@ class ReportService:
                 markdown_content = result.done_payload.get("answer", "")
                 citations = result.done_payload.get("citations", [])
 
+                # Remove citation markers [c1][c2][cx] from the text
+                markdown_content = re.sub(r'\[c\d+\]', '', markdown_content)
+
                 # Collect citations grouped by document
                 # Format: {"doc_id", "chunk_id", "canonical_name", "page_number", "position", "text", "score"}
                 # Citations are numbered [c1]-[c8] per retrieval
-                for idx, citation in enumerate(citations, start=1):
+                for citation in citations:
                     doc_name = citation.get("canonical_name") or citation.get("doc_id", "Unknown")
 
-                    # Group citation numbers by document name
+                    # Just track unique document names (no citation numbers needed)
                     if doc_name not in all_citations:
                         all_citations[doc_name] = {
                             "document_name": doc_name,
-                            "citation_numbers": [],
                         }
-                    # Add citation number if not already present
-                    if idx not in all_citations[doc_name]["citation_numbers"]:
-                        all_citations[doc_name]["citation_numbers"].append(idx)
 
                 # Convert Markdown to HTML
                 html_content = markdown.markdown(markdown_content)
@@ -195,20 +195,16 @@ class ReportService:
                 sections_data.append(
                     {
                         "title": section_def["title"],
-                        "content": f"<p>Error generating content: {e!s}</p>",
+                        "content": f"<p>The report is unable to develop an analysis for this section.</p>",
                     }
                 )
 
-        # 5. Build References section - group citations by document
+        # 5. Build References section - only document names
         references = []
-        for _doc_name, citation_info in all_citations.items():
-            # Format citation numbers like [c1][c2][c4]
-            citation_nums = sorted(citation_info["citation_numbers"])
-            citations_str = "".join(f"[c{n}]" for n in citation_nums)
+        for doc_name in all_citations.keys():
             references.append(
                 {
-                    "citations": citations_str,
-                    "document_name": citation_info["document_name"],
+                    "document_name": doc_name,
                 }
             )
 

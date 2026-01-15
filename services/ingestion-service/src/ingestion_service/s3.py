@@ -157,16 +157,12 @@ def download_pdf_from_s3(
                 bucket_name,
                 s3_key,
             )
-            raise RuntimeError(
-                f"S3 download failed: {error_code} - {error_message}"
-            ) from exc
+            raise RuntimeError(f"S3 download failed: {error_code} - {error_message}") from exc
 
     # If all variations failed, try listing objects with the document_id prefix
     try:
         prefix = f"{document_id}/"
-        response = s3_client.list_objects_v2(
-            Bucket=bucket_name, Prefix=prefix, MaxKeys=1
-        )
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=1)
 
         if "Contents" in response and len(response["Contents"]) > 0:
             # Use the first object found
