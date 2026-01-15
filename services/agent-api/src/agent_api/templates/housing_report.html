@@ -216,11 +216,6 @@
             line-height: 1.4;
         }
 
-        .reference-id {
-            font-weight: bold;
-            color: #0071bc;
-        }
-
         @media print {
             body {
                 -webkit-print-color-adjust: exact;
@@ -270,7 +265,7 @@
         <div class="references-title">References</div>
         {% for ref in references %}
         <div class="reference-item">
-            <span class="reference-id">[c{{ loop.index }}]</span> {{ ref.document_name }}
+            {{ ref.document_name }}
         </div>
         {% endfor %}
     </div>
