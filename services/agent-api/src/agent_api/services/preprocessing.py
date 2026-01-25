@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TypedDict
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from shared_data_layer.db.models import Document
@@ -22,14 +22,32 @@ from agent_api.services.conversations import ConversationService
 
 logger = logging.getLogger(__name__)
 
-# Priority countries for preprocessing (limited set)
-PRIORITY_COUNTRIES = {
-    "MEX",  # Mexico
-    "BRA",  # Brazil
-    "IDN",  # Indonesia
-    "GHA",  # Ghana
-    "KEN",  # Kenya
-    "VNM",  # Vietnam
+# Allowed countries for preprocessing (from frontend country list)
+ALLOWED_COUNTRIES = {
+    "AFG", "ALB", "DZA", "ASM", "AND", "AGO", "AIA", "ATA", "ATG", "ARG",
+    "ARM", "ABW", "AUS", "AUT", "AZE", "BHS", "BHR", "BGD", "BRB", "BLR",
+    "BEL", "BLZ", "BEN", "BMU", "BTN", "BOL", "BIH", "BWA", "BVT", "BRA",
+    "IOT", "BRN", "BGR", "BFA", "BDI", "KHM", "CMR", "CAN", "CPV", "CYM",
+    "CAF", "TCD", "CHL", "CHN", "CXR", "CCK", "COL", "COM", "COG", "COD",
+    "COK", "CRI", "CIV", "HRV", "CUB", "CYP", "CZE", "DNK", "DJI", "DMA",
+    "DOM", "ECU", "EGY", "SLV", "GNQ", "ERI", "EST", "ETH", "FLK", "FRO",
+    "FJI", "FIN", "FRA", "GUF", "PYF", "ATF", "GAB", "GMB", "GEO", "DEU",
+    "GHA", "GIB", "GRC", "GRL", "GRD", "GLP", "GUM", "GTM", "GIN", "GNB",
+    "GUY", "HTI", "HMD", "VAT", "HND", "HKG", "HUN", "ISL", "IND", "IDN",
+    "IRN", "IRQ", "IRL", "ISR", "ITA", "JAM", "JPN", "JOR", "KAZ", "KEN",
+    "KIR", "PRK", "KOR", "KWT", "KGZ", "LAO", "LVA", "LBN", "LSO", "LBR",
+    "LBY", "LIE", "LTU", "LUX", "MAC", "MKD", "MDG", "MWI", "MYS", "MDV",
+    "MLI", "MLT", "MHL", "MTQ", "MRT", "MUS", "MYT", "MEX", "FSM", "MDA",
+    "MCO", "MNG", "MNE", "MSR", "MAR", "MOZ", "MMR", "NAM", "NRU", "NPL",
+    "NLD", "NCL", "NZL", "NIC", "NER", "NGA", "NIU", "NFK", "MNP", "NOR",
+    "OMN", "PAK", "PLW", "PSE", "PAN", "PNG", "PRY", "PER", "PHL", "PCN",
+    "POL", "PRT", "PRI", "QAT", "REU", "ROU", "RUS", "RWA", "SHN", "KNA",
+    "LCA", "SPM", "VCT", "WSM", "SMR", "STP", "SAU", "SEN", "SRB", "SYC",
+    "SLE", "SGP", "SVK", "SVN", "SLB", "SOM", "ZAF", "SGS", "ESP", "LKA",
+    "SDN", "SUR", "SJM", "SWZ", "SWE", "CHE", "SYR", "TWN", "TJK", "TZA",
+    "THA", "TLS", "TGO", "TKL", "TON", "TTO", "TUN", "TUR", "TKM", "TCA",
+    "TUV", "UGA", "UKR", "ARE", "GBR", "USA", "UMI", "URY", "UZB", "VUT",
+    "VEN", "VNM", "VGB", "VIR", "WLF", "ESH", "YEM", "ZMB", "ZWE",
 }
 
 # Pillar Questions - 47 total questions across 5 pillars
@@ -147,7 +165,8 @@ async def preprocess_cache_for_country(
         "errors": 0,
     }
 
-    logger.info(f"Starting cache preprocessing for country: {country_code}")
+    logger.info(f"[{country_code}] Starting cache preprocessing")
+    print(f"[{country_code}] Starting cache preprocessing...")
 
     # Create a temporary conversation for this country and attach documents
     conversation = await convo_service.ensure_conversation(
@@ -161,8 +180,12 @@ async def preprocess_cache_for_country(
     # Get and attach all documents for this country
     documents = await doc_repo.list_documents_for_country(country_code)
     if not documents:
-        logger.warning(f"[{country_code}] No documents found, skipping preprocessing")
+        logger.warning(f"[{country_code}] No documents found (including regional/global), skipping preprocessing")
+        print(f"[{country_code}] WARNING: No documents found, skipping")
         return stats
+    
+    print(f"[{country_code}] Found {len(documents)} documents (country/regional/global)")
+    logger.info(f"[{country_code}] Found {len(documents)} documents to attach")
 
     for doc in documents:
         try:
@@ -175,8 +198,35 @@ async def preprocess_cache_for_country(
         except Exception as e:
             logger.warning(f"[{country_code}] Failed to attach doc {doc.id}: {e}")
 
-    for _pillar_name, questions in PILLAR_QUESTIONS.items():
+    total_questions = sum(len(questions) for questions in PILLAR_QUESTIONS.values())
+    question_num = 0
+    use_no_data_placeholder = False  # Flag to use "No data available" for all remaining questions
+    first_question_attempted = False  # Track if we've attempted the first question
+    
+    # Helper function to create "No data available for this country" response
+    def create_no_data_response(thread_id: str, request_id: str) -> dict[str, Any]:
+        """Create a standardized 'No data available for this country' response."""
+        return {
+            "thread_id": thread_id,
+            "request_id": request_id,
+            "done": {
+                "status": "COMPLETED",
+                "answer": "No data available for this country",
+                "thread_id": thread_id,
+                "route": "react",
+                "citations": [],
+                "requires_sql": False,
+                "tool_calls": [],
+            },
+            "messages": [{"role": "assistant", "content": "No data available for this country"}],
+        }
+    
+    for pillar_name, questions in PILLAR_QUESTIONS.items():
+        print(f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)")
+        logger.info(f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)")
+        
         for question in questions:
+            question_num += 1
             stats["total_questions"] += 1
 
             try:
@@ -184,11 +234,26 @@ async def preprocess_cache_for_country(
                 cached = await cache_service.get_cached_response(country_code, question)
                 if cached:
                     stats["cache_hits"] += 1
-                    logger.debug(f"[{country_code}] Cache hit for: {question[:50]}...")
+                    first_question_attempted = True  # Cache hit counts as successful attempt
+                    if question_num % 10 == 0:  # Log every 10th cache hit
+                        print(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
+                    logger.debug(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
+                    continue
+
+                # If we're using placeholder, store "No data available for this country" for all remaining questions
+                if use_no_data_placeholder:
+                    thread_id = str(uuid4())
+                    request_id = f"preprocess-{country_code}-{stats['total_questions']}"
+                    no_data_response = create_no_data_response(thread_id, request_id)
+                    await cache_service.store_response(country_code, question, no_data_response)
+                    stats["cache_generated"] += 1
+                    print(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
+                    logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
                     continue
 
                 # Generate response
-                logger.info(f"[{country_code}] Generating response for: {question[:60]}...")
+                print(f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}...")
+                logger.info(f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}...")
 
                 # Create a minimal auth context (system/internal)
                 auth = AuthContext(
@@ -214,7 +279,7 @@ async def preprocess_cache_for_country(
                     session_id=None,
                     allow_stateless=False,
                     message=ChatMessagePayload(content=question),
-                    hints={},
+                    hints={"retrieval_profile": "country_profile"},
                     constraints=ChatConstraints(country_code=country_code),
                     owner_user_id="00000000-0000-0000-0000-000000000000",
                     workspace_id=None,
@@ -230,7 +295,7 @@ async def preprocess_cache_for_country(
                         request_context=request_context,
                         sse_emitter=None,
                         prompt_overrides={},
-                        hints={},
+                        hints={"retrieval_profile": "country_profile"},
                         response_mode=ResponseMode.BLOCKING,
                         db_session=db_session,
                     )
@@ -245,13 +310,48 @@ async def preprocess_cache_for_country(
                         }
                         await cache_service.store_response(country_code, question, response_data)
                         stats["cache_generated"] += 1
-                        logger.info(f"[{country_code}] ✓ Cached response for: {question[:60]}...")
+                        first_question_attempted = True  # Successful generation
+                        print(f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}...")
+                        logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}...")
                 except Exception as inner_exc:
-                    # Expected errors like "no documents attached" - skip
-                    logger.warning(
-                        f"[{country_code}] Skipping question (likely no docs attached): {str(inner_exc)[:100]}"
-                    )
-                    stats["errors"] += 1
+                    error_msg = str(inner_exc)
+                    # Check if this is a "no documents" error
+                    no_docs_errors = [
+                        "Retrieval returned no eligible documents after applying filters",
+                        "NO_RESULTS",
+                        "ATTACHMENTS_REQUIRED",
+                        "DOCUMENTS_INACTIVE",
+                        "Unable to produce cited answer; retrieval did not yield citations",
+                    ]
+                    is_no_docs_error = any(err in error_msg for err in no_docs_errors)
+                    
+                    # If first question fails with no docs error, use "No data available for this country" for all remaining
+                    if is_no_docs_error and not first_question_attempted:
+                        use_no_data_placeholder = True
+                        logger.warning(
+                            f"[{country_code}] First question failed with no documents error. "
+                            f"Will use 'No data available for this country' for all remaining questions. Error: {error_msg[:100]}"
+                        )
+                        print(
+                            f"[{country_code}] WARNING: No eligible documents found. "
+                            f"Using 'No data available for this country' for all questions for {country_code}."
+                        )
+                        # Store "No data available for this country" for this question
+                        no_data_response = create_no_data_response(
+                            chat_request.thread_id, request_context.request_id
+                        )
+                        await cache_service.store_response(country_code, question, no_data_response)
+                        stats["cache_generated"] += 1
+                        first_question_attempted = True
+                        print(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
+                        logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
+                    else:
+                        # Expected errors like "no documents attached" - skip this question only
+                        logger.warning(
+                            f"[{country_code}] Skipping question (likely no docs attached): {error_msg[:100]}"
+                        )
+                        stats["errors"] += 1
+                        first_question_attempted = True  # Mark that we've attempted a question
 
             except Exception as exc:
                 logger.error(
@@ -259,20 +359,37 @@ async def preprocess_cache_for_country(
                     exc_info=exc,
                 )
                 stats["errors"] += 1
+                first_question_attempted = True  # Mark attempt even on error
 
-    logger.info(
-        f"[{country_code}] Preprocessing complete: "
-        f"{stats['cache_generated']} generated, "
-        f"{stats['cache_hits']} hits, "
-        f"{stats['errors']} errors"
-    )
+    if use_no_data_placeholder:
+        completion_msg = (
+            f"[{country_code}] Preprocessing complete (no eligible documents - used 'No data available for this country'): "
+            f"{stats['cache_generated']} generated, "
+            f"{stats['cache_hits']} hits, "
+            f"{stats['errors']} errors "
+            f"(total: {stats['total_questions']} questions)"
+        )
+    else:
+        completion_msg = (
+            f"[{country_code}] Preprocessing complete: "
+            f"{stats['cache_generated']} generated, "
+            f"{stats['cache_hits']} hits, "
+            f"{stats['errors']} errors "
+            f"(total: {stats['total_questions']} questions)"
+        )
+    print(completion_msg)
+    logger.info(completion_msg)
 
     return stats
 
 
 async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
     """
-    Run cache preprocessing for all countries with documents.
+    Run cache preprocessing for all countries in the allowed list.
+
+    Processes all pillar questions for each country in ALLOWED_COUNTRIES.
+    For countries without direct documents, uses regional and global documents
+    (via list_documents_for_country() which automatically includes regional/GLO docs).
 
     Args:
         runner: Chat runner instance
@@ -285,29 +402,14 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
     logger.info("=" * 80)
 
     try:
-        print("Fetching countries with documents...")
-        # Get countries with documents
-        countries = await get_countries_with_documents()
-        print(f"Found {len(countries)} countries with active documents: {countries}")
-        logger.info(f"Found {len(countries)} countries with active documents: {countries}")
-
-        if not countries:
-            logger.info("No countries with documents found. Skipping preprocessing.")
-            return
-
-        # Filter to priority countries only
-        countries = [c for c in countries if c in PRIORITY_COUNTRIES]
-        print(f"Filtered to priority countries: {countries}")
-        if not countries:
-            print(f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}")
-            logger.info(
-                f"No priority countries with documents found. Priority: {PRIORITY_COUNTRIES}"
-            )
-            return
-
-        print(f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}")
+        # Process all countries from the allowed list
+        # list_documents_for_country() will automatically include regional and global documents
+        countries = sorted(ALLOWED_COUNTRIES)
+        print(f"Processing {len(countries)} countries from allowed list")
+        print(f"Countries: {', '.join(countries[:20])}... (showing first 20)")
+        logger.info(f"Processing {len(countries)} countries from allowed list")
         logger.info(
-            f"Processing {len(countries)} priority countries: {', '.join(sorted(countries))}"
+            f"Countries: {', '.join(countries[:20])}... (showing first 20 of {len(countries)})"
         )
 
         total_stats = {
@@ -319,15 +421,42 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         }
 
         # Process each country
-        for country_code in countries:
+        for idx, country_code in enumerate(countries, 1):
+            country_progress = f"[{idx}/{len(countries)}]"
+            print("=" * 80)
+            print(f"{country_progress} Processing country: {country_code}")
+            print("=" * 80)
+            logger.info("=" * 80)
+            logger.info(f"{country_progress} Processing country: {country_code}")
+            logger.info("=" * 80)
+            
             async with DatabaseSessionManager.session() as session:
                 stats = await preprocess_cache_for_country(country_code, runner, session)
                 total_stats["total_questions"] += stats["total_questions"]
                 total_stats["total_generated"] += stats["cache_generated"]
                 total_stats["total_hits"] += stats["cache_hits"]
                 total_stats["total_errors"] += stats["errors"]
+                
+                # Log country completion with progress
+                progress_pct = (idx / len(countries)) * 100
+                print(f"{country_progress} {country_code} completed: {stats['cache_generated']} generated, {stats['cache_hits']} hits, {stats['errors']} errors")
+                print(f"Overall progress: {idx}/{len(countries)} countries ({progress_pct:.1f}%)")
+                logger.info(
+                    f"{country_progress} {country_code} completed: "
+                    f"{stats['cache_generated']} generated, {stats['cache_hits']} hits, {stats['errors']} errors"
+                )
+                logger.info(f"Overall progress: {idx}/{len(countries)} countries ({progress_pct:.1f}%)")
 
         # Final summary
+        print("=" * 80)
+        print("CACHE PREPROCESSING COMPLETED!")
+        print("=" * 80)
+        print(f"Countries processed: {total_stats['total_countries']}")
+        print(f"Total questions: {total_stats['total_questions']}")
+        print(f"Generated: {total_stats['total_generated']}")
+        print(f"Cache hits: {total_stats['total_hits']}")
+        print(f"Errors: {total_stats['total_errors']}")
+        print("=" * 80)
         logger.info("=" * 80)
         logger.info("Cache preprocessing completed!")
         logger.info(f"Countries processed: {total_stats['total_countries']}")
@@ -342,4 +471,4 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         logger.exception("Error during cache preprocessing", exc_info=exc)
 
 
-__all__ = ["PILLAR_QUESTIONS", "PRIORITY_COUNTRIES", "run_preprocessing"]
+__all__ = ["PILLAR_QUESTIONS", "ALLOWED_COUNTRIES", "run_preprocessing"]
