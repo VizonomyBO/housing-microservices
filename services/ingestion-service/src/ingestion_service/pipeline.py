@@ -4,9 +4,7 @@ import builtins
 import gc
 import hashlib
 import logging
-import os
 import re
-import tempfile
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -196,11 +194,8 @@ class MarkdownChunker:
 class MarkdownConverter:
     """Wraps MarkItDown with a conversion convenience helper.
 
-    Creates a fresh MarkItDown instance per conversion to prevent memory leaks
-    from PDFMiner internal caches (page layouts, fonts, CMap data) accumulating
-    across multiple PDF conversions.
-
-    Uses an isolated temp directory per conversion for the input file.
+    Uses markitdown 0.1.0+ stream-based API which doesn't create temp files.
+    Creates a fresh MarkItDown instance per conversion to prevent memory leaks.
     """
 
     def __init__(self) -> None:
@@ -211,21 +206,19 @@ class MarkdownConverter:
         ) = _load_markitdown()
 
     def convert(self, *, data: bytes, suffix: str) -> tuple[str, dict[str, Any]]:
-        with tempfile.TemporaryDirectory(prefix="markitdown_") as temp_dir:
-            converter = self._MarkItDown()
-            input_path = os.path.join(temp_dir, f"input.{suffix}")
-            with open(input_path, "wb") as f:
-                f.write(data)
+        import io
 
-            try:
-                result = converter.convert(input_path)
-            except (
-                self._UnsupportedFormatException,
-                self._FileConversionException,
-            ) as exc:
-                raise IngestionError(f"Conversion failed: {exc}") from exc
-            finally:
-                del converter
+        converter = self._MarkItDown()
+        try:
+            stream = io.BytesIO(data)
+            result = converter.convert_stream(stream, file_extension=f".{suffix}")
+        except (
+            self._UnsupportedFormatException,
+            self._FileConversionException,
+        ) as exc:
+            raise IngestionError(f"Conversion failed: {exc}") from exc
+        finally:
+            del converter
 
         markdown = getattr(result, "text_content", None) or getattr(
             result, "markdown_content", None
