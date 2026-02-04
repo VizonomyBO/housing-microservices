@@ -50,9 +50,12 @@ ALLOWED_COUNTRIES = {
     "VEN", "VNM", "VGB", "VIR", "WLF", "ESH", "YEM", "ZMB", "ZWE",
 }
 
-# Pillar Questions - 47 total questions across 5 pillars
+# Pillar Questions - 50 total across 5 pillars.
+# Must stay in sync with frontend PILLAR_CONTENT (housing-sector-context, policies-institutions,
+# government-programs, housing-supply-chain, developer-end-user-finance). Cache is keyed by
+# country_code + question text hash; question text must match exactly for cache hits.
 PILLAR_QUESTIONS = {
-    "Sector Context": [
+    "Sector Context": [  # pillarId: housing-sector-context
         "What is the housing sector's contribution to GDP and employment, including both direct and indirect economic effects?",
         "What is the scale and geographic distribution of housing need (quantitative deficit, qualitative deficit, overcrowding, backyard shacks, informal settlements)?",
         "What are typical household incomes and affordability levels, and how do these compare to the cost of formal housing?",
@@ -64,7 +67,7 @@ PILLAR_QUESTIONS = {
         "What are the spatial patterns of housing development (location, density) and what are their implications for urban growth?",
         "What would be the potential economic impact of improvements in housing sector performance, such as increases in private investment, job creation, and household wealth?",
     ],
-    "Policies and Institutions": [
+    "Policies and Institutions": [  # pillarId: policies-institutions
         "Who are the main institutions responsible for housing, and what are their mandates, capacities, and constraints?",
         "What is the legal framework governing the housing sector and what potential gaps or weaknesses exist?",
         "What is the legal and regulatory framework for rental housing, including taxation and eviction procedures?",
@@ -74,14 +77,14 @@ PILLAR_QUESTIONS = {
         "What is the capacity of local governments to partner with private developers for infrastructure provision?",
         "What are the key policy and institutional constraints affecting the housing sector?",
     ],
-    "Government Programs": [
+    "Government Programs": [  # pillarId: government-programs
         "What is the chronology of government interventions in the housing sector, and what have been the successes and failures?",
         "What role do social and public housing programs play, and how financially sustainable are they?",
         "What are the design, coverage, eligibility criteria, and performance of government housing programs in the last 10 years?",
         "What are the main constraints to upgrading informal settlements, including affordability, tenure insecurity, and service gaps?",
         "What are the key strengths and weaknesses of government programs to support affordable housing?",
     ],
-    "Supply Chain": [
+    "Supply Chain": [  # pillarId: housing-supply-chain
         "How accessible, available, and affordable is urban land for housing development?",
         "How efficient and transparent are land administration systems, including titling, deeds registration, and subdivision?",
         "How effective are the planning, zoning, and building regulatory systems, and where do bottlenecks delay delivery?",
@@ -95,7 +98,7 @@ PILLAR_QUESTIONS = {
         "What are the constraints to formal rental development (regulatory, financial, land availability)?",
         "What are the key constraints affecting housing supply?",
     ],
-    "Finance": [
+    "Finance": [  # pillarId: developer-end-user-finance
         "What is the structure, volume, and share of housing finance in the financial sector and economy, including metrics such as total outstanding mortgage debt-to-GDP, volume of mortgages per year, and share of mortgage borrowers in adult population?",
         "What are the constraints on lenders (risk appetite, capital adequacy, foreclosure processes, collateral valuation)?",
         "What are the key conventional housing finance products and terms available?",

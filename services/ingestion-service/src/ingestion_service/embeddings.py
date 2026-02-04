@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol, cast
 
 from langchain_voyageai import VoyageAIEmbeddings
@@ -24,13 +24,32 @@ class VoyageEmbeddingClientProtocol(Protocol):
     ) -> list[list[float]]: ...
 
 
-@dataclass(slots=True)
+@dataclass
 class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
-    """Thin wrapper around langchain-voyageai embeddings."""
+    """Thin wrapper around langchain-voyageai embeddings.
+
+    Caches VoyageAIEmbeddings clients by output_dimension to prevent memory leaks
+    from creating new clients on every embed() call. Each client holds HTTP
+    connection pools and internal caches that accumulate if not reused.
+    """
 
     api_key: str
     model: str
     output_dimension: int | None = None
+    _clients: dict[int, VoyageAIEmbeddings] = field(default_factory=dict, init=False, repr=False)
+
+    def _get_client(self, dim: int) -> VoyageAIEmbeddings:
+        """Get or create a cached VoyageAIEmbeddings client for the given dimension."""
+        if dim not in self._clients:
+            os.environ["VOYAGE_API_KEY"] = self.api_key
+            typed_dim = cast(Literal[256, 512, 1024, 2048], dim)
+            self._clients[dim] = VoyageAIEmbeddings(
+                model=self.model,
+                output_dimension=typed_dim,
+                truncation=True,
+            )
+            logger.debug("Created VoyageAIEmbeddings client for dimension %d", dim)
+        return self._clients[dim]
 
     async def embed(
         self,
@@ -42,21 +61,10 @@ class VoyageEmbeddingClient(VoyageEmbeddingClientProtocol):
         if not texts:
             return []
 
-        # Set API key in environment for VoyageAIEmbeddings
-        os.environ["VOYAGE_API_KEY"] = self.api_key
-
-        # Cast output_dimension to the expected Literal type
         dim = output_dimension or self.output_dimension
         valid_dims = (256, 512, 1024, 2048)
         if dim not in valid_dims:
             raise ValueError(f"output_dimension must be one of {valid_dims}, got {dim}")
 
-        # Type-safe cast to Literal type
-        typed_dim = cast(Literal[256, 512, 1024, 2048], dim)
-
-        client = VoyageAIEmbeddings(
-            model=self.model,
-            output_dimension=typed_dim,
-            truncation=True,
-        )
+        client = self._get_client(dim)
         return await asyncio.to_thread(client.embed_documents, list(texts))

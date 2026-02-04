@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, status
@@ -29,6 +30,7 @@ from agent_api.services.attachments import (
 )
 from agent_api.services.retrieval_scope import ConversationDocumentRecord
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/conversations", tags=["attachments"])
 
 
@@ -170,6 +172,14 @@ async def bulk_attach_documents(
                 attached_by_user_id=auth_context.user_id,
                 auto_attach_base_docs=False,
             )
+        except ValueError as exc:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=doc_id,
+                    reason="Invalid document_id format",
+                )
+            )
+            continue
         except DocumentNotReadyError as exc:
             skipped.append(
                 AttachmentBulkSkipped(
@@ -181,6 +191,14 @@ async def bulk_attach_documents(
         except LookupError as exc:
             skipped.append(AttachmentBulkSkipped(document_id=doc_id, reason=str(exc)))
             continue
+        except Exception as exc:
+            await db_session.rollback()
+            logger.exception("Bulk attach failed for document_id=%s", doc_id)
+            raise GatewayError(
+                code="BULK_ATTACH_FAILED",
+                message=f"Bulk attach failed: {exc}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            ) from exc
 
         if result.status == AttachmentStatus.ATTACHED and result.attachment:
             attached.append(result.attachment.document_id)

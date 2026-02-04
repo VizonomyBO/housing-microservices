@@ -151,5 +151,28 @@ class ChatCacheService:
 
         return deleted
 
+    async def clear_cache_for_country(self, country_code: str) -> int:
+        """
+        Clear all cache entries for a given country (for regeneration).
+
+        Args:
+            country_code: ISO-3 country code
+
+        Returns:
+            Number of cache entries deleted
+        """
+        stmt = delete(ChatResponseCache).where(
+            ChatResponseCache.country_code == country_code,
+        )
+        result = await self._session.execute(stmt)
+        await self._session.commit()
+        deleted = result.rowcount or 0
+        if deleted:
+            logger.info(
+                "Cleared cache for country",
+                extra={"country_code": country_code, "deleted_count": deleted},
+            )
+        return deleted
+
 
 __all__ = ["ChatCacheService"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -90,52 +91,53 @@ async def database_status(
     """Check current database connection details and verify connectivity."""
     try:
         from sqlalchemy import text
-        
+
         # Get database configuration from settings
         db_url = settings.database_url
-        
+
         # Parse connection details
         import re
-        host_match = re.search(r'@([^:]+):', db_url)
-        db_match = re.search(r'/([^?]+)(\?|$)', db_url)
-        
+
+        host_match = re.search(r"@([^:]+):", db_url)
+        db_match = re.search(r"/([^?]+)(\?|$)", db_url)
+
         host = host_match.group(1) if host_match else "unknown"
         database = db_match.group(1) if db_match else "unknown"
-        
+
         # Test actual connection and get row counts
         doc_result = await db.execute(text("SELECT COUNT(*) FROM documents"))
         doc_count = doc_result.scalar()
-        
+
         # Get latest document
         latest_doc = await db.execute(
-            text("SELECT canonical_name, created_at FROM documents ORDER BY created_at DESC LIMIT 1")
+            text(
+                "SELECT canonical_name, created_at FROM documents ORDER BY created_at DESC LIMIT 1"
+            )
         )
         latest = latest_doc.fetchone()
-        
+
         return {
             "status": "connected",
-            "database": {
-                "host": host,
-                "database_name": database,
-                "connection_status": "active"
-            },
+            "database": {"host": host, "database_name": database, "connection_status": "active"},
             "stats": {
                 "total_documents": doc_count,
                 "latest_document": {
                     "name": latest[0] if latest else None,
-                    "created_at": str(latest[1]) if latest else None
-                } if latest else None
-            }
+                    "created_at": str(latest[1]) if latest else None,
+                }
+                if latest
+                else None,
+            },
         }
     except Exception as e:
         return {
             "status": "error",
             "database": {
-                "host": host if 'host' in locals() else "unknown",
-                "database_name": database if 'database' in locals() else "unknown",
-                "connection_status": "failed"
+                "host": host if "host" in locals() else "unknown",
+                "database_name": database if "database" in locals() else "unknown",
+                "connection_status": "failed",
             },
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -361,48 +363,50 @@ async def complete_upload(
         raise HTTPException(status_code=413, detail="File exceeds max_file_size_bytes")
     payload.file_size_bytes = actual_size
 
-    # Upload PDF to S3 if source_type is PDF and bucket is configured
-    s3_uri: str | None = None
-    if source_type.lower() == "pdf" and settings.s3_housing_pdf_bucket:
-        try:
-            s3_uri = upload_pdf_to_s3(
-                file_bytes=body,
-                document_id=document_id,
-                document_name=document_name,
-                settings=settings,
-            )
-            logger.info("PDF uploaded to S3: %s", s3_uri)
-        except Exception as exc:
-            # Log error but don't fail the upload - ingestion can proceed without S3
-            logger.warning("Failed to upload PDF to S3 (continuing with ingestion): %s", exc)
-
     try:
-        pipeline: IngestionPipeline = request.app.state.pipeline
-        document, job = await pipeline.ingest_file(
-            session=db,
-            request=payload,
-            owner_user_id=owner_uuid,
-            document_id=document_uuid,
-            ingestion_id=ingestion_uuid,
-            file_bytes=body,
-        )
-        await db.commit()
-    except IngestionError as exc:
-        await db.commit()
-        logger.exception("Ingestion failed for %s", document_id)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        await db.rollback()
-        logger.exception("Unexpected failure")
-        raise HTTPException(status_code=500, detail="Unexpected ingestion failure") from exc
+        s3_uri: str | None = None
+        if source_type.lower() == "pdf" and settings.s3_housing_pdf_bucket:
+            try:
+                s3_uri = upload_pdf_to_s3(
+                    file_bytes=body,
+                    document_id=document_id,
+                    document_name=document_name,
+                    settings=settings,
+                )
+                logger.info("PDF uploaded to S3: %s", s3_uri)
+            except Exception as exc:
+                logger.warning("Failed to upload PDF to S3 (continuing with ingestion): %s", exc)
 
-    return UploadCompleteResponse(
-        document_id=document.id,
-        ingestion_id=job.id,
-        status=document.status,
-        content_hash=document.content_hash,
-        message="Ingestion completed" if document.status == "active" else "Ingestion failed",
-    )
+        try:
+            pipeline: IngestionPipeline = request.app.state.pipeline
+            document, job = await pipeline.ingest_file(
+                session=db,
+                request=payload,
+                owner_user_id=owner_uuid,
+                document_id=document_uuid,
+                ingestion_id=ingestion_uuid,
+                file_bytes=body,
+            )
+            await db.commit()
+        except IngestionError as exc:
+            await db.commit()
+            logger.exception("Ingestion failed for %s", document_id)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            await db.rollback()
+            logger.exception("Unexpected failure")
+            raise HTTPException(status_code=500, detail="Unexpected ingestion failure") from exc
+
+        return UploadCompleteResponse(
+            document_id=document.id,
+            ingestion_id=job.id,
+            status=document.status,
+            content_hash=document.content_hash,
+            message="Ingestion completed" if document.status == "active" else "Ingestion failed",
+        )
+    finally:
+        del body
+        gc.collect()
 
 
 @app.get(

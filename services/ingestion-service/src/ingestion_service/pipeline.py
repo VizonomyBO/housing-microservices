@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import gc
 import hashlib
 import logging
 import os
@@ -193,7 +194,12 @@ class MarkdownChunker:
 
 
 class MarkdownConverter:
-    """Wraps MarkItDown with a conversion convenience helper."""
+    """Wraps MarkItDown with a conversion convenience helper.
+
+    Creates a fresh MarkItDown instance per conversion to prevent memory leaks
+    from PDFMiner internal caches (page layouts, fonts, CMap data) accumulating
+    across multiple PDF conversions.
+    """
 
     def __init__(self) -> None:
         (
@@ -201,15 +207,15 @@ class MarkdownConverter:
             self._MarkItDown,
             self._UnsupportedFormatException,
         ) = _load_markitdown()
-        self._converter = self._MarkItDown()
 
     def convert(self, *, data: bytes, suffix: str) -> tuple[str, dict[str, Any]]:
+        converter = self._MarkItDown()
         with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
             tmp.write(data)
             tmp.flush()
             path = tmp.name
         try:
-            result = self._converter.convert(path)
+            result = converter.convert(path)
         except (
             self._UnsupportedFormatException,
             self._FileConversionException,
@@ -220,6 +226,7 @@ class MarkdownConverter:
                 os.unlink(path)
             except OSError:
                 logger.warning("Failed to cleanup temp file %s", path)
+            del converter
 
         markdown = getattr(result, "text_content", None) or getattr(
             result, "markdown_content", None
@@ -335,6 +342,7 @@ class IngestionPipeline:
                 request=request,
                 ingestion_id=ingestion_id,
             )
+            del markdown
             logger.info(
                 "[%s] STEP 4/4 DONE: Total ingestion completed in %.1fs",
                 document.id,
@@ -641,6 +649,10 @@ class IngestionPipeline:
             total_chunks,
             t_db_end - t_db_start,
         )
+
+        del chunks
+        del embeddings
+        gc.collect()
 
         now = datetime.now(UTC)
         document.status = "active"

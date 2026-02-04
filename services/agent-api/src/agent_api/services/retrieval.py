@@ -308,7 +308,10 @@ class RetrievalService:
                 filtered.append(doc_id)
                 continue
             metadata = summary.metadata or {}
+            # Try metadata first, then fallback to canonical_name
             year = coerce_publication_year(metadata.get("publication_year"))
+            if year is None and hasattr(summary, 'canonical_name') and summary.canonical_name:
+                year = coerce_publication_year(summary.canonical_name)
             if year is not None and year < 2000:
                 continue
             filtered.append(doc_id)
