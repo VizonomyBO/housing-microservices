@@ -199,6 +199,8 @@ class MarkdownConverter:
     Creates a fresh MarkItDown instance per conversion to prevent memory leaks
     from PDFMiner internal caches (page layouts, fonts, CMap data) accumulating
     across multiple PDF conversions.
+
+    Uses an isolated temp directory per conversion for the input file.
     """
 
     def __init__(self) -> None:
@@ -209,24 +211,21 @@ class MarkdownConverter:
         ) = _load_markitdown()
 
     def convert(self, *, data: bytes, suffix: str) -> tuple[str, dict[str, Any]]:
-        converter = self._MarkItDown()
-        with tempfile.NamedTemporaryFile(suffix=f".{suffix}", delete=False) as tmp:
-            tmp.write(data)
-            tmp.flush()
-            path = tmp.name
-        try:
-            result = converter.convert(path)
-        except (
-            self._UnsupportedFormatException,
-            self._FileConversionException,
-        ) as exc:
-            raise IngestionError(f"Conversion failed: {exc}") from exc
-        finally:
+        with tempfile.TemporaryDirectory(prefix="markitdown_") as temp_dir:
+            converter = self._MarkItDown()
+            input_path = os.path.join(temp_dir, f"input.{suffix}")
+            with open(input_path, "wb") as f:
+                f.write(data)
+
             try:
-                os.unlink(path)
-            except OSError:
-                logger.warning("Failed to cleanup temp file %s", path)
-            del converter
+                result = converter.convert(input_path)
+            except (
+                self._UnsupportedFormatException,
+                self._FileConversionException,
+            ) as exc:
+                raise IngestionError(f"Conversion failed: {exc}") from exc
+            finally:
+                del converter
 
         markdown = getattr(result, "text_content", None) or getattr(
             result, "markdown_content", None
