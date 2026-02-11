@@ -26,7 +26,7 @@ from shared_data_layer.repositories.documents import DocumentRepository
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
 from ingestion_service.pipeline import IngestionError, IngestionPipeline
-from ingestion_service.s3 import download_pdf_from_s3, upload_pdf_to_s3
+from ingestion_service.s3 import download_pdf_from_s3, download_pdf_from_s3_by_name, upload_pdf_to_s3
 from ingestion_service.schemas import (
     UploadCompleteResponse,
     UploadInfo,
@@ -505,82 +505,41 @@ async def download_document(
 )
 async def download_document_by_name(
     canonical_name: str,
-    db: DBSession,
     settings: SettingsDep,
     authorization: str | None = Header(default=None, convert_underscores=False),
 ) -> Response:
     """
     Download a PDF document from S3 by canonical name.
 
-    Requires authentication and verifies the user has access to the document.
-    Searches for documents owned by the authenticated user with the given canonical_name.
+    Searches S3 directly by filename without requiring a database document ID.
+    Requires authentication.
     """
-    # Authenticate user
     await _require_user(authorization, settings)
 
-    # Check if S3 bucket is configured
     if not settings.s3_housing_pdf_bucket:
         raise HTTPException(status_code=500, detail="S3 housing PDF bucket is not configured")
 
-    # Find document by canonical_name
-    # ALL documents are accessible to any authenticated user (no access restrictions)
-    from shared_data_layer.db.models.documents import Document
-    from sqlalchemy import select
-
-    # Search for ALL documents with matching canonical_name
-    stmt = select(Document).where(Document.canonical_name == canonical_name)
-
-    result = await db.execute(stmt)
-    documents = result.scalars().all()
-
-    if not documents:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Document not found with name '{canonical_name}'",
+    try:
+        file_bytes = download_pdf_from_s3_by_name(
+            document_name=canonical_name,
+            settings=settings,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        error_msg = str(exc)
+        if "not found" in error_msg.lower():
+            raise HTTPException(
+                status_code=404,
+                detail=f"PDF file not found in S3 for document '{canonical_name}'",
+            ) from exc
+        raise HTTPException(status_code=500, detail=f"Failed to download PDF: {error_msg}") from exc
 
-    # Try each document until we find one with PDF in S3
-    # ALL documents are accessible - no access checks needed
-    document = None
-    file_bytes = None
-    last_error = None
-
-    for doc in documents:
-        # Try to download PDF from S3 for this document
-        try:
-            file_bytes = download_pdf_from_s3(
-                document_id=str(doc.id),
-                document_name=doc.canonical_name,
-                settings=settings,
-            )
-            document = doc
-            break  # Found a document with PDF in S3
-        except RuntimeError as exc:
-            last_error = exc
-            continue  # Try next document
-
-    if not document or not file_bytes:
-        if last_error:
-            error_msg = str(last_error)
-            if "not found" in error_msg.lower():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"PDF file not found in S3 for document '{canonical_name}'",
-                ) from last_error
-        raise HTTPException(
-            status_code=404,
-            detail=f"PDF file not found in S3 for document '{canonical_name}'",
-        )
-
-    # Use canonical_name for S3 key construction
-    document_name = document.canonical_name
-
-    # Return file as response
     return Response(
         content=file_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{document_name}"',
+            "Content-Disposition": f'attachment; filename="{canonical_name}"',
             "Content-Length": str(len(file_bytes)),
         },
     )

@@ -191,3 +191,65 @@ def download_pdf_from_s3(
         raise RuntimeError(f"PDF not found: {document_name}") from last_exc
 
     raise RuntimeError(f"PDF not found: {document_name}")
+
+
+def download_pdf_from_s3_by_name(
+    document_name: str,
+    settings: Settings,
+) -> bytes:
+    if not settings.s3_housing_pdf_bucket:
+        raise ValueError("S3 housing PDF bucket is not configured")
+
+    bucket_name = settings.s3_housing_pdf_bucket
+    region = settings.aws_region
+
+    s3_client = boto3.client("s3", region_name=region)
+
+    try:
+        response = s3_client.get_object(Bucket=bucket_name, Key=document_name)
+        file_bytes = response["Body"].read()
+        logger.info(
+            "Downloaded PDF from S3 by name: s3://%s/%s (size: %d bytes)",
+            bucket_name,
+            document_name,
+            len(file_bytes),
+        )
+        return file_bytes
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        if error_code != "NoSuchKey":
+            error_message = exc.response.get("Error", {}).get("Message", str(exc))
+            raise RuntimeError(f"S3 download failed: {error_code} - {error_message}") from exc
+
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket_name):
+        for obj in page.get("Contents", []):
+            key: str = obj["Key"]
+            if key.endswith(f"/{document_name}") or key == document_name:
+                response = s3_client.get_object(Bucket=bucket_name, Key=key)
+                file_bytes = response["Body"].read()
+                logger.info(
+                    "Downloaded PDF from S3 by name (found via listing): s3://%s/%s (size: %d bytes)",
+                    bucket_name,
+                    key,
+                    len(file_bytes),
+                )
+                return file_bytes
+
+    if not document_name.endswith(".pdf"):
+        name_with_ext = f"{document_name}.pdf"
+        for page in paginator.paginate(Bucket=bucket_name):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith(f"/{name_with_ext}") or key == name_with_ext:
+                    response = s3_client.get_object(Bucket=bucket_name, Key=key)
+                    file_bytes = response["Body"].read()
+                    logger.info(
+                        "Downloaded PDF from S3 by name (found via listing with .pdf): s3://%s/%s (size: %d bytes)",
+                        bucket_name,
+                        key,
+                        len(file_bytes),
+                    )
+                    return file_bytes
+
+    raise RuntimeError(f"PDF not found by name: {document_name}")
