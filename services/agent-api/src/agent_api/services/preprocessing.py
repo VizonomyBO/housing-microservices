@@ -144,6 +144,7 @@ async def preprocess_cache_for_country(
     country_code: str,
     runner: ChatRunnerProtocol,
     db_session: AsyncSession,
+    force_regenerate: bool = False,
 ) -> PreprocessingStats:
     """
     Preprocess cache for all pillar questions for a given country.
@@ -152,6 +153,7 @@ async def preprocess_cache_for_country(
         country_code: ISO-3 country code
         runner: Chat runner instance
         db_session: Database session
+        force_regenerate: If True, always generate responses and do not skip cache hits.
 
     Returns:
         Dictionary with statistics about the preprocessing
@@ -233,15 +235,15 @@ async def preprocess_cache_for_country(
             stats["total_questions"] += 1
 
             try:
-                # Check if cache already exists
-                cached = await cache_service.get_cached_response(country_code, question)
-                if cached:
-                    stats["cache_hits"] += 1
-                    first_question_attempted = True  # Cache hit counts as successful attempt
-                    if question_num % 10 == 0:  # Log every 10th cache hit
-                        print(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
-                    logger.debug(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
-                    continue
+                if not force_regenerate:
+                    cached = await cache_service.get_cached_response(country_code, question)
+                    if cached is not None:
+                        stats["cache_hits"] += 1
+                        first_question_attempted = True
+                        if question_num % 10 == 0:
+                            print(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
+                        logger.debug(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
+                        continue
 
                 # If we're using placeholder, store "No data available for this country" for all remaining questions
                 if use_no_data_placeholder:
@@ -333,7 +335,7 @@ async def preprocess_cache_for_country(
                         use_no_data_placeholder = True
                         logger.warning(
                             f"[{country_code}] First question failed with no documents error. "
-                            f"Will use 'No data available for this country' for all remaining questions. Error: {error_msg[:100]}"
+                            f"Will use 'No data available for this country' for all remaining questions. Error: {error_msg}"
                         )
                         print(
                             f"[{country_code}] WARNING: No eligible documents found. "
@@ -349,12 +351,12 @@ async def preprocess_cache_for_country(
                         print(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
                         logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
                     else:
-                        # Expected errors like "no documents attached" - skip this question only
                         logger.warning(
-                            f"[{country_code}] Skipping question (likely no docs attached): {error_msg[:100]}"
+                            f"[{country_code}] Skipping question: {error_msg}"
                         )
+                        print(f"[{country_code}] Skipping question: {error_msg}")
                         stats["errors"] += 1
-                        first_question_attempted = True  # Mark that we've attempted a question
+                        first_question_attempted = True
 
             except Exception as exc:
                 logger.error(

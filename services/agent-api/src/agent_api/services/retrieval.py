@@ -108,22 +108,40 @@ class RetrievalService:
                 status_code=502,
             )
 
+        effective_top_k = self._top_k
+        if profile is RetrievalProfile.COUNTRY_PROFILE:
+            effective_top_k = max(self._top_k, 12)
+
         expanded_queries = await self._build_query_set(user_query)
         embeddings = await self._embedding_client.embed(expanded_queries)
-        retrieved = await self._run_retrieval(
-            queries=expanded_queries,
-            embeddings=embeddings,
-            document_ids=candidate_doc_ids,
-            summaries=summaries,
-        )
+
+        if profile is RetrievalProfile.COUNTRY_PROFILE and focus_country is not None:
+            retrieved = await self._run_tiered_retrieval(
+                queries=expanded_queries,
+                embeddings=embeddings,
+                document_ids=candidate_doc_ids,
+                summaries=summaries,
+                target_country=focus_country,
+                effective_top_k=effective_top_k,
+            )
+        else:
+            retrieved = await self._run_retrieval(
+                queries=expanded_queries,
+                embeddings=embeddings,
+                document_ids=candidate_doc_ids,
+                summaries=summaries,
+                top_k_override=effective_top_k,
+            )
+
         reranked = await self._rerank_chunks(query=user_query, chunks=retrieved)
         reranked = self._apply_profile_weighting(
             chunks=reranked,
             summaries=summaries,
             profile=profile,
             target_country=focus_country,
+            effective_top_k=effective_top_k,
         )
-        context_blocks = reranked[: self._top_k]
+        context_blocks = reranked[:effective_top_k]
         context_text = self._format_context(context_blocks)
         citations = [
             {
@@ -164,6 +182,86 @@ class RetrievalService:
                 queries.append(q)
         return queries[:4]
 
+    def _partition_doc_ids_by_geo(
+        self,
+        doc_ids: Sequence[str],
+        summaries,
+        target_country: str,
+    ) -> tuple[list[str], list[str], list[str]]:
+        target_upper = target_country.strip().upper()
+        target_region = REGION_BY_COUNTRY_ALPHA3.get(target_upper)
+        country_ids: list[str] = []
+        region_ids: list[str] = []
+        global_ids: list[str] = []
+        for doc_id in doc_ids:
+            summary = summaries.get(doc_id)
+            if summary is None:
+                global_ids.append(doc_id)
+                continue
+            cc = (summary.country_code or "").strip().upper()
+            if cc == target_upper:
+                country_ids.append(doc_id)
+            elif target_region is not None and (
+                cc == target_region.value or REGION_BY_COUNTRY_ALPHA3.get(cc) == target_region
+            ):
+                region_ids.append(doc_id)
+            else:
+                global_ids.append(doc_id)
+        return country_ids, region_ids, global_ids
+
+    async def _run_tiered_retrieval(
+        self,
+        *,
+        queries: Sequence[str],
+        embeddings: Sequence[Sequence[float]],
+        document_ids: Sequence[str],
+        summaries,
+        target_country: str,
+        effective_top_k: int,
+    ) -> list[RetrievedChunk]:
+        country_ids, region_ids, global_ids = self._partition_doc_ids_by_geo(
+            document_ids, summaries, target_country
+        )
+        logger.info(
+            "country_profile tiered retrieval for %s: country=%d docs, region=%d docs, global=%d docs",
+            target_country,
+            len(country_ids),
+            len(region_ids),
+            len(global_ids),
+        )
+
+        per_tier_k = max(effective_top_k, 8)
+        all_chunks: dict[str, RetrievedChunk] = {}
+
+        for tier_label, tier_ids in [
+            ("country", country_ids),
+            ("region", region_ids),
+            ("global", global_ids),
+        ]:
+            if not tier_ids:
+                logger.info("country_profile tier %s: no documents, skipping", tier_label)
+                continue
+            tier_chunks = await self._run_retrieval(
+                queries=queries,
+                embeddings=embeddings,
+                document_ids=tier_ids,
+                summaries=summaries,
+                top_k_override=per_tier_k,
+            )
+            logger.info(
+                "country_profile tier %s: retrieved %d chunks from %d docs",
+                tier_label,
+                len(tier_chunks),
+                len(tier_ids),
+            )
+            for chunk in tier_chunks:
+                key = f"{chunk.document_id}:{chunk.chunk_id}"
+                existing = all_chunks.get(key)
+                if existing is None or chunk.score > existing.score:
+                    all_chunks[key] = chunk
+
+        return sorted(all_chunks.values(), key=lambda c: c.score, reverse=True)
+
     async def _run_retrieval(
         self,
         *,
@@ -171,13 +269,15 @@ class RetrievalService:
         embeddings: Sequence[Sequence[float]],
         document_ids: Sequence[str],
         summaries,
+        top_k_override: int | None = None,
     ) -> list[RetrievedChunk]:
+        effective_k = top_k_override if top_k_override is not None else self._top_k
         results: dict[str, RetrievedChunk] = {}
         previews = await self._scope_repo.load_document_chunk_previews(
             document_ids=document_ids,
             chunk_types=("text",),
             max_chars_per_doc=2400,
-            max_chunks_per_doc=self._top_k,
+            max_chunks_per_doc=effective_k,
         )
 
         for query, embedding in zip(queries, embeddings, strict=False):
@@ -185,7 +285,7 @@ class RetrievalService:
                 query=query,
                 document_ids=document_ids,
                 embedding=embedding,
-                top_k=self._top_k,
+                top_k=effective_k,
                 hybrid_weight=0.6,
                 chunk_types=("text",),
             )
@@ -310,7 +410,7 @@ class RetrievalService:
             metadata = summary.metadata or {}
             # Try metadata first, then fallback to canonical_name
             year = coerce_publication_year(metadata.get("publication_year"))
-            if year is None and hasattr(summary, 'canonical_name') and summary.canonical_name:
+            if year is None and hasattr(summary, "canonical_name") and summary.canonical_name:
                 year = coerce_publication_year(summary.canonical_name)
             if year is not None and year < 2000:
                 continue
@@ -324,6 +424,7 @@ class RetrievalService:
         summaries,
         profile: RetrievalProfile,
         target_country: str | None,
+        effective_top_k: int | None = None,
     ) -> list[RetrievedChunk]:
         if profile is not RetrievalProfile.COUNTRY_PROFILE:
             return chunks
@@ -344,7 +445,70 @@ class RetrievalService:
                     canonical_name=chunk.canonical_name,
                 )
             )
-        return sorted(weighted, key=lambda c: c.score, reverse=True)
+        weighted.sort(key=lambda c: c.score, reverse=True)
+
+        if target_country is None:
+            return weighted
+
+        target_upper = target_country.strip().upper()
+        target_region = REGION_BY_COUNTRY_ALPHA3.get(target_upper)
+
+        def _geo_tier(chunk: RetrievedChunk) -> int:
+            summary = summaries.get(chunk.document_id)
+            if summary is None:
+                return 3
+            cc = (summary.country_code or "").strip().upper()
+            if cc == target_upper:
+                return 0
+            if target_region is not None:
+                region = REGION_BY_COUNTRY_ALPHA3.get(cc)
+                if cc == target_region.value or region == target_region:
+                    return 1
+            if cc == Region.GLO.value or REGION_BY_COUNTRY_ALPHA3.get(cc) == Region.GLO:
+                return 2
+            return 3
+
+        country_chunks = [c for c in weighted if _geo_tier(c) == 0]
+        region_chunks = [c for c in weighted if _geo_tier(c) == 1]
+
+        cap = effective_top_k if effective_top_k is not None else self._top_k
+        min_country_slots = min(len(country_chunks), max(cap // 2, 4))
+        min_region_slots = min(len(region_chunks), max(cap // 4, 2))
+
+        result: list[RetrievedChunk] = []
+        seen: set[str] = set()
+
+        for chunk in country_chunks[:min_country_slots]:
+            result.append(chunk)
+            seen.add(chunk.chunk_id)
+
+        for chunk in region_chunks[:min_region_slots]:
+            if chunk.chunk_id not in seen:
+                result.append(chunk)
+                seen.add(chunk.chunk_id)
+
+        remaining = cap - len(result)
+        if remaining > 0:
+            for chunk in weighted:
+                if chunk.chunk_id not in seen:
+                    result.append(chunk)
+                    seen.add(chunk.chunk_id)
+                    if len(result) >= cap:
+                        break
+
+        geo_dist = Counter(_geo_tier(c) for c in result)
+        tier_labels = {0: "country", 1: "region", 2: "global", 3: "other"}
+        dist_str = ", ".join(
+            f"{tier_labels.get(t, 'unknown')}={cnt}" for t, cnt in sorted(geo_dist.items())
+        )
+        logger.info(
+            "country_profile geo distribution for %s (cap=%d): %s",
+            target_upper,
+            cap,
+            dist_str,
+        )
+
+        return result
 
     def _build_geo_weight_map(self, summaries, target_country: str | None) -> dict[str, float]:
         if not target_country:
@@ -357,11 +521,11 @@ class RetrievalService:
             region = REGION_BY_COUNTRY_ALPHA3.get(country_code)
             weight = 1.0
             if country_code == target_country:
-                weight = 1.3
+                weight = 2.0
             elif target_region and (country_code == target_region.value or region == target_region):
-                weight = 1.1
+                weight = 1.3
             elif country_code == Region.GLO.value or region == Region.GLO:
-                weight = 0.9
+                weight = 0.7
             weights[doc_id] = weight
         return weights
 

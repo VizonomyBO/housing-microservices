@@ -35,7 +35,18 @@ from agent_api.settings import load_settings
 logger = logging.getLogger(__name__)
 
 
+def _configure_app_logging() -> None:
+    app_logger = logging.getLogger("agent_api")
+    app_logger.setLevel(logging.INFO)
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+        app_logger.addHandler(handler)
+
+
 def create_app() -> FastAPI:
+    _configure_app_logging()
     settings = load_settings()
 
     @asynccontextmanager
