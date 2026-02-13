@@ -172,7 +172,7 @@ async def bulk_attach_documents(
                 attached_by_user_id=auth_context.user_id,
                 auto_attach_base_docs=False,
             )
-        except ValueError as exc:
+        except ValueError:
             skipped.append(
                 AttachmentBulkSkipped(
                     document_id=doc_id,

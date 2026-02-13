@@ -97,9 +97,9 @@ def test_build_geo_weight_map_prioritizes_country_region_and_global():
         ),
     }
     weights = service._build_geo_weight_map(summaries, target_country="PER")
-    assert weights["country"] == 1.3
-    assert weights["region"] == 1.1
-    assert weights["global"] == 0.9
+    assert weights["country"] == 2.0
+    assert weights["region"] == 1.3
+    assert weights["global"] == 0.7
     assert weights["other"] == 1.0
 
 

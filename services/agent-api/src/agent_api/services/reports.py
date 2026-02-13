@@ -26,31 +26,29 @@ TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
 def _simplify_country_name(country_name: str) -> str:
     """Simplify official ISO country names for report readability.
-    
+
     Examples:
         "Bolivia, Plurinational State of" → "Bolivia"
         "United States of America" → "United States"
     """
-    return country_name.split(',')[0].strip()
+    return country_name.split(",")[0].strip()
 
 
 def _map_chunk_citations_to_documents(
-    markdown_content: str,
-    citations: list[dict],
-    document_index: dict[str, int]
+    markdown_content: str, citations: list[dict], document_index: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
     """Map chunk-based citations [c1], [c2] to document-based citations [1], [2].
-    
+
     Deduplicates consecutive citations so [1][1][1] becomes [1] and [1][2][1] becomes [1][2].
-    
+
     Args:
         markdown_content: Text with [c1], [c2], etc. citations
         citations: List of citation dicts with canonical_name and chunk info
         document_index: Mapping of document_name -> citation number (updated in place)
-    
+
     Returns:
         Tuple of (updated_content, updated_document_index)
-    
+
     Example:
         Input text: "Housing markets are complex[c1][c2]. Policies matter[c3]."
         Where c1, c2 are from doc A and c3 is from doc B
@@ -58,30 +56,30 @@ def _map_chunk_citations_to_documents(
     """
     # Build mapping: c1 -> document_name -> [citation_number]
     chunk_to_doc_citation = {}
-    
+
     for idx, citation in enumerate(citations, start=1):
         doc_name = citation.get("canonical_name") or citation.get("doc_id", "Unknown")
         chunk_citation = f"c{idx}"
-        
+
         # Assign document number if not already assigned
         if doc_name not in document_index:
             document_index[doc_name] = len(document_index) + 1
-        
+
         doc_citation_num = document_index[doc_name]
         chunk_to_doc_citation[chunk_citation] = doc_citation_num
-    
+
     # Replace [c1] -> [1], [c2] -> [2], etc.
     for chunk_cit, doc_num in chunk_to_doc_citation.items():
         markdown_content = markdown_content.replace(f"[{chunk_cit}]", f"[{doc_num}]")
-    
+
     # Deduplicate citations in groups: [1][1][1] -> [1], [1][2][1] -> [1][2]
     # Handles all separator formats: [10],[10], [10]-[10], [10].[10]
     # Preserves sentence punctuation AND spacing: [1][3]. Together, [10][1], [1].
     def deduplicate_citation_group(match):
         group = match.group(0)
         # Extract all citation numbers from any format
-        citation_nums = re.findall(r'\[(\d+)\]', group)
-        
+        citation_nums = re.findall(r"\[(\d+)\]", group)
+
         # Deduplicate while preserving order: ['1', '2', '1'] -> ['1', '2']
         seen = set()
         unique_citations = []
@@ -89,24 +87,30 @@ def _map_chunk_citations_to_documents(
             if num not in seen:
                 unique_citations.append(num)
                 seen.add(num)
-        
+
         # Check for trailing punctuation + space after last citation
-        trailing = ''
-        after_citations = group[group.rfind(']')+1:]  # Everything after last ]
-        
+        trailing = ""
+        after_citations = group[group.rfind("]") + 1 :]  # Everything after last ]
+
         # If there's punctuation followed by space/end, preserve it
-        punct_match = re.match(r'^[,.\-\s]*([.,;!?])(\s*)', after_citations)
+        punct_match = re.match(r"^[,.\-\s]*([.,;!?])(\s*)", after_citations)
         if punct_match:
             # Preserve if it's sentence punctuation (followed by space or end of string)
-            if punct_match.group(2) or not re.match(r'^\d', after_citations[len(punct_match.group()):]):
+            if punct_match.group(2) or not re.match(
+                r"^\d", after_citations[len(punct_match.group()) :]
+            ):
                 trailing = punct_match.group(1) + punct_match.group(2)
-        
+
         # Rebuild: clean citations + trailing punctuation/space
-        return ''.join(f'[{num}]' for num in unique_citations) + trailing
-    
+        return "".join(f"[{num}]" for num in unique_citations) + trailing
+
     # Match citation groups with any separators, stop before letters
-    markdown_content = re.sub(r'\[\d+\](?:[,.\-\s]*\[\d+\])*[,.\-\s]*(?=[A-Z]|[a-z]|$)', deduplicate_citation_group, markdown_content)
-    
+    markdown_content = re.sub(
+        r"\[\d+\](?:[,.\-\s]*\[\d+\])*[,.\-\s]*(?=[A-Z]|[a-z]|$)",
+        deduplicate_citation_group,
+        markdown_content,
+    )
+
     return markdown_content, document_index
 
 
@@ -123,7 +127,7 @@ def _get_section_prompts(country_name: str) -> list[dict[str, str]]:
         f"Do NOT provide statistics without document support. "
         f"If evidence is limited, state 'regional evidence suggests...' or 'global studies show...'. "
     )
-    
+
     return [
         {
             "title": "1. Executive Summary",
@@ -170,6 +174,7 @@ def _get_section_prompts(country_name: str) -> list[dict[str, str]]:
             "prompt": f"{base_instruction}Then write Constraints and Opportunities. Synthesize findings from documents, distinguishing between {country_name}-specific evidence and regional/global patterns. Frame recommendations based on regional experience if {country_name} evidence is limited. Be explicit about evidence base for each claim.",
         },
     ]
+
 
 SECTION_PROMPTS = [
     {
@@ -249,7 +254,7 @@ class ReportService:
         country_name = COUNTRY_NAME_BY_ALPHA3.get(country_code, country_code)
         country_name = _simplify_country_name(country_name)
         section_prompts = _get_section_prompts(country_name)
-        
+
         # 2. Fetch all documents for the country
         documents = await self._doc_repo.list_documents_for_country(country_code)
         if not documents:
@@ -327,9 +332,7 @@ class ReportService:
 
                 # Map chunk citations [c1], [c2] to document citations [1], [2]
                 markdown_content, document_index = _map_chunk_citations_to_documents(
-                    markdown_content,
-                    citations,
-                    document_index
+                    markdown_content, citations, document_index
                 )
 
                 # COMMENTED OUT: Old citation removal that stripped citations entirely
@@ -350,7 +353,7 @@ class ReportService:
             except Exception as e:
                 logger.error(
                     f"Error generating section {section_def['title']}: {type(e).__name__}: {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 sections_data.append(
                     {
@@ -363,10 +366,12 @@ class ReportService:
         references = []
         # Sort by citation number [1], [2], [3], etc.
         for doc_name, citation_num in sorted(document_index.items(), key=lambda x: x[1]):
-            references.append({
-                "citation_number": citation_num,
-                "document_name": doc_name,
-            })
+            references.append(
+                {
+                    "citation_number": citation_num,
+                    "document_name": doc_name,
+                }
+            )
 
         # 4. Render PDF
         env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(TEMPLATE_DIR)))

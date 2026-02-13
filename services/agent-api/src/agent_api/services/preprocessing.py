@@ -24,30 +24,245 @@ logger = logging.getLogger(__name__)
 
 # Allowed countries for preprocessing (from frontend country list)
 ALLOWED_COUNTRIES = {
-    "AFG", "ALB", "DZA", "ASM", "AND", "AGO", "AIA", "ATA", "ATG", "ARG",
-    "ARM", "ABW", "AUS", "AUT", "AZE", "BHS", "BHR", "BGD", "BRB", "BLR",
-    "BEL", "BLZ", "BEN", "BMU", "BTN", "BOL", "BIH", "BWA", "BVT", "BRA",
-    "IOT", "BRN", "BGR", "BFA", "BDI", "KHM", "CMR", "CAN", "CPV", "CYM",
-    "CAF", "TCD", "CHL", "CHN", "CXR", "CCK", "COL", "COM", "COG", "COD",
-    "COK", "CRI", "CIV", "HRV", "CUB", "CYP", "CZE", "DNK", "DJI", "DMA",
-    "DOM", "ECU", "EGY", "SLV", "GNQ", "ERI", "EST", "ETH", "FLK", "FRO",
-    "FJI", "FIN", "FRA", "GUF", "PYF", "ATF", "GAB", "GMB", "GEO", "DEU",
-    "GHA", "GIB", "GRC", "GRL", "GRD", "GLP", "GUM", "GTM", "GIN", "GNB",
-    "GUY", "HTI", "HMD", "VAT", "HND", "HKG", "HUN", "ISL", "IND", "IDN",
-    "IRN", "IRQ", "IRL", "ISR", "ITA", "JAM", "JPN", "JOR", "KAZ", "KEN",
-    "KIR", "PRK", "KOR", "KWT", "KGZ", "LAO", "LVA", "LBN", "LSO", "LBR",
-    "LBY", "LIE", "LTU", "LUX", "MAC", "MKD", "MDG", "MWI", "MYS", "MDV",
-    "MLI", "MLT", "MHL", "MTQ", "MRT", "MUS", "MYT", "MEX", "FSM", "MDA",
-    "MCO", "MNG", "MNE", "MSR", "MAR", "MOZ", "MMR", "NAM", "NRU", "NPL",
-    "NLD", "NCL", "NZL", "NIC", "NER", "NGA", "NIU", "NFK", "MNP", "NOR",
-    "OMN", "PAK", "PLW", "PSE", "PAN", "PNG", "PRY", "PER", "PHL", "PCN",
-    "POL", "PRT", "PRI", "QAT", "REU", "ROU", "RUS", "RWA", "SHN", "KNA",
-    "LCA", "SPM", "VCT", "WSM", "SMR", "STP", "SAU", "SEN", "SRB", "SYC",
-    "SLE", "SGP", "SVK", "SVN", "SLB", "SOM", "ZAF", "SGS", "ESP", "LKA",
-    "SDN", "SUR", "SJM", "SWZ", "SWE", "CHE", "SYR", "TWN", "TJK", "TZA",
-    "THA", "TLS", "TGO", "TKL", "TON", "TTO", "TUN", "TUR", "TKM", "TCA",
-    "TUV", "UGA", "UKR", "ARE", "GBR", "USA", "UMI", "URY", "UZB", "VUT",
-    "VEN", "VNM", "VGB", "VIR", "WLF", "ESH", "YEM", "ZMB", "ZWE",
+    "AFG",
+    "ALB",
+    "DZA",
+    "ASM",
+    "AND",
+    "AGO",
+    "AIA",
+    "ATA",
+    "ATG",
+    "ARG",
+    "ARM",
+    "ABW",
+    "AUS",
+    "AUT",
+    "AZE",
+    "BHS",
+    "BHR",
+    "BGD",
+    "BRB",
+    "BLR",
+    "BEL",
+    "BLZ",
+    "BEN",
+    "BMU",
+    "BTN",
+    "BOL",
+    "BIH",
+    "BWA",
+    "BVT",
+    "BRA",
+    "IOT",
+    "BRN",
+    "BGR",
+    "BFA",
+    "BDI",
+    "KHM",
+    "CMR",
+    "CAN",
+    "CPV",
+    "CYM",
+    "CAF",
+    "TCD",
+    "CHL",
+    "CHN",
+    "CXR",
+    "CCK",
+    "COL",
+    "COM",
+    "COG",
+    "COD",
+    "COK",
+    "CRI",
+    "CIV",
+    "HRV",
+    "CUB",
+    "CYP",
+    "CZE",
+    "DNK",
+    "DJI",
+    "DMA",
+    "DOM",
+    "ECU",
+    "EGY",
+    "SLV",
+    "GNQ",
+    "ERI",
+    "EST",
+    "ETH",
+    "FLK",
+    "FRO",
+    "FJI",
+    "FIN",
+    "FRA",
+    "GUF",
+    "PYF",
+    "ATF",
+    "GAB",
+    "GMB",
+    "GEO",
+    "DEU",
+    "GHA",
+    "GIB",
+    "GRC",
+    "GRL",
+    "GRD",
+    "GLP",
+    "GUM",
+    "GTM",
+    "GIN",
+    "GNB",
+    "GUY",
+    "HTI",
+    "HMD",
+    "VAT",
+    "HND",
+    "HKG",
+    "HUN",
+    "ISL",
+    "IND",
+    "IDN",
+    "IRN",
+    "IRQ",
+    "IRL",
+    "ISR",
+    "ITA",
+    "JAM",
+    "JPN",
+    "JOR",
+    "KAZ",
+    "KEN",
+    "KIR",
+    "PRK",
+    "KOR",
+    "KWT",
+    "KGZ",
+    "LAO",
+    "LVA",
+    "LBN",
+    "LSO",
+    "LBR",
+    "LBY",
+    "LIE",
+    "LTU",
+    "LUX",
+    "MAC",
+    "MKD",
+    "MDG",
+    "MWI",
+    "MYS",
+    "MDV",
+    "MLI",
+    "MLT",
+    "MHL",
+    "MTQ",
+    "MRT",
+    "MUS",
+    "MYT",
+    "MEX",
+    "FSM",
+    "MDA",
+    "MCO",
+    "MNG",
+    "MNE",
+    "MSR",
+    "MAR",
+    "MOZ",
+    "MMR",
+    "NAM",
+    "NRU",
+    "NPL",
+    "NLD",
+    "NCL",
+    "NZL",
+    "NIC",
+    "NER",
+    "NGA",
+    "NIU",
+    "NFK",
+    "MNP",
+    "NOR",
+    "OMN",
+    "PAK",
+    "PLW",
+    "PSE",
+    "PAN",
+    "PNG",
+    "PRY",
+    "PER",
+    "PHL",
+    "PCN",
+    "POL",
+    "PRT",
+    "PRI",
+    "QAT",
+    "REU",
+    "ROU",
+    "RUS",
+    "RWA",
+    "SHN",
+    "KNA",
+    "LCA",
+    "SPM",
+    "VCT",
+    "WSM",
+    "SMR",
+    "STP",
+    "SAU",
+    "SEN",
+    "SRB",
+    "SYC",
+    "SLE",
+    "SGP",
+    "SVK",
+    "SVN",
+    "SLB",
+    "SOM",
+    "ZAF",
+    "SGS",
+    "ESP",
+    "LKA",
+    "SDN",
+    "SUR",
+    "SJM",
+    "SWZ",
+    "SWE",
+    "CHE",
+    "SYR",
+    "TWN",
+    "TJK",
+    "TZA",
+    "THA",
+    "TLS",
+    "TGO",
+    "TKL",
+    "TON",
+    "TTO",
+    "TUN",
+    "TUR",
+    "TKM",
+    "TCA",
+    "TUV",
+    "UGA",
+    "UKR",
+    "ARE",
+    "GBR",
+    "USA",
+    "UMI",
+    "URY",
+    "UZB",
+    "VUT",
+    "VEN",
+    "VNM",
+    "VGB",
+    "VIR",
+    "WLF",
+    "ESH",
+    "YEM",
+    "ZMB",
+    "ZWE",
 }
 
 # Pillar Questions - 50 total across 5 pillars.
@@ -185,10 +400,12 @@ async def preprocess_cache_for_country(
     # Get and attach all documents for this country
     documents = await doc_repo.list_documents_for_country(country_code)
     if not documents:
-        logger.warning(f"[{country_code}] No documents found (including regional/global), skipping preprocessing")
+        logger.warning(
+            f"[{country_code}] No documents found (including regional/global), skipping preprocessing"
+        )
         print(f"[{country_code}] WARNING: No documents found, skipping")
         return stats
-    
+
     print(f"[{country_code}] Found {len(documents)} documents (country/regional/global)")
     logger.info(f"[{country_code}] Found {len(documents)} documents to attach")
 
@@ -207,7 +424,7 @@ async def preprocess_cache_for_country(
     question_num = 0
     use_no_data_placeholder = False  # Flag to use "No data available" for all remaining questions
     first_question_attempted = False  # Track if we've attempted the first question
-    
+
     # Helper function to create "No data available for this country" response
     def create_no_data_response(thread_id: str, request_id: str) -> dict[str, Any]:
         """Create a standardized 'No data available for this country' response."""
@@ -225,11 +442,13 @@ async def preprocess_cache_for_country(
             },
             "messages": [{"role": "assistant", "content": "No data available for this country"}],
         }
-    
+
     for pillar_name, questions in PILLAR_QUESTIONS.items():
         print(f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)")
-        logger.info(f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)")
-        
+        logger.info(
+            f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)"
+        )
+
         for question in questions:
             question_num += 1
             stats["total_questions"] += 1
@@ -241,8 +460,12 @@ async def preprocess_cache_for_country(
                         stats["cache_hits"] += 1
                         first_question_attempted = True
                         if question_num % 10 == 0:
-                            print(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
-                        logger.debug(f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}...")
+                            print(
+                                f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}..."
+                            )
+                        logger.debug(
+                            f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}..."
+                        )
                         continue
 
                 # If we're using placeholder, store "No data available for this country" for all remaining questions
@@ -252,13 +475,21 @@ async def preprocess_cache_for_country(
                     no_data_response = create_no_data_response(thread_id, request_id)
                     await cache_service.store_response(country_code, question, no_data_response)
                     stats["cache_generated"] += 1
-                    print(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
-                    logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
+                    print(
+                        f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
+                    )
+                    logger.info(
+                        f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
+                    )
                     continue
 
                 # Generate response
-                print(f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}...")
-                logger.info(f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}...")
+                print(
+                    f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}..."
+                )
+                logger.info(
+                    f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}..."
+                )
 
                 # Create a minimal auth context (system/internal)
                 auth = AuthContext(
@@ -316,8 +547,12 @@ async def preprocess_cache_for_country(
                         await cache_service.store_response(country_code, question, response_data)
                         stats["cache_generated"] += 1
                         first_question_attempted = True  # Successful generation
-                        print(f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}...")
-                        logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}...")
+                        print(
+                            f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
+                        )
+                        logger.info(
+                            f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
+                        )
                 except Exception as inner_exc:
                     error_msg = str(inner_exc)
                     # Check if this is a "no documents" error
@@ -329,7 +564,7 @@ async def preprocess_cache_for_country(
                         "Unable to produce cited answer; retrieval did not yield citations",
                     ]
                     is_no_docs_error = any(err in error_msg for err in no_docs_errors)
-                    
+
                     # If first question fails with no docs error, use "No data available for this country" for all remaining
                     if is_no_docs_error and not first_question_attempted:
                         use_no_data_placeholder = True
@@ -348,12 +583,14 @@ async def preprocess_cache_for_country(
                         await cache_service.store_response(country_code, question, no_data_response)
                         stats["cache_generated"] += 1
                         first_question_attempted = True
-                        print(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
-                        logger.info(f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}...")
-                    else:
-                        logger.warning(
-                            f"[{country_code}] Skipping question: {error_msg}"
+                        print(
+                            f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
                         )
+                        logger.info(
+                            f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
+                        )
+                    else:
+                        logger.warning(f"[{country_code}] Skipping question: {error_msg}")
                         print(f"[{country_code}] Skipping question: {error_msg}")
                         stats["errors"] += 1
                         first_question_attempted = True
@@ -434,23 +671,27 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
             logger.info("=" * 80)
             logger.info(f"{country_progress} Processing country: {country_code}")
             logger.info("=" * 80)
-            
+
             async with DatabaseSessionManager.session() as session:
                 stats = await preprocess_cache_for_country(country_code, runner, session)
                 total_stats["total_questions"] += stats["total_questions"]
                 total_stats["total_generated"] += stats["cache_generated"]
                 total_stats["total_hits"] += stats["cache_hits"]
                 total_stats["total_errors"] += stats["errors"]
-                
+
                 # Log country completion with progress
                 progress_pct = (idx / len(countries)) * 100
-                print(f"{country_progress} {country_code} completed: {stats['cache_generated']} generated, {stats['cache_hits']} hits, {stats['errors']} errors")
+                print(
+                    f"{country_progress} {country_code} completed: {stats['cache_generated']} generated, {stats['cache_hits']} hits, {stats['errors']} errors"
+                )
                 print(f"Overall progress: {idx}/{len(countries)} countries ({progress_pct:.1f}%)")
                 logger.info(
                     f"{country_progress} {country_code} completed: "
                     f"{stats['cache_generated']} generated, {stats['cache_hits']} hits, {stats['errors']} errors"
                 )
-                logger.info(f"Overall progress: {idx}/{len(countries)} countries ({progress_pct:.1f}%)")
+                logger.info(
+                    f"Overall progress: {idx}/{len(countries)} countries ({progress_pct:.1f}%)"
+                )
 
         # Final summary
         print("=" * 80)
@@ -476,4 +717,4 @@ async def run_preprocessing(runner: ChatRunnerProtocol) -> None:
         logger.exception("Error during cache preprocessing", exc_info=exc)
 
 
-__all__ = ["PILLAR_QUESTIONS", "ALLOWED_COUNTRIES", "run_preprocessing"]
+__all__ = ["ALLOWED_COUNTRIES", "PILLAR_QUESTIONS", "run_preprocessing"]

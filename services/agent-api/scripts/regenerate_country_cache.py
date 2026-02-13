@@ -48,9 +48,7 @@ async def main(country_codes: list[str]) -> None:
             cache_service = ChatCacheService(session)
             deleted = await cache_service.clear_cache_for_country(code)
             print(f"Cleared {deleted} existing cache entries for {code}")
-            stats = await preprocess_cache_for_country(
-                code, runner, session, force_regenerate=True
-            )
+            stats = await preprocess_cache_for_country(code, runner, session, force_regenerate=True)
             print(
                 f"Preprocessing {code}: {stats['cache_generated']} generated, "
                 f"{stats['cache_hits']} hits, {stats['errors']} errors"

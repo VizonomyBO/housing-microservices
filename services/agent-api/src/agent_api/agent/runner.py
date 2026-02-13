@@ -244,8 +244,7 @@ class LangGraphRunner(ChatRunnerProtocol):
                     ai_content = last.get("content") or ""
         if not ai_content:
             ai_content = "I'm sorry, I couldn't produce a response."
-        if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE:
-            ai_content = _cap_answer_length(ai_content, _PROFILE_CHAR_LIMIT)
+        ai_content = _cap_answer_length(ai_content, _PROFILE_CHAR_LIMIT)
 
         tool_calls = _extract_tool_history(
             result.get("messages") if isinstance(result, dict) else None

@@ -131,7 +131,7 @@ async def list_documents(
 ) -> JSONResponse:
     # user_id = _require_user(auth_context)
     # user_uuid = UUID(user_id)
-    stmt = select(Document) #.where(Document.owner_user_id == user_uuid)
+    stmt = select(Document)  # .where(Document.owner_user_id == user_uuid)
     if tags:
         stmt = stmt.where(Document.tags.contains(tags))
     if content_hash:

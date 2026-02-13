@@ -174,54 +174,59 @@ def create_app() -> FastAPI:
         """Check current database connection details and verify connectivity."""
         try:
             from sqlalchemy import text
-            
+
             # Get database configuration from settings
             db_url = settings.database_url
-            
+
             # Parse connection details
             import re
-            host_match = re.search(r'@([^:]+):', db_url)
-            db_match = re.search(r'/([^?]+)(\?|$)', db_url)
-            
+
+            host_match = re.search(r"@([^:]+):", db_url)
+            db_match = re.search(r"/([^?]+)(\?|$)", db_url)
+
             host = host_match.group(1) if host_match else "unknown"
             database = db_match.group(1) if db_match else "unknown"
-            
+
             # Test actual connection and get row counts
             async with DatabaseSessionManager.session() as session:
                 # Get document count
                 doc_result = await session.execute(text("SELECT COUNT(*) FROM documents"))
                 doc_count = doc_result.scalar()
-                
+
                 # Get latest document
                 latest_doc = await session.execute(
-                    text("SELECT canonical_name, created_at FROM documents ORDER BY created_at DESC LIMIT 1")
+                    text(
+                        "SELECT canonical_name, created_at FROM documents ORDER BY created_at DESC LIMIT 1"
+                    )
                 )
                 latest = latest_doc.fetchone()
-                
+
                 return {
                     "status": "connected",
                     "database": {
                         "host": host,
                         "database_name": database,
-                        "connection_status": "active"
+                        "connection_status": "active",
                     },
                     "stats": {
                         "total_documents": doc_count,
                         "latest_document": {
                             "name": latest[0] if latest else None,
-                            "created_at": str(latest[1]) if latest else None
-                        } if latest else None
-                    }
+                            "created_at": str(latest[1]) if latest else None,
+                        }
+                        if latest
+                        else None,
+                    },
                 }
         except Exception as e:
             return {
                 "status": "error",
                 "database": {
-                    "host": host if 'host' in locals() else "unknown",
-                    "database_name": database if 'database' in locals() else "unknown",
-                    "connection_status": "failed"
+                    "host": host if "host" in locals() else "unknown",
+                    "database_name": database if "database" in locals() else "unknown",
+                    "connection_status": "failed",
                 },
-                "error": str(e)
+                "error": str(e),
             }
 
     @app.exception_handler(GatewayError)

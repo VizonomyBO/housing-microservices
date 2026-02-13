@@ -36,7 +36,7 @@ def _get_cache_key(country_code: str) -> str:
 
     Returns:
         S3 key in format: reports/report_{country_code}.pdf
-        
+
     Note:
         Reports are cached indefinitely (no month-based expiration).
         Use skip_cache=true to force regeneration when needed.

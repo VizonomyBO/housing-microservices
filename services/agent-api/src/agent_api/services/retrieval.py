@@ -108,14 +108,12 @@ class RetrievalService:
                 status_code=502,
             )
 
-        effective_top_k = self._top_k
-        if profile is RetrievalProfile.COUNTRY_PROFILE:
-            effective_top_k = max(self._top_k, 12)
+        effective_top_k = max(self._top_k, 12)
 
         expanded_queries = await self._build_query_set(user_query)
         embeddings = await self._embedding_client.embed(expanded_queries)
 
-        if profile is RetrievalProfile.COUNTRY_PROFILE and focus_country is not None:
+        if focus_country is not None:
             retrieved = await self._run_tiered_retrieval(
                 queries=expanded_queries,
                 embeddings=embeddings,
@@ -137,7 +135,6 @@ class RetrievalService:
         reranked = self._apply_profile_weighting(
             chunks=reranked,
             summaries=summaries,
-            profile=profile,
             target_country=focus_country,
             effective_top_k=effective_top_k,
         )
@@ -422,12 +419,9 @@ class RetrievalService:
         *,
         chunks: list[RetrievedChunk],
         summaries,
-        profile: RetrievalProfile,
         target_country: str | None,
         effective_top_k: int | None = None,
     ) -> list[RetrievedChunk]:
-        if profile is not RetrievalProfile.COUNTRY_PROFILE:
-            return chunks
         weight_map = self._build_geo_weight_map(summaries, target_country)
         if not weight_map:
             return chunks
