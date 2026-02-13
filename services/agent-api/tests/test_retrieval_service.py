@@ -111,3 +111,181 @@ async def test_retrieval_raises_without_attachments():
     with pytest.raises(GatewayError) as excinfo:
         await service.retrieve(user_query="hi", conversation_id="conv1")
     assert excinfo.value.code == "ATTACHMENTS_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_default_profile_applies_geo_weighting():
+    from agent_api.services.retrieval import RetrievalProfile
+
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        document_id="doc1",
+        text="USA content",
+        score=0.5,
+        page_number=1,
+        position=0,
+        canonical_name="doc1",
+    )
+
+    class MultiDocScope(_FakeScopeRepo):
+        async def hydrate_documents(self, ids):
+            return {
+                "doc1": type(
+                    "Summary",
+                    (),
+                    {
+                        "status": "active",
+                        "canonical_name": "USA Doc",
+                        "country_code": "USA",
+                        "metadata": {},
+                    },
+                )()
+            }
+
+    service = RetrievalService(
+        scope_repo=MultiDocScope([chunk]),  # type: ignore[arg-type]
+        embedding_client=_FakeEmbed(),  # type: ignore[arg-type]
+        rerank_client=_FakeRerank(),  # type: ignore[arg-type]
+        chat_client=_FakeChat(),  # type: ignore[arg-type]
+        top_k=3,
+    )
+
+    ctx = await service.retrieve(
+        user_query="hi",
+        conversation_id="conv1",
+        profile=RetrievalProfile.DEFAULT,
+        target_country_code="USA",
+    )
+
+    assert ctx.citations
+    assert len(ctx.citations) > 0
+
+
+@pytest.mark.asyncio
+async def test_country_profile_filters_old_documents():
+    from agent_api.services.retrieval import RetrievalProfile
+
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        document_id="doc1",
+        text="old content",
+        score=0.5,
+        page_number=1,
+        position=0,
+        canonical_name="doc1",
+    )
+
+    class OldDocScope(_FakeScopeRepo):
+        async def list_conversation_documents(self, conversation_id: str):
+            return [
+                type(
+                    "Att",
+                    (),
+                    {
+                        "document_id": "doc1",
+                        "attach_source": "test",
+                        "role": "primary",
+                        "visibility": "visible",
+                        "canonical_name": "doc1",
+                        "access_scope": "user_private",
+                        "country_code": "USA",
+                        "metadata": {"publication_year": 1995},
+                    },
+                )()
+            ]
+
+        async def hydrate_documents(self, ids):
+            return {
+                "doc1": type(
+                    "Summary",
+                    (),
+                    {
+                        "status": "active",
+                        "canonical_name": "Old Doc 1995",
+                        "country_code": "USA",
+                        "metadata": {"publication_year": 1995},
+                    },
+                )()
+            }
+
+    service = RetrievalService(
+        scope_repo=OldDocScope([chunk]),  # type: ignore[arg-type]
+        embedding_client=_FakeEmbed(),  # type: ignore[arg-type]
+        rerank_client=_FakeRerank(),  # type: ignore[arg-type]
+        chat_client=_FakeChat(),  # type: ignore[arg-type]
+        top_k=3,
+    )
+
+    with pytest.raises(GatewayError) as excinfo:
+        await service.retrieve(
+            user_query="hi",
+            conversation_id="conv1",
+            profile=RetrievalProfile.COUNTRY_PROFILE,
+        )
+    assert excinfo.value.code == "NO_RESULTS"
+
+
+@pytest.mark.asyncio
+async def test_default_profile_includes_old_documents():
+    from agent_api.services.retrieval import RetrievalProfile
+
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        document_id="doc1",
+        text="old content",
+        score=0.5,
+        page_number=1,
+        position=0,
+        canonical_name="doc1",
+    )
+
+    class OldDocScope(_FakeScopeRepo):
+        async def list_conversation_documents(self, conversation_id: str):
+            return [
+                type(
+                    "Att",
+                    (),
+                    {
+                        "document_id": "doc1",
+                        "attach_source": "test",
+                        "role": "primary",
+                        "visibility": "visible",
+                        "canonical_name": "doc1",
+                        "access_scope": "user_private",
+                        "country_code": "USA",
+                        "metadata": {"publication_year": 1995},
+                    },
+                )()
+            ]
+
+        async def hydrate_documents(self, ids):
+            return {
+                "doc1": type(
+                    "Summary",
+                    (),
+                    {
+                        "status": "active",
+                        "canonical_name": "Old Doc 1995",
+                        "country_code": "USA",
+                        "metadata": {"publication_year": 1995},
+                    },
+                )()
+            }
+
+    service = RetrievalService(
+        scope_repo=OldDocScope([chunk]),  # type: ignore[arg-type]
+        embedding_client=_FakeEmbed(),  # type: ignore[arg-type]
+        rerank_client=_FakeRerank(),  # type: ignore[arg-type]
+        chat_client=_FakeChat(),  # type: ignore[arg-type]
+        top_k=3,
+    )
+
+    ctx = await service.retrieve(
+        user_query="hi",
+        conversation_id="conv1",
+        profile=RetrievalProfile.DEFAULT,
+    )
+
+    assert ctx.citations
+    assert len(ctx.citations) > 0
+    assert ctx.citations[0]["text"] == "old content"
