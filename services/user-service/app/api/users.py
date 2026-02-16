@@ -45,6 +45,7 @@ class UserListRequest(BaseModel):
     countries: list[str] | None = None
     country: str | None = None
     search: str | None = Field(default=None, min_length=1, max_length=200)
+    sort_by: str | None = None
 
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
@@ -159,6 +160,7 @@ async def list_users(
             "statuses": payload.statuses,
             "countries": payload.countries,
             "search": payload.search,
+            "sort_by": payload.sort_by,
         },
     )
     result = UserService.get_all_users(
@@ -169,6 +171,7 @@ async def list_users(
         statuses=(payload.statuses or []) + ([payload.status] if payload.status else []),
         countries=(payload.countries or []) + ([payload.country] if payload.country else []),
         search=payload.search,
+        sort_by=payload.sort_by,
     )
     return JSONResponse(result)
 

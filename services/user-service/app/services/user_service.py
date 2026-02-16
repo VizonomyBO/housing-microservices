@@ -55,6 +55,7 @@ class UserService:
         statuses: list[str] | None = None,
         countries: list[str] | None = None,
         search: str | None = None,
+        sort_by: str | None = None,
     ) -> dict[str, Any]:
         """Get all users with pagination and filtering."""
         query = session.query(User)
@@ -84,7 +85,10 @@ class UserService:
                 )
             )
 
-        query = query.order_by(User.date_created.desc())
+        if sort_by == "date":
+            query = query.order_by(User.date_created.desc())
+        else:
+            query = query.order_by(User.first_name.asc(), User.last_name.asc())
 
         total = query.count()
         offset = (page - 1) * per_page
