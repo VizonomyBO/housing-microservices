@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Iterable, Set
 
 from sqlalchemy import event, inspect
@@ -12,6 +13,10 @@ from shared_data_layer.db.maintenance import (
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.db.models.knowledge_graph import GraphEdge, GraphEvidence
 from shared_data_layer.db.models.retrieval import Chunk
+
+
+def _skip_view_refresh() -> bool:
+    return os.getenv("SKIP_VIEW_REFRESH", "").lower() in ("true", "1", "yes")
 
 
 def _collect_base_countries(target: Document) -> Set[str]:
@@ -43,11 +48,15 @@ def _collect_base_countries(target: Document) -> Set[str]:
 
 
 def _refresh_countries(connection, countries: Iterable[str]) -> None:
+    if _skip_view_refresh():
+        return
     for country in countries:
         refresh_base_documents_cache_sync(connection, country)
 
 
 def _refresh_active_chunks(connection) -> None:
+    if _skip_view_refresh():
+        return
     refresh_active_chunks_view_sync(connection, concurrently=False)
 
 
