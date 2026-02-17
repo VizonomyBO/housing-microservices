@@ -35,15 +35,14 @@ from streaming.sse_emitter import SSEEmitter
 logger = logging.getLogger(__name__)
 
 _PROFILE_CHAR_LIMIT = 3000
-_PROFILE_MAX_TOKENS = 900
+_PROFILE_MAX_TOKENS = 500
 _COUNTRY_PROFILE_SYSTEM_PROMPT = (
-    "You are a retrieval-first country profile analyst. Use the retrieved evidence to write one or "
-    "two concise paragraphs (no bullets or numbered lists) that directly answer the user's "
-    "country-focused policy questions. Weave the points together like a textbook section for an "
-    "information system: clear topic sentences, coherent flow across sub-questions, and short "
-    "sentences when possible. Cite specific facts with [c#] references immediately after each "
-    "claim. If retrieval is thin, restate only what is supported. Stay within the response length "
-    "limit and never cut off mid-sentence."
+    "You are a retrieval-first country profile analyst. Use the retrieved evidence to write "
+    "EXACTLY two short paragraphs separated by a blank line. Each paragraph must be 3-5 sentences "
+    "maximum. Do NOT write a single long paragraph. Do NOT use bullet points or numbered lists. "
+    "Weave the points together like a textbook section: clear topic sentences, coherent flow, and "
+    "short sentences. Cite specific facts with [c#] references immediately after each claim. "
+    "If retrieval is thin, restate only what is supported. Never cut off mid-sentence."
 )
 
 

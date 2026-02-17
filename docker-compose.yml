@@ -152,6 +152,7 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-localstack}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-localstack}
       AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      SKIP_VIEW_REFRESH: ${SKIP_VIEW_REFRESH:-true}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
       interval: 30s

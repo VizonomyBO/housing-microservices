@@ -136,7 +136,7 @@
         }
 
         .section-content p {
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             text-align: left;
         }
 
@@ -194,6 +194,22 @@
             color: #000d1a;
             margin-top: 6px;
             margin-bottom: 3px;
+        }
+
+        .section-content sup {
+            font-size: 7pt;
+            vertical-align: super;
+            line-height: 0;
+        }
+
+        .section-content a.citation-link {
+            color: #004370;
+            text-decoration: none;
+        }
+
+        .section-content a.citation-link:hover {
+            color: #009fda;
+            text-decoration: underline;
         }
 
         /* References section */
@@ -264,7 +280,7 @@
     <div class="references">
         <div class="references-title">References</div>
         {% for ref in references %}
-        <div class="reference-item">
+        <div class="reference-item" id="ref-{{ ref.citation_number }}">
             [{{ ref.citation_number }}] {{ ref.document_name }}
         </div>
         {% endfor %}

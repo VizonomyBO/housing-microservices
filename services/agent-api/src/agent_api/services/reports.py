@@ -40,47 +40,27 @@ def _map_chunk_citations_to_documents(
     """Map chunk-based citations [c1], [c2] to document-based citations [1], [2].
 
     Deduplicates consecutive citations so [1][1][1] becomes [1] and [1][2][1] becomes [1][2].
-
-    Args:
-        markdown_content: Text with [c1], [c2], etc. citations
-        citations: List of citation dicts with canonical_name and chunk info
-        document_index: Mapping of document_name -> citation number (updated in place)
-
-    Returns:
-        Tuple of (updated_content, updated_document_index)
-
-    Example:
-        Input text: "Housing markets are complex[c1][c2]. Policies matter[c3]."
-        Where c1, c2 are from doc A and c3 is from doc B
-        Output text: "Housing markets are complex[1]. Policies matter[2]."
+    Preserves citation placement relative to punctuation: "text. [1][2]" stays as-is.
     """
-    # Build mapping: c1 -> document_name -> [citation_number]
     chunk_to_doc_citation = {}
 
     for idx, citation in enumerate(citations, start=1):
         doc_name = citation.get("canonical_name") or citation.get("doc_id", "Unknown")
         chunk_citation = f"c{idx}"
 
-        # Assign document number if not already assigned
         if doc_name not in document_index:
             document_index[doc_name] = len(document_index) + 1
 
         doc_citation_num = document_index[doc_name]
         chunk_to_doc_citation[chunk_citation] = doc_citation_num
 
-    # Replace [c1] -> [1], [c2] -> [2], etc.
     for chunk_cit, doc_num in chunk_to_doc_citation.items():
         markdown_content = markdown_content.replace(f"[{chunk_cit}]", f"[{doc_num}]")
 
-    # Deduplicate citations in groups: [1][1][1] -> [1], [1][2][1] -> [1][2]
-    # Handles all separator formats: [10],[10], [10]-[10], [10].[10]
-    # Preserves sentence punctuation AND spacing: [1][3]. Together, [10][1], [1].
     def deduplicate_citation_group(match):
         group = match.group(0)
-        # Extract all citation numbers from any format
         citation_nums = re.findall(r"\[(\d+)\]", group)
 
-        # Deduplicate while preserving order: ['1', '2', '1'] -> ['1', '2']
         seen = set()
         unique_citations = []
         for num in citation_nums:
@@ -88,30 +68,63 @@ def _map_chunk_citations_to_documents(
                 unique_citations.append(num)
                 seen.add(num)
 
-        # Check for trailing punctuation + space after last citation
         trailing = ""
-        after_citations = group[group.rfind("]") + 1 :]  # Everything after last ]
+        after_citations = group[group.rfind("]") + 1 :]
 
-        # If there's punctuation followed by space/end, preserve it
         punct_match = re.match(r"^[,.\-\s]*([.,;!?])(\s*)", after_citations)
-        if punct_match:
-            # Preserve if it's sentence punctuation (followed by space or end of string)
-            if punct_match.group(2) or not re.match(
-                r"^\d", after_citations[len(punct_match.group()) :]
-            ):
-                trailing = punct_match.group(1) + punct_match.group(2)
+        if punct_match and (
+            punct_match.group(2)
+            or not re.match(r"^\d", after_citations[len(punct_match.group()) :])
+        ):
+            trailing = punct_match.group(1) + punct_match.group(2)
 
-        # Rebuild: clean citations + trailing punctuation/space
         return "".join(f"[{num}]" for num in unique_citations) + trailing
 
-    # Match citation groups with any separators, stop before letters
     markdown_content = re.sub(
         r"\[\d+\](?:[,.\-\s]*\[\d+\])*[,.\-\s]*(?=[A-Z]|[a-z]|$)",
         deduplicate_citation_group,
         markdown_content,
     )
 
+    markdown_content = re.sub(r"([^\s\]])(\[\d+\])", r"\1 \2", markdown_content)
+    markdown_content = re.sub(r"(\])([^\s\]\[\.,;!?\d])", r"\1 \2", markdown_content)
+
+    markdown_content = re.sub(
+        r"([.,;!?])\s+(\[\d+\](?:\s*\[\d+\])*)",
+        lambda m: f" {m.group(2)}{m.group(1)} "
+        if m.end() < len(m.string) and m.string[m.end()].isalpha()
+        else f" {m.group(2)}{m.group(1)}",
+        markdown_content,
+    )
+
+    markdown_content = re.sub(r"[^\S\n]{2,}", " ", markdown_content)
+
     return markdown_content, document_index
+
+
+def _force_two_paragraphs(text: str) -> str:
+    if "\n\n" in text.strip():
+        return text
+
+    sentence_end = re.compile(
+        r"""
+        (?:                     # citation cluster (optional)
+            (?:\s*\[\w+\])+     # one or more [c1], [2], etc.
+        )?
+        \.\s+                   # period followed by whitespace
+        """,
+        re.VERBOSE,
+    )
+
+    spans = list(sentence_end.finditer(text))
+    if len(spans) < 2:
+        return text
+
+    midpoint = len(text) // 2
+    best = min(spans, key=lambda m: abs(m.end() - midpoint))
+    split_pos = best.end()
+
+    return text[:split_pos].rstrip() + "\n\n" + text[split_pos:].lstrip()
 
 
 def _get_section_prompts(country_name: str) -> list[dict[str, str]]:
@@ -127,99 +140,109 @@ def _get_section_prompts(country_name: str) -> list[dict[str, str]]:
         f"Do NOT provide statistics without document support. "
         f"If evidence is limited, state 'regional evidence suggests...' or 'global studies show...'. "
     )
+    
+    format_reminder = (
+        "\n\nREMINDER: Your response MUST be exactly 2 paragraphs separated by a blank line. "
+        "Each paragraph 3-5 sentences max. No bullet points. No numbered lists."
+    )
 
     return [
         {
             "title": "1. Executive Summary",
-            "prompt": f"{base_instruction}Then write an Executive Summary for {country_name}'s housing market based on available evidence. Summarize market conditions, main constraints, and high-potential opportunities using only document-supported claims. Outline emerging trends and policy levers. Clearly distinguish between {country_name}-specific findings and regional/global patterns.",
+            "prompt": f"{base_instruction}Then write a brief Executive Summary for {country_name}'s housing market based on available evidence. Summarize market conditions, main constraints, and high-potential opportunities using only document-supported claims. Outline emerging trends and policy levers. Clearly distinguish between {country_name}-specific findings and regional/global patterns.{format_reminder}",
         },
         {
             "title": "2. Introduction of Purpose and Scope",
-            "prompt": f"{base_instruction}Then write the Introduction of Purpose and Scope. State that the report diagnoses housing market patterns using evidence from retrieved documents. Describe the analytical framework and document types. If documents are regional/global rather than {country_name}-specific, state that clearly.",
+            "prompt": f"{base_instruction}Then write a brief Introduction of Purpose and Scope. State that the report diagnoses housing market patterns using evidence from retrieved documents. Describe the analytical framework and document types. If documents are regional/global rather than {country_name}-specific, state that clearly.{format_reminder}",
         },
         {
             "title": "3. National and Regional Context",
-            "prompt": f"{base_instruction}Then write the National and Regional Context. ONLY include {country_name}-specific data if explicitly stated in documents. If documents discuss Latin America or regional patterns, frame findings as regional context. Do NOT invent city names, demographic statistics, or GDP figures not in the documents.",
+            "prompt": f"{base_instruction}Then write a brief National and Regional Context. ONLY include {country_name}-specific data if explicitly stated in documents. If documents discuss Latin America or regional patterns, frame findings as regional context. Do NOT invent city names, demographic statistics, or GDP figures not in the documents.{format_reminder}",
         },
         {
             "title": "4. Housing Sector within the Economy",
-            "prompt": f"{base_instruction}Then write the 'Housing Sector within the Economy' section. If documents provide {country_name} GDP/employment data, use it. Otherwise, describe regional or global patterns and explicitly label them as such (e.g., 'in Latin American countries' or 'globally, housing sectors contribute...'). Do NOT estimate {country_name} figures without document support.",
+            "prompt": f"{base_instruction}Then write a brief 'Housing Sector within the Economy' section. If documents provide {country_name} GDP/employment data, use it. Otherwise, describe regional or global patterns and explicitly label them as such (e.g., 'in Latin American countries' or 'globally, housing sectors contribute...'). Do NOT estimate {country_name} figures without document support.{format_reminder}",
         },
         {
             "title": "5. Institutional and Legal Framework",
-            "prompt": f"{base_instruction}Then write the Institutional and Legal Framework section. ONLY describe {country_name} institutions/laws if explicitly mentioned in documents. If documents discuss regional patterns, write 'in Latin America' or 'regional institutional frameworks typically...'. Do NOT name specific {country_name} agencies or programs unless cited in documents.",
+            "prompt": f"{base_instruction}Then write a brief Institutional and Legal Framework section. ONLY describe {country_name} institutions/laws if explicitly mentioned in documents. If documents discuss regional patterns, write 'in Latin America' or 'regional institutional frameworks typically...'. Do NOT name specific {country_name} agencies or programs unless cited in documents.{format_reminder}",
         },
         {
             "title": "6. Housing Supply",
-            "prompt": f"{base_instruction}Then write the Housing Supply section. Base analysis on document evidence. If documents discuss land access patterns regionally, state that. If {country_name} supply chain details are in documents, cite them. Otherwise, describe regional/global housing supply patterns and note evidence limitations for {country_name}.",
+            "prompt": f"{base_instruction}Then write a brief Housing Supply section. Base analysis on document evidence. If documents discuss land access patterns regionally, state that. If {country_name} supply chain details are in documents, cite them. Otherwise, describe regional/global housing supply patterns and note evidence limitations for {country_name}.{format_reminder}",
         },
         {
             "title": "7. Rental Housing",
-            "prompt": f"{base_instruction}Then write the Rental Housing section. ONLY provide {country_name} rental statistics, regulations, or programs if explicitly in documents. If documents discuss rental housing in Latin America generally, frame as regional context. Do NOT invent tenure percentages, rental programs, or legal frameworks without citations.",
+            "prompt": f"{base_instruction}Then write a brief Rental Housing section. ONLY provide {country_name} rental statistics, regulations, or programs if explicitly in documents. If documents discuss rental housing in Latin America generally, frame as regional context. Do NOT invent tenure percentages, rental programs, or legal frameworks without citations.{format_reminder}",
         },
         {
             "title": "8. Housing Finance",
-            "prompt": f"{base_instruction}Then write the Housing Finance section. Describe mortgage markets and housing finance based on document evidence. If documents cover Latin American housing finance patterns, state that explicitly. Do NOT claim {country_name} has specific mortgage products, interest rates, or financial institutions unless documented.",
+            "prompt": f"{base_instruction}Then write a brief Housing Finance section. Describe mortgage markets and housing finance based on document evidence. If documents cover Latin American housing finance patterns, state that explicitly. Do NOT claim {country_name} has specific mortgage products, interest rates, or financial institutions unless documented.{format_reminder}",
         },
         {
             "title": "9. Government Housing Programs and Subsidies",
-            "prompt": f"{base_instruction}Then write Government Housing Programs section. ONLY name {country_name} programs if explicitly mentioned in documents. If documents discuss subsidy approaches regionally/globally, describe those patterns and note they may apply to {country_name}. Do NOT invent program names, eligibility criteria, or coverage statistics.",
+            "prompt": f"{base_instruction}Then write a brief Government Housing Programs section. ONLY name {country_name} programs if explicitly mentioned in documents. If documents discuss subsidy approaches regionally/globally, describe those patterns and note they may apply to {country_name}. Do NOT invent program names, eligibility criteria, or coverage statistics.{format_reminder}",
         },
         {
             "title": "10. Supply and Demand Analysis",
-            "prompt": f"{base_instruction}Then write Supply and Demand Analysis. If documents provide {country_name} housing deficit data, use it. Otherwise, discuss regional housing deficit patterns and methodologies. Do NOT quantify {country_name}'s deficit without document support. Use qualifiers like 'regional evidence suggests...'.",
+            "prompt": f"{base_instruction}Then write a brief Supply and Demand Analysis. If documents provide {country_name} housing deficit data, use it. Otherwise, discuss regional housing deficit patterns and methodologies. Do NOT quantify {country_name}'s deficit without document support. Use qualifiers like 'regional evidence suggests...'.{format_reminder}",
         },
         {
             "title": "11. Constraints and Opportunities",
-            "prompt": f"{base_instruction}Then write Constraints and Opportunities. Synthesize findings from documents, distinguishing between {country_name}-specific evidence and regional/global patterns. Frame recommendations based on regional experience if {country_name} evidence is limited. Be explicit about evidence base for each claim.",
+            "prompt": f"{base_instruction}Then write a brief Constraints and Opportunities section. Synthesize findings from documents, distinguishing between {country_name}-specific evidence and regional/global patterns. Frame recommendations based on regional experience if {country_name} evidence is limited. Be explicit about evidence base for each claim.{format_reminder}",
         },
     ]
 
 
+_FORMAT_REMINDER = (
+    "\n\nREMINDER: Your response MUST be exactly 2 paragraphs separated by a blank line. "
+    "Each paragraph 3-5 sentences max. No bullet points. No numbered lists."
+)
+
 SECTION_PROMPTS = [
     {
         "title": "1. Executive Summary",
-        "prompt": "Write an Executive Summary for the housing market. Summarize market conditions, main constraints, and high-potential opportunities. Outline emerging trends and policy levers to ensure supply of affordable housing. Highlight priority interventions across the value chain.",
+        "prompt": f"Write a brief Executive Summary for the housing market. Summarize market conditions, main constraints, and high-potential opportunities. Outline emerging trends and policy levers to ensure supply of affordable housing. Highlight priority interventions across the value chain.{_FORMAT_REMINDER}",
     },
     {
         "title": "2. Introduction of Purpose and Scope",
-        "prompt": "Write the Introduction of Purpose and Scope. State that the report is designed to diagnose strengths and weaknesses of the housing market using the Housing Sector Value Chain as a framework. Clarify that this report serves as an entry point for further engagement. Describe the analytical framework and types of sources used.",
+        "prompt": f"Write a brief Introduction of Purpose and Scope. State that the report is designed to diagnose strengths and weaknesses of the housing market using the Housing Sector Value Chain as a framework. Clarify that this report serves as an entry point for further engagement. Describe the analytical framework and types of sources used.{_FORMAT_REMINDER}",
     },
     {
         "title": "3. National and Regional Context",
-        "prompt": "Write the National and Regional Context section. Analyze the country's urban system, labor market, and macroeconomic trends. Present key demographic data. Summarize historical growth trends. Compare the country with its regional peers.",
+        "prompt": f"Write a brief National and Regional Context section. Analyze the country's urban system, labor market, and macroeconomic trends. Present key demographic data. Summarize historical growth trends. Compare the country with its regional peers.{_FORMAT_REMINDER}",
     },
     {
         "title": "4. Housing Sector within the Economy",
-        "prompt": "Write the 'Housing Sector within the Economy' section. Estimate the sector's contribution to GDP and employment (formal and informal). Assess the total economic impact of improvements in housing sector performance.",
+        "prompt": f"Write a brief 'Housing Sector within the Economy' section. Estimate the sector's contribution to GDP and employment (formal and informal). Assess the total economic impact of improvements in housing sector performance.{_FORMAT_REMINDER}",
     },
     {
         "title": "5. Institutional and Legal Framework",
-        "prompt": "Write the Institutional and Legal Framework section. Summarize the legal framework governing the housing sector. Identify and describe the main institutions responsible for housing, including mandates, capacities, and constraints.",
+        "prompt": f"Write a brief Institutional and Legal Framework section. Summarize the legal framework governing the housing sector. Identify and describe the main institutions responsible for housing, including mandates, capacities, and constraints.{_FORMAT_REMINDER}",
     },
     {
         "title": "6. Housing Supply",
-        "prompt": "Write the Housing Supply section. Characterize and assess the housing supply value chain: access to land, infrastructure, construction/materials. Discuss spatial patterns of housing development and the capacity of private developers.",
+        "prompt": f"Write a brief Housing Supply section. Characterize and assess the housing supply value chain: access to land, infrastructure, construction/materials. Discuss spatial patterns of housing development and the capacity of private developers.{_FORMAT_REMINDER}",
     },
     {
         "title": "7. Rental Housing",
-        "prompt": "Write the Rental Housing section. Describe the structure and dynamics of the rental housing market. Summarize the legal and regulatory framework for rental housing.",
+        "prompt": f"Write a brief Rental Housing section. Describe the structure and dynamics of the rental housing market. Summarize the legal and regulatory framework for rental housing.{_FORMAT_REMINDER}",
     },
     {
         "title": "8. Housing Finance",
-        "prompt": "Write the Housing Finance section. Summarize the state of the mortgage finance market (products, institutions, depth). Analyze the structure, volume, and cost of housing finance. Review the construction finance sector.",
+        "prompt": f"Write a brief Housing Finance section. Summarize the state of the mortgage finance market (products, institutions, depth). Analyze the structure, volume, and cost of housing finance. Review the construction finance sector.{_FORMAT_REMINDER}",
     },
     {
         "title": "9. Government Housing Programs and Subsidies",
-        "prompt": "Write the Government Housing Programs and Subsidies section. Provide a brief chronology of government interventions. Summarize the design, coverage, eligibility, and performance of government housing programs.",
+        "prompt": f"Write a brief Government Housing Programs and Subsidies section. Provide a brief chronology of government interventions. Summarize the design, coverage, eligibility, and performance of government housing programs.{_FORMAT_REMINDER}",
     },
     {
         "title": "10. Supply and Demand Analysis",
-        "prompt": "Write the Supply and Demand Analysis section. Prepare a current snapshot of the housing market, comparing supply and demand. Quantify the housing deficit.",
+        "prompt": f"Write a brief Supply and Demand Analysis section. Prepare a current snapshot of the housing market, comparing supply and demand. Quantify the housing deficit.{_FORMAT_REMINDER}",
     },
     {
         "title": "11. Constraints and Opportunities",
-        "prompt": "Write the Constraints and Opportunities section. Synthesize the main constraints across the housing value chain. Recommend actions to unblock housing and strengthen the enabling environment.",
+        "prompt": f"Write a brief Constraints and Opportunities section. Synthesize the main constraints across the housing value chain. Recommend actions to unblock housing and strengthen the enabling environment.{_FORMAT_REMINDER}",
     },
 ]
 
@@ -330,23 +353,19 @@ class ReportService:
                 markdown_content = result.done_payload.get("answer", "")
                 citations = result.done_payload.get("citations", [])
 
-                # Map chunk citations [c1], [c2] to document citations [1], [2]
                 markdown_content, document_index = _map_chunk_citations_to_documents(
                     markdown_content, citations, document_index
                 )
 
-                # COMMENTED OUT: Old citation removal that stripped citations entirely
-                # This removed [c1], [c2] markers but left no link to references
-                # # Remove citation markers [c1][c2][cx] from the text
-                # markdown_content = re.sub(r'\[c\d+\]', '', markdown_content)
-                # # Clean up punctuation artifacts left by citation removal
-                # markdown_content = re.sub(r',\s*\.', '.', markdown_content)  # ", ." → "."
-                # markdown_content = re.sub(r',\s*,+', ',', markdown_content)  # ",," → ","
-                # markdown_content = re.sub(r'\s+\.', '.', markdown_content)   # " ." → "."
-                # markdown_content = re.sub(r'\s+,', ',', markdown_content)    # " ," → ","
+                markdown_content = _force_two_paragraphs(markdown_content)
 
-                # Convert Markdown to HTML
                 html_content = markdown.markdown(markdown_content)
+
+                html_content = re.sub(
+                    r"\[(\d+)\]",
+                    r'<sup><a href="#ref-\1" class="citation-link">[\1]</a></sup>',
+                    html_content,
+                )
 
                 sections_data.append({"title": section_def["title"], "content": html_content})
 
