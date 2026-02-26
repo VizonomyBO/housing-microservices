@@ -38,7 +38,6 @@ def build_agent_graph(
         messages = state.get("messages", [])
         if not messages:
             return {"messages": []}
-        # Bind tools so the model can issue tool calls; system prompt is injected as first message.
         bound = llm.bind_tools(tool_list)
         response = bound.invoke(messages)
         return {"messages": [response]}

@@ -257,7 +257,7 @@ class CountryISOAlpha3(str, Enum):
     TONGA = ("TON", "Tonga")
     TRINIDAD_AND_TOBAGO = ("TTO", "Trinidad and Tobago")
     TUNISIA = ("TUN", "Tunisia")
-    TURKIYE = ("TUR", "Turkiye")
+    TURKIYE = ("TUR", "Türkiye")
     TURKMENISTAN = ("TKM", "Turkmenistan")
     TURKS_AND_CAICOS_ISLANDS = ("TCA", "Turks and Caicos Islands")
     TUVALU = ("TUV", "Tuvalu")

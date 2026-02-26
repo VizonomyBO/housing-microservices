@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -102,6 +104,36 @@ def _map_chunk_citations_to_documents(
     return markdown_content, document_index
 
 
+_FAILURE_PATTERNS: list[str] = [
+    "i'm sorry",
+    "i am sorry",
+    "couldn't produce a response",
+    "could not produce a response",
+    "unable to develop an analysis",
+    "unable to produce cited answer",
+    "no information available",
+    "no data available",
+    "i don't have enough information",
+    "i do not have enough information",
+]
+
+_MIN_SECTION_CHARS = 80
+
+
+def _is_section_content_valid(markdown_content: str) -> tuple[bool, str]:
+    """Return (valid, reason) for a generated section's raw markdown content."""
+    stripped = markdown_content.strip()
+    if not stripped:
+        return False, "empty response"
+    if len(stripped) < _MIN_SECTION_CHARS:
+        return False, f"response too short ({len(stripped)} chars, min {_MIN_SECTION_CHARS})"
+    lower = stripped.lower()
+    for pattern in _FAILURE_PATTERNS:
+        if pattern in lower:
+            return False, f"failure pattern detected: '{pattern}'"
+    return True, "ok"
+
+
 def _force_two_paragraphs(text: str) -> str:
     if "\n\n" in text.strip():
         return text
@@ -128,123 +160,110 @@ def _force_two_paragraphs(text: str) -> str:
 
 
 def _get_section_prompts(country_name: str) -> list[dict[str, str]]:
-    """Generate section prompts with country name injected and strict evidence requirements."""
-    # Base instruction for all sections to prevent hallucination
-    base_instruction = (
-        f"First, retrieve relevant documents about {country_name}'s housing sector. "
-        f"CRITICAL: ONLY use information explicitly stated in the retrieved documents. "
-        f"If documents mention '{country_name}' specifically, write about {country_name}. "
-        f"If documents only mention 'Latin America', 'LAC', or regional patterns, write 'in Latin America' or 'regionally'. "
-        f"If documents only mention global patterns, write 'globally' or 'internationally'. "
-        f"Do NOT infer {country_name}-specific statistics, institutions, programs, or policies unless explicitly stated in the documents. "
-        f"Do NOT provide statistics without document support. "
-        f"If evidence is limited, state 'regional evidence suggests...' or 'global studies show...'. "
-    )
-    
-    format_reminder = (
-        "\n\nREMINDER: Your response MUST be exactly 2 paragraphs separated by a blank line. "
-        "Each paragraph 3-5 sentences max. No bullet points. No numbered lists."
-    )
+    """Generate clean, focused section prompts with country name injected.
 
+    The system prompt (_COUNTRY_PROFILE_SYSTEM_PROMPT) already enforces
+    retrieval-first behavior, 2-paragraph format, citation requirements,
+    and no bullet points. These prompts only need to specify the topic
+    and a fallback strategy for thin country-specific evidence.
+    """
+    fallback = (
+        f"If {country_name}-specific evidence is limited, you may draw on regional and global "
+        f"documents, but you MUST clearly state when a finding comes from regional or global "
+        f"sources rather than {country_name}-specific evidence. "
+        f"Use qualifiers like 'Across the region...' or 'Global evidence suggests...' "
+        f"for non-country-specific sources."
+    )
     return [
         {
             "title": "1. Executive Summary",
-            "prompt": f"{base_instruction}Then write a brief Executive Summary for {country_name}'s housing market based on available evidence. Summarize market conditions, main constraints, and high-potential opportunities using only document-supported claims. Outline emerging trends and policy levers. Clearly distinguish between {country_name}-specific findings and regional/global patterns.{format_reminder}",
+            "prompt": (
+                f"Summarize {country_name}'s housing market conditions, main constraints, "
+                f"and high-potential opportunities. Highlight emerging trends and policy levers "
+                f"for affordable housing supply. {fallback}"
+            ),
         },
         {
             "title": "2. Introduction of Purpose and Scope",
-            "prompt": f"{base_instruction}Then write a brief Introduction of Purpose and Scope. State that the report diagnoses housing market patterns using evidence from retrieved documents. Describe the analytical framework and document types. If documents are regional/global rather than {country_name}-specific, state that clearly.{format_reminder}",
+            "prompt": (
+                f"Introduce the purpose and scope of this housing sector diagnostic for "
+                f"{country_name}. Describe the analytical framework used and the types of "
+                f"evidence sources consulted. {fallback}"
+            ),
         },
         {
             "title": "3. National and Regional Context",
-            "prompt": f"{base_instruction}Then write a brief National and Regional Context. ONLY include {country_name}-specific data if explicitly stated in documents. If documents discuss Latin America or regional patterns, frame findings as regional context. Do NOT invent city names, demographic statistics, or GDP figures not in the documents.{format_reminder}",
+            "prompt": (
+                f"Describe {country_name}'s national and regional context relevant to housing: "
+                f"urban system, demographic trends, labor market conditions, and macroeconomic "
+                f"factors. Compare with regional peers where applicable. {fallback}"
+            ),
         },
         {
             "title": "4. Housing Sector within the Economy",
-            "prompt": f"{base_instruction}Then write a brief 'Housing Sector within the Economy' section. If documents provide {country_name} GDP/employment data, use it. Otherwise, describe regional or global patterns and explicitly label them as such (e.g., 'in Latin American countries' or 'globally, housing sectors contribute...'). Do NOT estimate {country_name} figures without document support.{format_reminder}",
+            "prompt": (
+                f"Analyze the role of {country_name}'s housing sector within its economy, "
+                f"including contributions to GDP, employment in formal and informal construction, "
+                f"and the broader economic impact of housing sector performance. {fallback}"
+            ),
         },
         {
             "title": "5. Institutional and Legal Framework",
-            "prompt": f"{base_instruction}Then write a brief Institutional and Legal Framework section. ONLY describe {country_name} institutions/laws if explicitly mentioned in documents. If documents discuss regional patterns, write 'in Latin America' or 'regional institutional frameworks typically...'. Do NOT name specific {country_name} agencies or programs unless cited in documents.{format_reminder}",
+            "prompt": (
+                f"Describe the institutional and legal framework governing {country_name}'s "
+                f"housing sector. Identify the main institutions responsible for housing policy, "
+                f"their mandates, capacities, and key constraints. {fallback}"
+            ),
         },
         {
             "title": "6. Housing Supply",
-            "prompt": f"{base_instruction}Then write a brief Housing Supply section. Base analysis on document evidence. If documents discuss land access patterns regionally, state that. If {country_name} supply chain details are in documents, cite them. Otherwise, describe regional/global housing supply patterns and note evidence limitations for {country_name}.{format_reminder}",
+            "prompt": (
+                f"Characterize {country_name}'s housing supply value chain: access to land, "
+                f"infrastructure provision, construction materials, and the capacity of private "
+                f"developers. Discuss spatial patterns of housing development. {fallback}"
+            ),
         },
         {
             "title": "7. Rental Housing",
-            "prompt": f"{base_instruction}Then write a brief Rental Housing section. ONLY provide {country_name} rental statistics, regulations, or programs if explicitly in documents. If documents discuss rental housing in Latin America generally, frame as regional context. Do NOT invent tenure percentages, rental programs, or legal frameworks without citations.{format_reminder}",
+            "prompt": (
+                f"Describe the structure and dynamics of {country_name}'s rental housing market, "
+                f"including tenure patterns, the legal and regulatory framework for rental "
+                f"housing, and key challenges facing renters. {fallback}"
+            ),
         },
         {
             "title": "8. Housing Finance",
-            "prompt": f"{base_instruction}Then write a brief Housing Finance section. Describe mortgage markets and housing finance based on document evidence. If documents cover Latin American housing finance patterns, state that explicitly. Do NOT claim {country_name} has specific mortgage products, interest rates, or financial institutions unless documented.{format_reminder}",
+            "prompt": (
+                f"Describe the state of {country_name}'s housing finance sector, including "
+                f"mortgage market depth, key financial institutions, products available, "
+                f"construction finance, and access to housing credit. {fallback}"
+            ),
         },
         {
             "title": "9. Government Housing Programs and Subsidies",
-            "prompt": f"{base_instruction}Then write a brief Government Housing Programs section. ONLY name {country_name} programs if explicitly mentioned in documents. If documents discuss subsidy approaches regionally/globally, describe those patterns and note they may apply to {country_name}. Do NOT invent program names, eligibility criteria, or coverage statistics.{format_reminder}",
+            "prompt": (
+                f"Describe {country_name}'s government housing programs and subsidies, including "
+                f"their design, coverage, eligibility criteria, and performance. Note the "
+                f"chronology of key government interventions in housing. {fallback}"
+            ),
         },
         {
             "title": "10. Supply and Demand Analysis",
-            "prompt": f"{base_instruction}Then write a brief Supply and Demand Analysis. If documents provide {country_name} housing deficit data, use it. Otherwise, discuss regional housing deficit patterns and methodologies. Do NOT quantify {country_name}'s deficit without document support. Use qualifiers like 'regional evidence suggests...'.{format_reminder}",
+            "prompt": (
+                f"Analyze {country_name}'s housing supply and demand balance. Describe the "
+                f"current housing deficit, its composition across income segments, and the "
+                f"methodologies used to quantify it. {fallback}"
+            ),
         },
         {
             "title": "11. Constraints and Opportunities",
-            "prompt": f"{base_instruction}Then write a brief Constraints and Opportunities section. Synthesize findings from documents, distinguishing between {country_name}-specific evidence and regional/global patterns. Frame recommendations based on regional experience if {country_name} evidence is limited. Be explicit about evidence base for each claim.{format_reminder}",
+            "prompt": (
+                f"Synthesize the main constraints across {country_name}'s housing value chain "
+                f"and identify priority opportunities. Recommend actions to unblock housing "
+                f"supply and strengthen the enabling environment. {fallback}"
+            ),
         },
     ]
-
-
-_FORMAT_REMINDER = (
-    "\n\nREMINDER: Your response MUST be exactly 2 paragraphs separated by a blank line. "
-    "Each paragraph 3-5 sentences max. No bullet points. No numbered lists."
-)
-
-SECTION_PROMPTS = [
-    {
-        "title": "1. Executive Summary",
-        "prompt": f"Write a brief Executive Summary for the housing market. Summarize market conditions, main constraints, and high-potential opportunities. Outline emerging trends and policy levers to ensure supply of affordable housing. Highlight priority interventions across the value chain.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "2. Introduction of Purpose and Scope",
-        "prompt": f"Write a brief Introduction of Purpose and Scope. State that the report is designed to diagnose strengths and weaknesses of the housing market using the Housing Sector Value Chain as a framework. Clarify that this report serves as an entry point for further engagement. Describe the analytical framework and types of sources used.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "3. National and Regional Context",
-        "prompt": f"Write a brief National and Regional Context section. Analyze the country's urban system, labor market, and macroeconomic trends. Present key demographic data. Summarize historical growth trends. Compare the country with its regional peers.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "4. Housing Sector within the Economy",
-        "prompt": f"Write a brief 'Housing Sector within the Economy' section. Estimate the sector's contribution to GDP and employment (formal and informal). Assess the total economic impact of improvements in housing sector performance.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "5. Institutional and Legal Framework",
-        "prompt": f"Write a brief Institutional and Legal Framework section. Summarize the legal framework governing the housing sector. Identify and describe the main institutions responsible for housing, including mandates, capacities, and constraints.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "6. Housing Supply",
-        "prompt": f"Write a brief Housing Supply section. Characterize and assess the housing supply value chain: access to land, infrastructure, construction/materials. Discuss spatial patterns of housing development and the capacity of private developers.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "7. Rental Housing",
-        "prompt": f"Write a brief Rental Housing section. Describe the structure and dynamics of the rental housing market. Summarize the legal and regulatory framework for rental housing.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "8. Housing Finance",
-        "prompt": f"Write a brief Housing Finance section. Summarize the state of the mortgage finance market (products, institutions, depth). Analyze the structure, volume, and cost of housing finance. Review the construction finance sector.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "9. Government Housing Programs and Subsidies",
-        "prompt": f"Write a brief Government Housing Programs and Subsidies section. Provide a brief chronology of government interventions. Summarize the design, coverage, eligibility, and performance of government housing programs.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "10. Supply and Demand Analysis",
-        "prompt": f"Write a brief Supply and Demand Analysis section. Prepare a current snapshot of the housing market, comparing supply and demand. Quantify the housing deficit.{_FORMAT_REMINDER}",
-    },
-    {
-        "title": "11. Constraints and Opportunities",
-        "prompt": f"Write a brief Constraints and Opportunities section. Synthesize the main constraints across the housing value chain. Recommend actions to unblock housing and strengthen the enabling environment.{_FORMAT_REMINDER}",
-    },
-]
 
 
 class ReportService:
@@ -276,6 +295,8 @@ class ReportService:
         # 1. Get country name and generate prompts
         country_name = COUNTRY_NAME_BY_ALPHA3.get(country_code, country_code)
         country_name = _simplify_country_name(country_name)
+        if country_code == "TUR":
+            country_name = "Türkiye"
         section_prompts = _get_section_prompts(country_name)
 
         # 2. Fetch all documents for the country
@@ -291,92 +312,174 @@ class ReportService:
         sections_data = []
         document_index = {}  # Maps document_name -> citation number [1], [2], etc.
 
-        for section_def in section_prompts:
-            logger.info(f"Generating section: {section_def['title']}")
+        _MAX_SECTION_ATTEMPTS = 3
+        _INTER_SECTION_DELAY_S = 2.0
+        _RETRY_DELAY_S = 5.0
 
-            # Create a separate conversation for this section
-            conversation = await self._convo_service.ensure_conversation(
-                owner_user_id=user_id,
-                country_code=country_code,
-                title=f"{section_def['title']} - {country_code}",
-                namespace="report-generation",
-                tags=["report", "housing", country_code],
+        for section_idx, section_def in enumerate(section_prompts):
+            section_title = section_def["title"]
+
+            if section_idx > 0:
+                await asyncio.sleep(_INTER_SECTION_DELAY_S)
+
+            logger.info(
+                "report.section.start",
+                extra={"country": country_code, "section": section_title},
             )
 
-            # Attach documents to this section's conversation
-            for doc in documents:
+            section_html: str | None = None
+            last_failure_reason: str = "unknown"
+
+            for attempt in range(1, _MAX_SECTION_ATTEMPTS + 1):
+                if attempt > 1:
+                    await asyncio.sleep(_RETRY_DELAY_S)
+                attempt_start = time.monotonic()
+                logger.info(
+                    "report.section.attempt",
+                    extra={
+                        "country": country_code,
+                        "section": section_title,
+                        "attempt": attempt,
+                        "max_attempts": _MAX_SECTION_ATTEMPTS,
+                    },
+                )
+
                 try:
-                    await self._doc_repo.attach_to_conversation(
-                        conversation_id=conversation.id,
-                        document_id=doc.id,
-                        attach_source="report-generator",
-                        visibility_override="hidden",  # Hidden so it doesn't clutter UI if user sees this convo
+                    conversation = await self._convo_service.ensure_conversation(
+                        owner_user_id=user_id,
+                        country_code=country_code,
+                        title=f"{section_title} - {country_code} (attempt {attempt})",
+                        namespace="report-generation",
+                        tags=["report", "housing", country_code],
                     )
-                except Exception as e:
-                    logger.error(f"Failed to attach doc {doc.id}: {e}")
 
-            # Generate unique thread_id per section
-            thread_id = str(uuid4())
+                    for doc in documents:
+                        try:
+                            await self._doc_repo.attach_to_conversation(
+                                conversation_id=conversation.id,
+                                document_id=doc.id,
+                                attach_source="report-generator",
+                                visibility_override="hidden",
+                            )
+                        except Exception as doc_err:
+                            logger.error(
+                                "report.section.doc_attach_failed",
+                                extra={
+                                    "country": country_code,
+                                    "section": section_title,
+                                    "doc_id": str(doc.id),
+                                    "error": str(doc_err),
+                                },
+                            )
 
-            chat_request = ChatRequestContext(
-                conversation_id=str(conversation.id),
-                thread_id=thread_id,
-                session_id=None,
-                allow_stateless=True,
-                message=ChatMessagePayload(
-                    type="user",
-                    content=section_def["prompt"],
-                    attachments=[],
-                ),
-                hints={
-                    "country_code": country_code,
-                    "retrieval_profile": "country_profile",
-                },
-                constraints={"country_code": country_code},  # type: ignore[arg-type]
-                owner_user_id=user_id,
-                workspace_id=None,
-                tenant_id=auth_context.tenant_id,
-            )
+                    thread_id = str(uuid4())
 
-            try:
-                result = await self._runner.run_chat(
-                    request=chat_request,
-                    auth=auth_context,
-                    request_context=request_context,
-                    sse_emitter=None,  # Blocking
-                    prompt_overrides={},
-                    hints={},
-                    response_mode=ResponseMode.BLOCKING,
-                    db_session=self._db_session,
-                )
+                    chat_request = ChatRequestContext(
+                        conversation_id=str(conversation.id),
+                        thread_id=thread_id,
+                        session_id=None,
+                        allow_stateless=True,
+                        message=ChatMessagePayload(
+                            type="user",
+                            content=section_def["prompt"],
+                            attachments=[],
+                        ),
+                        hints={
+                            "country_code": country_code,
+                            "retrieval_profile": "country_profile",
+                        },
+                        constraints={"country_code": country_code},  # type: ignore[arg-type]
+                        owner_user_id=user_id,
+                        workspace_id=None,
+                        tenant_id=auth_context.tenant_id,
+                    )
 
-                markdown_content = result.done_payload.get("answer", "")
-                citations = result.done_payload.get("citations", [])
+                    result = await self._runner.run_chat(
+                        request=chat_request,
+                        auth=auth_context,
+                        request_context=request_context,
+                        sse_emitter=None,
+                        prompt_overrides={},
+                        hints={},
+                        response_mode=ResponseMode.BLOCKING,
+                        db_session=self._db_session,
+                    )
 
-                markdown_content, document_index = _map_chunk_citations_to_documents(
-                    markdown_content, citations, document_index
-                )
+                    raw_markdown = result.done_payload.get("answer", "")
+                    citations = result.done_payload.get("citations", [])
 
-                markdown_content = _force_two_paragraphs(markdown_content)
+                    valid, reason = _is_section_content_valid(raw_markdown)
+                    elapsed = round(time.monotonic() - attempt_start, 2)
 
-                html_content = markdown.markdown(markdown_content)
+                    if not valid:
+                        last_failure_reason = reason
+                        logger.warning(
+                            "report.section.invalid_content",
+                            extra={
+                                "country": country_code,
+                                "section": section_title,
+                                "attempt": attempt,
+                                "reason": reason,
+                                "content_preview": raw_markdown[:120],
+                                "elapsed_s": elapsed,
+                            },
+                        )
+                        continue
 
-                html_content = re.sub(
-                    r"\[(\d+)\]",
-                    r'<sup><a href="#ref-\1" class="citation-link">[\1]</a></sup>',
-                    html_content,
-                )
+                    mapped_markdown, document_index = _map_chunk_citations_to_documents(
+                        raw_markdown, citations, document_index
+                    )
+                    mapped_markdown = _force_two_paragraphs(mapped_markdown)
+                    html_content = markdown.markdown(mapped_markdown)
+                    html_content = re.sub(
+                        r"\[(\d+)\]",
+                        r'<sup><a href="#ref-\1" class="citation-link">[\1]</a></sup>',
+                        html_content,
+                    )
 
-                sections_data.append({"title": section_def["title"], "content": html_content})
+                    section_html = html_content
+                    logger.info(
+                        "report.section.success",
+                        extra={
+                            "country": country_code,
+                            "section": section_title,
+                            "attempt": attempt,
+                            "elapsed_s": elapsed,
+                        },
+                    )
+                    break
 
-            except Exception as e:
+                except Exception as exc:
+                    elapsed = round(time.monotonic() - attempt_start, 2)
+                    last_failure_reason = f"{type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "report.section.exception",
+                        extra={
+                            "country": country_code,
+                            "section": section_title,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                            "elapsed_s": elapsed,
+                        },
+                        exc_info=True,
+                    )
+
+            if section_html is not None:
+                sections_data.append({"title": section_title, "content": section_html})
+            else:
                 logger.error(
-                    f"Error generating section {section_def['title']}: {type(e).__name__}: {e}",
-                    exc_info=True,
+                    "report.section.all_attempts_failed",
+                    extra={
+                        "country": country_code,
+                        "section": section_title,
+                        "attempts": _MAX_SECTION_ATTEMPTS,
+                        "last_failure_reason": last_failure_reason,
+                    },
                 )
                 sections_data.append(
                     {
-                        "title": section_def["title"],
+                        "title": section_title,
                         "content": "<p>The report is unable to develop an analysis for this section.</p>",
                     }
                 )
@@ -397,7 +500,7 @@ class ReportService:
         template = env.get_template("housing_report.html")
 
         rendered_html = template.render(
-            country=country_code,
+            country=country_name,
             date=datetime.now(UTC).strftime("%d %B %Y"),
             sections=sections_data,
             references=references,

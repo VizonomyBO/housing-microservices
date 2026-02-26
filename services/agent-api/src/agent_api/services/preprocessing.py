@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypedDict
+from typing import TypedDict
 from uuid import uuid4
 
 from shared_data_layer.db.models import Document
@@ -422,26 +422,6 @@ async def preprocess_cache_for_country(
 
     total_questions = sum(len(questions) for questions in PILLAR_QUESTIONS.values())
     question_num = 0
-    use_no_data_placeholder = False  # Flag to use "No data available" for all remaining questions
-    first_question_attempted = False  # Track if we've attempted the first question
-
-    # Helper function to create "No data available for this country" response
-    def create_no_data_response(thread_id: str, request_id: str) -> dict[str, Any]:
-        """Create a standardized 'No data available for this country' response."""
-        return {
-            "thread_id": thread_id,
-            "request_id": request_id,
-            "done": {
-                "status": "COMPLETED",
-                "answer": "No data available for this country",
-                "thread_id": thread_id,
-                "route": "react",
-                "citations": [],
-                "requires_sql": False,
-                "tool_calls": [],
-            },
-            "messages": [{"role": "assistant", "content": "No data available for this country"}],
-        }
 
     for pillar_name, questions in PILLAR_QUESTIONS.items():
         print(f"[{country_code}] Processing pillar: {pillar_name} ({len(questions)} questions)")
@@ -458,7 +438,6 @@ async def preprocess_cache_for_country(
                     cached = await cache_service.get_cached_response(country_code, question)
                     if cached is not None:
                         stats["cache_hits"] += 1
-                        first_question_attempted = True
                         if question_num % 10 == 0:
                             print(
                                 f"[{country_code}] Cache hit {question_num}/{total_questions}: {question[:50]}..."
@@ -468,22 +447,6 @@ async def preprocess_cache_for_country(
                         )
                         continue
 
-                # If we're using placeholder, store "No data available for this country" for all remaining questions
-                if use_no_data_placeholder:
-                    thread_id = str(uuid4())
-                    request_id = f"preprocess-{country_code}-{stats['total_questions']}"
-                    no_data_response = create_no_data_response(thread_id, request_id)
-                    await cache_service.store_response(country_code, question, no_data_response)
-                    stats["cache_generated"] += 1
-                    print(
-                        f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
-                    )
-                    logger.info(
-                        f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
-                    )
-                    continue
-
-                # Generate response
                 print(
                     f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}..."
                 )
@@ -491,7 +454,6 @@ async def preprocess_cache_for_country(
                     f"[{country_code}] Generating {question_num}/{total_questions}: {question[:60]}..."
                 )
 
-                # Create a minimal auth context (system/internal)
                 auth = AuthContext(
                     user_id=None,
                     tenant_id=None,
@@ -500,125 +462,91 @@ async def preprocess_cache_for_country(
                     metadata=None,
                 )
 
-                # Create request context
-                request_context = RequestContext(
-                    request_id=f"preprocess-{country_code}-{stats['total_questions']}",
-                    traceparent=None,
-                    idempotency_key=None,
-                    headers={},
-                )
-
-                # Create chat request using the conversation with attached documents
-                chat_request = ChatRequestContext(
-                    conversation_id=str(conversation.id),
-                    thread_id=str(uuid4()),
-                    session_id=None,
-                    allow_stateless=False,
-                    message=ChatMessagePayload(content=question),
-                    hints={"retrieval_profile": "country_profile"},
-                    constraints=ChatConstraints(country_code=country_code),
-                    owner_user_id="00000000-0000-0000-0000-000000000000",
-                    workspace_id=None,
-                    tenant_id=None,
-                )
-
-                # Run chat (this will fail if no documents attached - that's expected)
-                # We'll need to handle this gracefully
-                try:
-                    result = await runner.run_chat(
-                        request=chat_request,
-                        auth=auth,
-                        request_context=request_context,
-                        sse_emitter=None,
-                        prompt_overrides={},
-                        hints={"retrieval_profile": "country_profile"},
-                        response_mode=ResponseMode.BLOCKING,
-                        db_session=db_session,
+                max_attempts = 3
+                last_error: Exception | None = None
+                completed = False
+                for attempt in range(1, max_attempts + 1):
+                    request_context = RequestContext(
+                        request_id=f"preprocess-{country_code}-{stats['total_questions']}-a{attempt}",
+                        traceparent=None,
+                        idempotency_key=None,
+                        headers={},
                     )
+                    chat_request = ChatRequestContext(
+                        conversation_id=str(conversation.id),
+                        thread_id=str(uuid4()),
+                        session_id=None,
+                        allow_stateless=False,
+                        message=ChatMessagePayload(content=question),
+                        hints={"retrieval_profile": "country_profile"},
+                        constraints=ChatConstraints(country_code=country_code),
+                        owner_user_id="00000000-0000-0000-0000-000000000000",
+                        workspace_id=None,
+                        tenant_id=None,
+                    )
+                    try:
+                        if attempt > 1:
+                            print(
+                                f"[{country_code}] Retry {attempt}/{max_attempts} for "
+                                f"{question_num}/{total_questions}: {question[:60]}..."
+                            )
+                            logger.warning(
+                                f"[{country_code}] Retry {attempt}/{max_attempts} for "
+                                f"{question_num}/{total_questions}: {question[:60]}..."
+                            )
+                        result = await runner.run_chat(
+                            request=chat_request,
+                            auth=auth,
+                            request_context=request_context,
+                            sse_emitter=None,
+                            prompt_overrides={},
+                            hints={"retrieval_profile": "country_profile"},
+                            response_mode=ResponseMode.BLOCKING,
+                            db_session=db_session,
+                        )
+                        if result and result.done_payload:
+                            response_data = {
+                                "thread_id": chat_request.thread_id,
+                                "request_id": request_context.request_id,
+                                "done": result.done_payload,
+                                "messages": result.messages or [],
+                            }
+                            await cache_service.store_response(country_code, question, response_data)
+                            stats["cache_generated"] += 1
+                            print(
+                                f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
+                            )
+                            logger.info(
+                                f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
+                            )
+                            completed = True
+                            break
+                        last_error = RuntimeError("Empty done_payload from runner")
+                    except Exception as inner_exc:
+                        last_error = inner_exc
 
-                    if result and result.done_payload:
-                        # Store in cache
-                        response_data = {
-                            "thread_id": chat_request.thread_id,
-                            "request_id": request_context.request_id,
-                            "done": result.done_payload,
-                            "messages": result.messages or [],
-                        }
-                        await cache_service.store_response(country_code, question, response_data)
-                        stats["cache_generated"] += 1
-                        first_question_attempted = True  # Successful generation
-                        print(
-                            f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
-                        )
-                        logger.info(
-                            f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
-                        )
-                except Exception as inner_exc:
-                    error_msg = str(inner_exc)
-                    # Check if this is a "no documents" error
-                    no_docs_errors = [
-                        "Retrieval returned no eligible documents after applying filters",
-                        "NO_RESULTS",
-                        "ATTACHMENTS_REQUIRED",
-                        "DOCUMENTS_INACTIVE",
-                        "Unable to produce cited answer; retrieval did not yield citations",
-                    ]
-                    is_no_docs_error = any(err in error_msg for err in no_docs_errors)
-
-                    # If first question fails with no docs error, use "No data available for this country" for all remaining
-                    if is_no_docs_error and not first_question_attempted:
-                        use_no_data_placeholder = True
-                        logger.warning(
-                            f"[{country_code}] First question failed with no documents error. "
-                            f"Will use 'No data available for this country' for all remaining questions. Error: {error_msg}"
-                        )
-                        print(
-                            f"[{country_code}] WARNING: No eligible documents found. "
-                            f"Using 'No data available for this country' for all questions for {country_code}."
-                        )
-                        # Store "No data available for this country" for this question
-                        no_data_response = create_no_data_response(
-                            chat_request.thread_id, request_context.request_id
-                        )
-                        await cache_service.store_response(country_code, question, no_data_response)
-                        stats["cache_generated"] += 1
-                        first_question_attempted = True
-                        print(
-                            f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
-                        )
-                        logger.info(
-                            f"[{country_code}] ✓ Cached {question_num}/{total_questions} (No data available for this country): {question[:60]}..."
-                        )
-                    else:
-                        logger.warning(f"[{country_code}] Skipping question: {error_msg}")
-                        print(f"[{country_code}] Skipping question: {error_msg}")
-                        stats["errors"] += 1
-                        first_question_attempted = True
+                if not completed:
+                    stats["errors"] += 1
+                    error_msg = str(last_error) if last_error else "unknown error"
+                    raise RuntimeError(
+                        f"[{country_code}] Failed question {question_num}/{total_questions} after "
+                        f"{max_attempts} attempts: {question[:100]} | {error_msg}"
+                    ) from last_error
 
             except Exception as exc:
                 logger.error(
                     f"[{country_code}] Error processing question: {question[:60]}...",
                     exc_info=exc,
                 )
-                stats["errors"] += 1
-                first_question_attempted = True  # Mark attempt even on error
+                raise
 
-    if use_no_data_placeholder:
-        completion_msg = (
-            f"[{country_code}] Preprocessing complete (no eligible documents - used 'No data available for this country'): "
-            f"{stats['cache_generated']} generated, "
-            f"{stats['cache_hits']} hits, "
-            f"{stats['errors']} errors "
-            f"(total: {stats['total_questions']} questions)"
-        )
-    else:
-        completion_msg = (
-            f"[{country_code}] Preprocessing complete: "
-            f"{stats['cache_generated']} generated, "
-            f"{stats['cache_hits']} hits, "
-            f"{stats['errors']} errors "
-            f"(total: {stats['total_questions']} questions)"
-        )
+    completion_msg = (
+        f"[{country_code}] Preprocessing complete: "
+        f"{stats['cache_generated']} generated, "
+        f"{stats['cache_hits']} hits, "
+        f"{stats['errors']} errors "
+        f"(total: {stats['total_questions']} questions)"
+    )
     print(completion_msg)
     logger.info(completion_msg)
 

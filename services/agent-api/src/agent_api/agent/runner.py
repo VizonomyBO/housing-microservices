@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -35,14 +36,24 @@ from streaming.sse_emitter import SSEEmitter
 logger = logging.getLogger(__name__)
 
 _PROFILE_CHAR_LIMIT = 3000
-_PROFILE_MAX_TOKENS = 500
+_PROFILE_MAX_TOKENS = 800
 _COUNTRY_PROFILE_SYSTEM_PROMPT = (
-    "You are a retrieval-first country profile analyst. Use the retrieved evidence to write "
-    "EXACTLY two short paragraphs separated by a blank line. Each paragraph must be 3-5 sentences "
-    "maximum. Do NOT write a single long paragraph. Do NOT use bullet points or numbered lists. "
+    "You are a retrieval-first country profile analyst. "
+    "You MUST always call the `retrieve_documents` tool before writing any response — no exceptions. "
+    "Never write based on training memory alone; every claim must come from retrieved documents. "
+    "Use the retrieved evidence to write EXACTLY two short paragraphs separated by a blank line. "
+    "Each paragraph must be 3-5 sentences maximum. Do NOT write a single long paragraph. "
+    "Do NOT use bullet points or numbered lists. "
     "Weave the points together like a textbook section: clear topic sentences, coherent flow, and "
     "short sentences. Cite specific facts with [c#] references immediately after each claim. "
-    "If retrieval is thin, restate only what is supported. Never cut off mid-sentence."
+    "If retrieval is thin, restate only what is supported. Never cut off mid-sentence. "
+    "SCOPE RULE — check the country_code field in the Attachments metadata for every source you cite. "
+    "If a source's country_code matches the target country, state the finding as a direct fact about that country. "
+    "If a source's country_code is a regional code (e.g. LAC, AFR, EAP) or a different country, "
+    "you MUST qualify the claim — use phrases like 'Across the region...', 'Regional evidence suggests...', "
+    "or 'In neighboring countries...'. "
+    "If a source's country_code is GLO, use 'Global evidence indicates...' or 'Internationally...'. "
+    "Never present regional or global findings as facts specific to the target country."
 )
 
 
@@ -224,7 +235,11 @@ class LangGraphRunner(ChatRunnerProtocol):
             else self._system_prompt
         )
         system = SystemMessage(content=system_prompt)
-        config = {"configurable": {"thread_id": request.thread_id}}
+        recursion_limit = 8 if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE else 20
+        config = {
+            "configurable": {"thread_id": request.thread_id},
+            "recursion_limit": recursion_limit,
+        }
         agent = (
             self._profile_agent
             if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE
@@ -255,6 +270,7 @@ class LangGraphRunner(ChatRunnerProtocol):
                 message="Unable to produce cited answer; retrieval did not yield citations.",
                 status_code=502,
             )
+        ai_content, citations = _renumber_citations(ai_content, citations)
 
         await convo_service.append_message(
             conversation_id=request.conversation_id,
@@ -279,6 +295,37 @@ class LangGraphRunner(ChatRunnerProtocol):
         }
         messages = [{"role": "assistant", "content": ai_content}]
         return ChatRunResult(done_payload=payload, messages=messages, tool_calls=tool_calls)
+
+
+_CITATION_RE = re.compile(r"\[c(\d+)\]")
+
+
+def _renumber_citations(
+    answer: str, citations: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]]:
+    old_to_new: dict[int, int] = {}
+    counter = 1
+    for m in _CITATION_RE.finditer(answer):
+        old_num = int(m.group(1))
+        if old_num not in old_to_new:
+            old_to_new[old_num] = counter
+            counter += 1
+
+    if not old_to_new:
+        return answer, citations
+
+    def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
+        return f"[c{old_to_new.get(int(m.group(1)), int(m.group(1)))}]"
+
+    new_answer = _CITATION_RE.sub(_replace, answer)
+    new_citations: list[dict[str, Any]] = []
+    for old_num in sorted(old_to_new, key=lambda x: old_to_new[x]):
+        idx = old_num - 1
+        if 0 <= idx < len(citations):
+            new_citations.append(citations[idx])
+    if not new_citations:
+        return new_answer, citations
+    return new_answer, new_citations
 
 
 def _extract_tool_history(messages: Any) -> list[dict[str, Any]]:
