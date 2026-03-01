@@ -58,6 +58,7 @@ def _is_cacheable_answer(answer: str, citations: list[object] | None) -> tuple[b
             return False, f"failure pattern detected: '{pattern}'"
     return True, "ok"
 
+
 # Allowed countries for preprocessing (from frontend country list)
 ALLOWED_COUNTRIES = {
     "AFG",
@@ -566,7 +567,9 @@ async def preprocess_cache_for_country(
                                 "done": done_payload,
                                 "messages": result.messages or [],
                             }
-                            await cache_service.store_response(country_code, question, response_data)
+                            await cache_service.store_response(
+                                country_code, question, response_data
+                            )
                             stats["cache_generated"] += 1
                             print(
                                 f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."

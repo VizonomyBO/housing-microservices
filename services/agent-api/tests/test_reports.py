@@ -7,6 +7,7 @@ from agent_api.agent.runner import ChatRunResult
 from agent_api.http.errors import GatewayError
 from agent_api.services.reports import ReportService, _get_section_prompts
 
+
 @pytest.fixture
 def mock_db_session():
     return AsyncMock()

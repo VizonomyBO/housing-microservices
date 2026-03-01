@@ -73,7 +73,9 @@ async def main(country_codes: list[str]) -> int:
                 raise
             total_errors += 1
             failed_countries.append(code)
-            print(f"ERROR: {code} regeneration failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(
+                f"ERROR: {code} regeneration failed: {type(exc).__name__}: {exc}", file=sys.stderr
+            )
 
     if total_errors > 0:
         print(
