@@ -27,14 +27,16 @@ from agent_api.services.preprocessing import preprocess_cache_for_country
 from agent_api.settings import load_settings
 
 
-async def main(country_codes: list[str]) -> None:
+async def main(country_codes: list[str]) -> int:
     settings = load_settings()
     if not settings.database_url:
         print("ERROR: DATABASE_URL is not set", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     DatabaseSessionManager.init(settings.database_url)
     runner = LangGraphRunner(settings=settings)
+    total_errors = 0
+    failed_countries: list[str] = []
 
     for country_code in country_codes:
         code = country_code.strip().upper()
@@ -44,16 +46,44 @@ async def main(country_codes: list[str]) -> None:
         print("=" * 60)
         print(f"Regenerating cache for {code}")
         print("=" * 60)
-        async with DatabaseSessionManager.session() as session:
-            cache_service = ChatCacheService(session)
-            deleted = await cache_service.clear_cache_for_country(code)
-            print(f"Cleared {deleted} existing cache entries for {code}")
-            stats = await preprocess_cache_for_country(code, runner, session, force_regenerate=True)
-            print(
-                f"Preprocessing {code}: {stats['cache_generated']} generated, "
-                f"{stats['cache_hits']} hits, {stats['errors']} errors"
-            )
+        try:
+            async with DatabaseSessionManager.session() as session:
+                cache_service = ChatCacheService(session)
+                deleted = await cache_service.clear_cache_for_country(code)
+                print(f"Cleared {deleted} existing cache entries for {code}")
+                stats = await preprocess_cache_for_country(
+                    code, runner, session, force_regenerate=True
+                )
+                total_errors += stats["errors"]
+                if stats["errors"] > 0:
+                    failed_countries.append(code)
+                    failed_examples = ", ".join(q[:60] for q in stats["failed_questions"][:3])
+                    print(
+                        f"Preprocessing {code}: {stats['cache_generated']} generated, "
+                        f"{stats['cache_hits']} hits, {stats['errors']} errors "
+                        f"(examples: {failed_examples})"
+                    )
+                else:
+                    print(
+                        f"Preprocessing {code}: {stats['cache_generated']} generated, "
+                        f"{stats['cache_hits']} hits, {stats['errors']} errors"
+                    )
+        except Exception as exc:
+            if isinstance(exc, (asyncio.CancelledError, TimeoutError, OSError)):
+                raise
+            total_errors += 1
+            failed_countries.append(code)
+            print(f"ERROR: {code} regeneration failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    if total_errors > 0:
+        print(
+            f"Done with {total_errors} error(s) across countries: {', '.join(failed_countries)}",
+            file=sys.stderr,
+        )
+        return 1
+
     print("Done.")
+    return 0
 
 
 if __name__ == "__main__":
@@ -64,7 +94,7 @@ if __name__ == "__main__":
     else:
         codes = [c.upper() for c in sys.argv[1:]]
     try:
-        asyncio.run(main(codes))
+        raise SystemExit(asyncio.run(main(codes)))
     except (asyncio.CancelledError, TimeoutError, OSError) as e:
         print(
             "ERROR: Cannot reach the database (timeout or connection refused).\n"

@@ -11,17 +11,26 @@
 #   ./scripts/regenerate_country_cache_via_tunnel.sh
 #
 # Requires in env: EC2_HOST (or POSTGRES_HOST), SSH_KEY (or terraform output / ~/.ssh/id_rsa),
-#   DB_HOST_INTERNAL (DB hostname as seen from EC2, default postgres),
+#   DB_HOST_INTERNAL (DB hostname as seen from EC2, default 127.0.0.1),
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+AGENT_API_DIR="$ROOT_DIR/services/agent-api"
 TF_DIR="$ROOT_DIR/ArchaaS"
 TUNNEL_LOCAL_PORT="${TUNNEL_LOCAL_PORT:-}"
 SSH_USER="${SSH_USER:-ec2-user}"
 SSH_PORT="${SSH_PORT:-22}"
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required tool: $1" >&2; exit 1; }
+}
+
+require lsof
+require ssh
+require uv
 
 pick_available_port() {
   local base=15432
@@ -75,8 +84,9 @@ if [[ -z "$SSH_KEY" || ! -f "$SSH_KEY" ]]; then
   exit 1
 fi
 
-# DB as seen from EC2 (compose service name or RDS endpoint)
-DB_HOST_INTERNAL="${DB_HOST_INTERNAL:-postgres}"
+# DB as seen from the EC2 host running the SSH tunnel.
+# In the current prod topology, Postgres is published on the host at 127.0.0.1:5432.
+DB_HOST_INTERNAL="${DB_HOST_INTERNAL:-127.0.0.1}"
 DB_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-vizonomy_user}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
@@ -95,10 +105,23 @@ if [[ -z "$TUNNEL_LOCAL_PORT" ]]; then
   fi
 fi
 
-ssh -N -o StrictHostKeyChecking=no -o ServerAliveInterval=60 \
-  -L "${TUNNEL_LOCAL_PORT}:${DB_HOST_INTERNAL}:${DB_PORT}" \
-  ${SSH_PORT:+-p "$SSH_PORT"} -i "$SSH_KEY" \
-  "$SSH_USER@$EC2_HOST" &
+if [[ ! -d "$AGENT_API_DIR" ]]; then
+  echo "ERROR: Agent API directory not found at $AGENT_API_DIR." >&2
+  exit 1
+fi
+
+ssh_args=(
+  -N
+  -o StrictHostKeyChecking=no
+  -o ServerAliveInterval=60
+  -L "${TUNNEL_LOCAL_PORT}:${DB_HOST_INTERNAL}:${DB_PORT}"
+  -i "$SSH_KEY"
+)
+if [[ -n "$SSH_PORT" ]]; then
+  ssh_args+=(-p "$SSH_PORT")
+fi
+
+ssh "${ssh_args[@]}" "$SSH_USER@$EC2_HOST" &
 SSH_PID=$!
 cleanup() { kill "$SSH_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
@@ -111,4 +134,7 @@ fi
 
 echo "Tunnel: localhost:${TUNNEL_LOCAL_PORT} -> ${EC2_HOST}:${DB_HOST_INTERNAL}:${DB_PORT}"
 export DATABASE_URL="postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${TUNNEL_LOCAL_PORT}/${POSTGRES_DB}"
-"$SCRIPT_DIR/regenerate_country_cache.sh" "$@"
+(
+  cd "$AGENT_API_DIR"
+  uv run python scripts/regenerate_country_cache.py "$@"
+)

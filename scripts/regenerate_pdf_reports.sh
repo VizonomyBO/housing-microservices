@@ -149,7 +149,8 @@ regenerate_report() {
   local attempt
   local tmp_dir
   tmp_dir=$(mktemp -d)
-  local final_pdf=""
+  local last_output=""
+  local last_output_ext="txt"
   local success=false
 
   for attempt in $(seq 1 "$max_attempts"); do
@@ -159,31 +160,36 @@ regenerate_report() {
     local pdf_file="$tmp_dir/${code}_attempt${attempt}.pdf"
     local http_code
     http_code=$(fetch_report_to_file "$code" "$pdf_file")
+    last_output="$pdf_file"
+    last_output_ext="txt"
 
     if [[ $http_code -lt 200 || $http_code -ge 300 ]]; then
       echo "  [$code] HTTP $http_code on attempt $attempt — skipping validation." >&2
+      if [[ -s "$pdf_file" ]]; then
+        local response_preview
+        response_preview=$(head -c 400 "$pdf_file" | tr '\n' ' ')
+        echo "  [$code] Response preview: $response_preview" >&2
+      fi
       if [[ $attempt -lt $max_attempts ]]; then
         echo "  [$code] Retrying..."
         continue
       fi
       echo "  [$code] All $max_attempts attempts failed (HTTP errors)." >&2
-      rm -rf "$tmp_dir"
-      return 1
+      break
     fi
 
     echo "  [$code] HTTP $http_code OK, PDF downloaded ($(wc -c < "$pdf_file") bytes)."
+    last_output_ext="pdf"
 
     if [[ "$VALIDATE" == "false" ]]; then
       echo "  [$code] Validation skipped (--no-validate)."
       success=true
-      final_pdf="$pdf_file"
       break
     fi
 
     if validate_report "$code" "$pdf_file" "$attempt"; then
       echo "  [$code] Validation passed on attempt $attempt."
       success=true
-      final_pdf="$pdf_file"
       break
     else
       echo "  [$code] Validation FAILED on attempt $attempt." >&2
@@ -198,10 +204,10 @@ regenerate_report() {
     return 0
   fi
 
-  local keep_path="${ROOT_DIR}/${code}_failed_report.pdf"
-  if [[ -n "$final_pdf" && -f "$final_pdf" ]]; then
-    cp "$final_pdf" "$keep_path"
-    echo "  [$code] All $max_attempts attempts failed. Last PDF saved to: $keep_path" >&2
+  local keep_path="${ROOT_DIR}/${code}_failed_report.${last_output_ext}"
+  if [[ -n "$last_output" && -f "$last_output" ]]; then
+    cp "$last_output" "$keep_path"
+    echo "  [$code] All $max_attempts attempts failed. Last response saved to: $keep_path" >&2
   else
     echo "  [$code] All $max_attempts attempts failed (no PDF produced)." >&2
   fi

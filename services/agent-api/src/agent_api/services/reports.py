@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.agent.runner import LangGraphRunner
 from agent_api.http.context import AuthContext, RequestContext
+from agent_api.http.errors import GatewayError
 from agent_api.http.schemas import ChatMessagePayload, ResponseMode
 from agent_api.models.chat import ChatRequestContext
 from agent_api.report_cache import get_cached_report, upload_cached_report
@@ -120,13 +121,17 @@ _FAILURE_PATTERNS: list[str] = [
 _MIN_SECTION_CHARS = 80
 
 
-def _is_section_content_valid(markdown_content: str) -> tuple[bool, str]:
+def _is_section_content_valid(markdown_content: str, citations: list[dict]) -> tuple[bool, str]:
     """Return (valid, reason) for a generated section's raw markdown content."""
     stripped = markdown_content.strip()
     if not stripped:
         return False, "empty response"
     if len(stripped) < _MIN_SECTION_CHARS:
         return False, f"response too short ({len(stripped)} chars, min {_MIN_SECTION_CHARS})"
+    if not citations:
+        return False, "missing citations"
+    if "[c" not in stripped.lower():
+        return False, "response missing inline citation markers"
     lower = stripped.lower()
     for pattern in _FAILURE_PATTERNS:
         if pattern in lower:
@@ -408,7 +413,7 @@ class ReportService:
                     raw_markdown = result.done_payload.get("answer", "")
                     citations = result.done_payload.get("citations", [])
 
-                    valid, reason = _is_section_content_valid(raw_markdown)
+                    valid, reason = _is_section_content_valid(raw_markdown, citations)
                     elapsed = round(time.monotonic() - attempt_start, 2)
 
                     if not valid:
@@ -477,11 +482,20 @@ class ReportService:
                         "last_failure_reason": last_failure_reason,
                     },
                 )
-                sections_data.append(
-                    {
-                        "title": section_title,
-                        "content": "<p>The report is unable to develop an analysis for this section.</p>",
-                    }
+                raise GatewayError(
+                    code="REPORT_SECTION_INCOMPLETE",
+                    message=(
+                        f"Report generation failed for {country_code}: "
+                        f"section '{section_title}' did not complete after "
+                        f"{_MAX_SECTION_ATTEMPTS} attempts."
+                    ),
+                    status_code=502,
+                    details={
+                        "country_code": country_code,
+                        "section": section_title,
+                        "attempts": _MAX_SECTION_ATTEMPTS,
+                        "last_failure_reason": last_failure_reason,
+                    },
                 )
 
         # 3. Build References section - numbered citations
