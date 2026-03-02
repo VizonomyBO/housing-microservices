@@ -26,7 +26,11 @@ from shared_data_layer.repositories.documents import DocumentRepository
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
 from ingestion_service.pipeline import IngestionError, IngestionPipeline
-from ingestion_service.s3 import download_pdf_from_s3, download_pdf_from_s3_by_name, upload_pdf_to_s3
+from ingestion_service.s3 import (
+    download_pdf_from_s3,
+    download_pdf_from_s3_by_name,
+    upload_pdf_to_s3,
+)
 from ingestion_service.schemas import (
     UploadCompleteResponse,
     UploadInfo,

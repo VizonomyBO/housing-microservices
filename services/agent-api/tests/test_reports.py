@@ -4,9 +4,8 @@ import pytest
 from shared_data_layer.db.models.documents import Document
 
 from agent_api.agent.runner import ChatRunResult
+from agent_api.http.errors import GatewayError
 from agent_api.services.reports import ReportService, _get_section_prompts
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
@@ -58,6 +57,7 @@ def mock_request_context():
     return req
 
 
+@pytest.mark.asyncio
 async def test_generate_housing_report_logic(
     mock_db_session,
     mock_runner,
@@ -68,6 +68,7 @@ async def test_generate_housing_report_logic(
     with (
         patch("agent_api.services.reports.DocumentRepository") as mock_doc_repo,
         patch("agent_api.services.reports.ConversationService") as mock_convo_service,
+        patch("agent_api.services.reports.asyncio.sleep", new_callable=AsyncMock),
     ):
         # Setup DB mocks
         doc_repo = mock_doc_repo.return_value
@@ -124,6 +125,58 @@ async def test_generate_housing_report_logic(
             assert "REMINDER" not in content
             assert "Do NOT" not in content
             assert "retrieve relevant documents" not in content
+
+
+@pytest.mark.asyncio
+async def test_generate_housing_report_raises_for_incomplete_section(
+    mock_db_session,
+    mock_auth_context,
+    mock_request_context,
+):
+    failing_runner = MagicMock()
+    failing_runner.run_chat = AsyncMock(
+        return_value=ChatRunResult(
+            done_payload={
+                "answer": "Too short [c1]",
+                "citations": [{"canonical_name": "Mock Document A", "doc_id": "doc-a"}],
+            },
+            messages=[],
+            tool_calls=[],
+        )
+    )
+
+    with (
+        patch("agent_api.services.reports.DocumentRepository") as mock_doc_repo,
+        patch("agent_api.services.reports.ConversationService") as mock_convo_service,
+        patch("agent_api.services.reports.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        doc_repo = mock_doc_repo.return_value
+        convo_service = mock_convo_service.return_value
+
+        mock_doc = MagicMock(spec=Document)
+        mock_doc.id = "doc-123"
+        doc_repo.list_documents_for_country = AsyncMock(return_value=[mock_doc])
+        doc_repo.attach_to_conversation = AsyncMock()
+
+        mock_convo = MagicMock()
+        mock_convo.id = "convo-123"
+        convo_service.ensure_conversation = AsyncMock(return_value=mock_convo)
+
+        settings = MagicMock()
+        settings.s3_housing_pdf_bucket = None
+        service = ReportService(mock_db_session, failing_runner, settings)  # type: ignore[arg-type]
+
+        with pytest.raises(GatewayError) as exc_info:
+            await service.generate_housing_report(
+                country_code="USA",
+                user_id="test-user-id",
+                request_context=mock_request_context,
+                auth_context=mock_auth_context,
+            )
+
+        assert exc_info.value.code == "REPORT_SECTION_INCOMPLETE"
+        assert "1. Executive Summary" in exc_info.value.message
+        assert failing_runner.run_chat.call_count == 3
 
 
 def test_get_section_prompts_are_clean_and_focused():

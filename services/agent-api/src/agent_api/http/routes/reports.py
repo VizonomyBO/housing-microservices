@@ -31,7 +31,10 @@ router = APIRouter(prefix="/v1/reports", tags=["reports"])
         200: {
             "content": {"application/pdf": {}},
             "description": "Returns the generated PDF report.",
-        }
+        },
+        502: {
+            "description": "Report generation failed because one or more sections could not be generated completely.",
+        },
     },
 )
 async def generate_report(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TypedDict
 from uuid import uuid4
@@ -21,6 +22,42 @@ from agent_api.services.cache import ChatCacheService
 from agent_api.services.conversations import ConversationService
 
 logger = logging.getLogger(__name__)
+
+_FAILURE_PATTERNS: tuple[str, ...] = (
+    "i'm sorry",
+    "i am sorry",
+    "couldn't produce a response",
+    "could not produce a response",
+    "unable to develop an analysis",
+    "unable to produce cited answer",
+    "no information available",
+    "no data available",
+    "i don't have enough information",
+    "i do not have enough information",
+)
+_MIN_CACHEABLE_ANSWER_CHARS = 80
+
+
+def _is_cacheable_answer(answer: str, citations: list[object] | None) -> tuple[bool, str]:
+    stripped = answer.strip()
+    if not stripped:
+        return False, "empty answer"
+    if len(stripped) < _MIN_CACHEABLE_ANSWER_CHARS:
+        return (
+            False,
+            f"answer too short ({len(stripped)} chars, min {_MIN_CACHEABLE_ANSWER_CHARS})",
+        )
+    if not citations:
+        return False, "missing citations"
+    if "[c" not in stripped.lower():
+        return False, "missing inline citation markers"
+
+    lower = stripped.lower()
+    for pattern in _FAILURE_PATTERNS:
+        if pattern in lower:
+            return False, f"failure pattern detected: '{pattern}'"
+    return True, "ok"
+
 
 # Allowed countries for preprocessing (from frontend country list)
 ALLOWED_COUNTRIES = {
@@ -353,6 +390,7 @@ class PreprocessingStats(TypedDict):
     cache_hits: int
     cache_generated: int
     errors: int
+    failed_questions: list[str]
 
 
 async def preprocess_cache_for_country(
@@ -383,6 +421,7 @@ async def preprocess_cache_for_country(
         "cache_hits": 0,
         "cache_generated": 0,
         "errors": 0,
+        "failed_questions": [],
     }
 
     logger.info(f"[{country_code}] Starting cache preprocessing")
@@ -505,13 +544,32 @@ async def preprocess_cache_for_country(
                             db_session=db_session,
                         )
                         if result and result.done_payload:
+                            done_payload = result.done_payload
+                            valid, reason = _is_cacheable_answer(
+                                str(done_payload.get("answer", "")),
+                                done_payload.get("citations"),
+                            )
+                            if not valid:
+                                last_error = RuntimeError(reason)
+                                logger.warning(
+                                    "[%s] Invalid answer for %s/%s on attempt %s/%s: %s",
+                                    country_code,
+                                    question_num,
+                                    total_questions,
+                                    attempt,
+                                    max_attempts,
+                                    reason,
+                                )
+                                continue
                             response_data = {
                                 "thread_id": chat_request.thread_id,
                                 "request_id": request_context.request_id,
-                                "done": result.done_payload,
+                                "done": done_payload,
                                 "messages": result.messages or [],
                             }
-                            await cache_service.store_response(country_code, question, response_data)
+                            await cache_service.store_response(
+                                country_code, question, response_data
+                            )
                             stats["cache_generated"] += 1
                             print(
                                 f"[{country_code}] ✓ Cached {question_num}/{total_questions}: {question[:60]}..."
@@ -528,17 +586,28 @@ async def preprocess_cache_for_country(
                 if not completed:
                     stats["errors"] += 1
                     error_msg = str(last_error) if last_error else "unknown error"
-                    raise RuntimeError(
+                    stats["failed_questions"].append(question)
+                    failure_msg = (
                         f"[{country_code}] Failed question {question_num}/{total_questions} after "
                         f"{max_attempts} attempts: {question[:100]} | {error_msg}"
-                    ) from last_error
+                    )
+                    print(failure_msg)
+                    logger.error(failure_msg)
+                    continue
 
             except Exception as exc:
+                if isinstance(exc, (asyncio.CancelledError, TimeoutError, OSError)):
+                    raise
                 logger.error(
                     f"[{country_code}] Error processing question: {question[:60]}...",
                     exc_info=exc,
                 )
-                raise
+                stats["errors"] += 1
+                stats["failed_questions"].append(question)
+                print(
+                    f"[{country_code}] Error {question_num}/{total_questions}: {question[:100]} | {exc}"
+                )
+                continue
 
     completion_msg = (
         f"[{country_code}] Preprocessing complete: "
@@ -549,6 +618,14 @@ async def preprocess_cache_for_country(
     )
     print(completion_msg)
     logger.info(completion_msg)
+    if stats["failed_questions"]:
+        preview = ", ".join(q[:60] for q in stats["failed_questions"][:3])
+        failed_msg = (
+            f"[{country_code}] Failed questions: {len(stats['failed_questions'])} "
+            f"(examples: {preview})"
+        )
+        print(failed_msg)
+        logger.warning(failed_msg)
 
     return stats
 
