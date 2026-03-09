@@ -13,6 +13,8 @@ from agent_api.http.context import AuthContext, RequestContext
 from agent_api.http.deps import get_auth_context, get_db_session, get_request_context
 from agent_api.http.errors import GatewayError
 from agent_api.http.schemas import (
+    AttachmentBulkDeleteRequest,
+    AttachmentBulkDeleteResponse,
     AttachmentBulkRequest,
     AttachmentBulkResponse,
     AttachmentBulkSkipped,
@@ -110,40 +112,6 @@ async def attach_document(
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=response.model_dump())
 
 
-@router.delete("/{conversation_id}/attachments/{document_id}", summary="Detach a document")
-async def detach_document(
-    conversation_id: str,
-    document_id: str,
-    request_context: Annotated[RequestContext, Depends(get_request_context)],
-    db_session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> JSONResponse:
-    service = AttachmentService(db_session)
-    try:
-        status_value = await service.detach_document(
-            conversation_id=conversation_id,
-            document_id=document_id,
-        )
-    except LookupError as exc:
-        await db_session.rollback()
-        raise GatewayError(
-            code="NOT_FOUND",
-            message=str(exc),
-            status_code=status.HTTP_404_NOT_FOUND,
-        ) from exc
-
-    if status_value is AttachmentStatus.DETACHED:
-        await db_session.commit()
-    else:
-        await db_session.rollback()
-    response = AttachmentDeleteResponse(
-        conversation_id=conversation_id,
-        document_id=document_id,
-        status=_detach_status_literal(status_value),
-        request_id=request_context.request_id,
-    )
-    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
-
-
 @router.post(
     "/{conversation_id}/attachments/bulk",
     summary="Attach a set of documents to a conversation",
@@ -215,6 +183,101 @@ async def bulk_attach_documents(
         conversation_id=conversation_id,
         attached=attached,
         skipped=skipped,
+        request_id=request_context.request_id,
+    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
+
+
+@router.delete(
+    "/{conversation_id}/attachments/bulk",
+    summary="Detach a set of documents from a conversation",
+)
+async def bulk_detach_documents(
+    conversation_id: str,
+    payload: AttachmentBulkDeleteRequest,
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> JSONResponse:
+    service = AttachmentService(db_session)
+
+    detached: list[str] = []
+    skipped: list[AttachmentBulkSkipped] = []
+    unique_ids = list(dict.fromkeys(payload.document_ids))
+    for doc_id in unique_ids:
+        try:
+            status_value = await service.detach_document(
+                conversation_id=conversation_id,
+                document_id=doc_id,
+            )
+        except ValueError:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=doc_id,
+                    reason="Invalid document_id format",
+                )
+            )
+            continue
+        except LookupError as exc:
+            skipped.append(AttachmentBulkSkipped(document_id=doc_id, reason=str(exc)))
+            continue
+        except Exception as exc:
+            await db_session.rollback()
+            logger.exception("Bulk detach failed for document_id=%s", doc_id)
+            raise GatewayError(
+                code="BULK_DETACH_FAILED",
+                message=f"Bulk detach failed: {exc}",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            ) from exc
+
+        if status_value == AttachmentStatus.DETACHED:
+            detached.append(doc_id)
+        else:
+            skipped.append(
+                AttachmentBulkSkipped(
+                    document_id=doc_id,
+                    reason=status_value,
+                )
+            )
+
+    await db_session.commit()
+    response = AttachmentBulkDeleteResponse(
+        conversation_id=conversation_id,
+        detached=detached,
+        skipped=skipped,
+        request_id=request_context.request_id,
+    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
+
+
+@router.delete("/{conversation_id}/attachments/{document_id}", summary="Detach a document")
+async def detach_document(
+    conversation_id: str,
+    document_id: str,
+    request_context: Annotated[RequestContext, Depends(get_request_context)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> JSONResponse:
+    service = AttachmentService(db_session)
+    try:
+        status_value = await service.detach_document(
+            conversation_id=conversation_id,
+            document_id=document_id,
+        )
+    except LookupError as exc:
+        await db_session.rollback()
+        raise GatewayError(
+            code="NOT_FOUND",
+            message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+
+    if status_value is AttachmentStatus.DETACHED:
+        await db_session.commit()
+    else:
+        await db_session.rollback()
+    response = AttachmentDeleteResponse(
+        conversation_id=conversation_id,
+        document_id=document_id,
+        status=_detach_status_literal(status_value),
         request_id=request_context.request_id,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())

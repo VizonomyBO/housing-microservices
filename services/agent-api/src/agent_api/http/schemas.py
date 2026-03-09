@@ -252,6 +252,17 @@ class AttachmentBulkResponse(BaseModel):
     request_id: str
 
 
+class AttachmentBulkDeleteRequest(BaseModel):
+    document_ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class AttachmentBulkDeleteResponse(BaseModel):
+    conversation_id: str
+    detached: list[str] = Field(default_factory=list)
+    skipped: list[AttachmentBulkSkipped] = Field(default_factory=list)
+    request_id: str
+
+
 class AttachmentMutationResponse(BaseModel):
     conversation_id: str
     document_id: str | None
@@ -270,6 +281,8 @@ class AttachmentDeleteResponse(BaseModel):
 
 
 __all__ = [
+    "AttachmentBulkDeleteRequest",
+    "AttachmentBulkDeleteResponse",
     "AttachmentBulkRequest",
     "AttachmentBulkResponse",
     "AttachmentBulkSkipped",
