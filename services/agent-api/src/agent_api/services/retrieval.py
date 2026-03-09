@@ -73,6 +73,7 @@ class RetrievalService:
         conversation_id: str,
         profile: RetrievalProfile = RetrievalProfile.DEFAULT,
         target_country_code: str | None = None,
+        geo_weights: dict[str, float] | None = None,
     ) -> RetrievalContext:
         attachments = await self._scope_repo.list_conversation_documents(conversation_id)
         if not attachments:
@@ -137,6 +138,7 @@ class RetrievalService:
             summaries=summaries,
             target_country=focus_country,
             effective_top_k=effective_top_k,
+            geo_weights=geo_weights,
         )
         context_blocks = reranked[:effective_top_k]
         context_text = self._format_context(context_blocks)
@@ -421,8 +423,9 @@ class RetrievalService:
         summaries,
         target_country: str | None,
         effective_top_k: int | None = None,
+        geo_weights: dict[str, float] | None = None,
     ) -> list[RetrievedChunk]:
-        weight_map = self._build_geo_weight_map(summaries, target_country)
+        weight_map = self._build_geo_weight_map(summaries, target_country, geo_weights=geo_weights)
         if not weight_map:
             return chunks
         weighted: list[RetrievedChunk] = []
@@ -462,12 +465,22 @@ class RetrievalService:
                 return 2
             return 3
 
+        w_country = geo_weights.get("country", 2.0) if geo_weights is not None else 2.0
+        w_region = geo_weights.get("region", 1.3) if geo_weights is not None else 1.3
+        w_global = geo_weights.get("global", 0.7) if geo_weights is not None else 0.7
+        total_weight = w_country + w_region + w_global
+
         country_chunks = [c for c in weighted if _geo_tier(c) == 0]
         region_chunks = [c for c in weighted if _geo_tier(c) == 1]
 
         cap = effective_top_k if effective_top_k is not None else self._top_k
-        min_country_slots = min(len(country_chunks), max(cap // 2, 4))
-        min_region_slots = min(len(region_chunks), max(cap // 4, 2))
+
+        if total_weight == 0:
+            return weighted[:cap]
+
+        reserved = int(cap * 0.7)
+        min_country_slots = min(len(country_chunks), round(reserved * w_country / total_weight))
+        min_region_slots = min(len(region_chunks), round(reserved * w_region / total_weight))
 
         result: list[RetrievedChunk] = []
         seen: set[str] = set()
@@ -504,9 +517,22 @@ class RetrievalService:
 
         return result
 
-    def _build_geo_weight_map(self, summaries, target_country: str | None) -> dict[str, float]:
+    def _build_geo_weight_map(
+        self,
+        summaries,
+        target_country: str | None,
+        *,
+        geo_weights: dict[str, float] | None = None,
+    ) -> dict[str, float]:
         if not target_country:
             return {}
+        w_country = 2.0
+        w_region = 1.3
+        w_global = 0.7
+        if geo_weights is not None:
+            w_country = geo_weights.get("country", w_country)
+            w_region = geo_weights.get("region", w_region)
+            w_global = geo_weights.get("global", w_global)
         target_country = target_country.strip().upper()
         target_region = REGION_BY_COUNTRY_ALPHA3.get(target_country)
         weights: dict[str, float] = {}
@@ -515,11 +541,11 @@ class RetrievalService:
             region = REGION_BY_COUNTRY_ALPHA3.get(country_code)
             weight = 1.0
             if country_code == target_country:
-                weight = 2.0
+                weight = w_country
             elif target_region and (country_code == target_region.value or region == target_region):
-                weight = 1.3
+                weight = w_region
             elif country_code == Region.GLO.value or region == Region.GLO:
-                weight = 0.7
+                weight = w_global
             weights[doc_id] = weight
         return weights
 
