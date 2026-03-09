@@ -202,6 +202,9 @@ class LangGraphRunner(ChatRunnerProtocol):
             rerank_client=self._rerank_client,
             chat_client=self._chat_client,
         )
+        constraints = getattr(request, "constraints", None)
+        geo_weights = getattr(constraints, "geo_weights", None) if constraints is not None else None
+
         runtime = ToolRuntime(
             conversation_id=request.conversation_id,
             owner_user_id=request.owner_user_id,
@@ -218,6 +221,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             retrieval_profile=retrieval_profile,
             target_country_code=target_country,
             hints=merged_hints,
+            geo_weights=geo_weights,
         )
         set_runtime(runtime)
 
@@ -229,11 +233,21 @@ class LangGraphRunner(ChatRunnerProtocol):
         )
 
         human = HumanMessage(content=request.message.content)
-        system_prompt = (
-            self._profile_system_prompt
-            if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE
-            else self._system_prompt
-        )
+        if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE:
+            system_prompt = self._profile_system_prompt
+        elif target_country is not None:
+            system_prompt = (
+                self._system_prompt
+                + f"\n\nSCOPE RULE — The user is asking about {target_country}. "
+                "Check the country_code field in the Attachments metadata for every source you cite. "
+                f"If a source's country_code matches {target_country}, state the finding as a direct fact. "
+                "If a source's country_code is a regional code (e.g. LAC, AFR, MNA) or a different country, "
+                "you MUST qualify the claim — use phrases like 'Across the region...', 'Regional evidence suggests...'. "
+                "If a source's country_code is GLO, use 'Global evidence indicates...' or 'Internationally...'. "
+                f"Never present regional or global findings as facts specific to {target_country}."
+            )
+        else:
+            system_prompt = self._system_prompt
         system = SystemMessage(content=system_prompt)
         recursion_limit = 8 if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE else 20
         config = {

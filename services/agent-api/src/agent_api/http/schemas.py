@@ -6,12 +6,20 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ResponseMode(str, Enum):
     STREAM = "stream"
     BLOCKING = "blocking"
+
+
+class GeoWeights(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    country: float = Field(default=2.0, ge=0.0, le=10.0)
+    region: float = Field(default=1.3, ge=0.0, le=10.0)
+    global_: float = Field(default=0.7, ge=0.0, le=10.0, alias="global")
 
 
 class ChatMessagePayload(BaseModel):
@@ -42,6 +50,7 @@ class ChatConstraints(BaseModel):
     auto_attach_base_docs: bool = True
     max_tool_calls: int | None = None
     allowed_chunk_types: list[str] | None = None
+    geo_weights: GeoWeights | None = None
 
 
 class ChatRequestBody(BaseModel):
@@ -283,6 +292,7 @@ __all__ = [
     "ConversationSummaryResponse",
     "DocumentListItem",
     "DocumentListResponse",
+    "GeoWeights",
     "IncomingAttachment",
     "PaginationMetadata",
     "ResponseMode",

@@ -36,11 +36,19 @@ async def retrieve_documents(query: str) -> str:
     """
 
     runtime = get_runtime()
+    geo_weight_overrides: dict[str, float] | None = None
+    if runtime.geo_weights is not None:
+        geo_weight_overrides = {
+            "country": runtime.geo_weights.country,
+            "region": runtime.geo_weights.region,
+            "global": runtime.geo_weights.global_,
+        }
     ctx = await runtime.retrieval.retrieve(
         user_query=query,
         conversation_id=runtime.conversation_id,
         profile=runtime.retrieval_profile,
         target_country_code=runtime.target_country_code,
+        geo_weights=geo_weight_overrides,
     )
     runtime.last_retrieval = ctx
     attachments = [_serialize_attachment(att) for att in ctx.attachments]

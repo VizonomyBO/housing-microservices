@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.auth.validator import AuthContext
+from agent_api.http.schemas import GeoWeights
 from agent_api.services.retrieval import (
     RetrievalContext,
     RetrievalProfile,
@@ -31,6 +32,7 @@ class ToolRuntime:
     retrieval_profile: RetrievalProfile = RetrievalProfile.DEFAULT
     target_country_code: str | None = None
     hints: dict[str, Any] | None = None
+    geo_weights: GeoWeights | None = None
 
 
 _tool_runtime: contextvars.ContextVar[ToolRuntime | None] = contextvars.ContextVar(
