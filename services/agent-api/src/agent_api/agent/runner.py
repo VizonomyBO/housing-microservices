@@ -11,6 +11,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared_data_layer.schemas.countries import COUNTRY_NAME_BY_ALPHA3
+
 from agent_api.agent.graph import DEFAULT_SYSTEM_PROMPT, build_agent_graph
 from agent_api.agent.tool_runtime import ToolRuntime, set_runtime
 from agent_api.agent.tools import (
@@ -232,7 +234,14 @@ class LangGraphRunner(ChatRunnerProtocol):
             content=request.message.model_dump(mode="json"),
         )
 
-        human = HumanMessage(content=request.message.content)
+        user_content = request.message.content
+        if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE and target_country is not None:
+            country_name = COUNTRY_NAME_BY_ALPHA3.get(target_country)
+            if country_name is not None:
+                country_name = country_name.split(",")[0].strip()
+                user_content = f"For country {country_name}, {user_content}"
+
+        human = HumanMessage(content=user_content)
         if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE:
             system_prompt = self._profile_system_prompt
         elif target_country is not None:
