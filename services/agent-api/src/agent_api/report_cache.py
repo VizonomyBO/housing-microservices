@@ -146,3 +146,32 @@ def upload_cached_report(country_code: str, pdf_bytes: bytes, settings: Settings
             bucket_name,
             s3_key,
         )
+
+
+def delete_cached_report(country_code: str, settings: Settings) -> None:
+    if not settings.s3_housing_pdf_bucket:
+        return
+
+    bucket_name = settings.s3_housing_pdf_bucket
+    s3_key = _get_cache_key(country_code)
+
+    try:
+        s3_client = _get_s3_client(settings)
+        s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+        if error_code != "NoSuchKey":
+            logger.warning(
+                "Failed to delete cached report from S3: %s - %s (bucket: %s, key: %s)",
+                error_code,
+                exc.response.get("Error", {}).get("Message", str(exc)),
+                bucket_name,
+                s3_key,
+            )
+    except Exception as exc:
+        logger.warning(
+            "Unexpected error deleting cached report from S3: %s (bucket: %s, key: %s)",
+            exc,
+            bucket_name,
+            s3_key,
+        )

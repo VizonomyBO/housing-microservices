@@ -286,6 +286,7 @@ class ReportService:
         request_context: RequestContext,
         auth_context: AuthContext,
         skip_cache: bool = False,
+        upload_cache: bool = True,
     ) -> bytes:
         # Check S3 cache first unless skip_cache is requested
         if not skip_cache and self._settings.s3_housing_pdf_bucket:
@@ -523,7 +524,7 @@ class ReportService:
         pdf_bytes = weasyprint.HTML(string=rendered_html).write_pdf()
 
         # 5. Upload to S3 cache (non-blocking)
-        if self._settings.s3_housing_pdf_bucket:
+        if upload_cache and self._settings.s3_housing_pdf_bucket:
             try:
                 upload_cached_report(country_code, pdf_bytes, self._settings)
                 logger.info(f"Cached report for {country_code}")

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
         description="Auth service base URL for token verification fallback",
     )
     auth_verify_path: str = Field(default="/v1/auth/verify-token")
+    auth_shared_secret: str | None = Field(
+        default=None,
+        alias="AUTH_SHARED_SECRET",
+        description="Shared secret for internal service-to-service calls",
+    )
 
     # Upload signing
     signing_secret: str | None = Field(
@@ -115,6 +120,11 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context: Any) -> None:  # type: ignore[override]
+        if (self.s3_bucket_name is None or self.s3_bucket_name.strip() == "") and (
+            self.s3_housing_pdf_bucket is not None and self.s3_housing_pdf_bucket.strip() != ""
+        ):
+            object.__setattr__(self, "s3_bucket_name", self.s3_housing_pdf_bucket)
+
         if self.signing_secret is None and self.jwt_secret_key:
             object.__setattr__(self, "signing_secret", self.jwt_secret_key)
         elif self.signing_secret is None:

@@ -82,3 +82,25 @@ class UploadedFileRead(ORMBaseSchema):
     ingestion_metadata: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentUploadRead(ORMBaseSchema):
+    id: UUID
+    country_code: CountryISOAlpha3
+    filename: str
+    storage_uri: str
+    byte_size: int
+    content_hash: str
+    source: str
+    uploaded_by: UUID
+    verified: bool
+    verified_by: Optional[UUID] = None
+    verified_at: Optional[datetime] = None
+    document_id: Optional[UUID] = None
+    reprocess_status: str
+    reprocess_error: Optional[str] = None
+    reprocess_started_at: Optional[datetime] = None
+    reprocess_completed_at: Optional[datetime] = None
+    metadata_: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime

@@ -283,6 +283,7 @@ class CountryISOAlpha3(str, Enum):
     WALLIS_AND_FUTUNA = ("WLF", "Wallis and Futuna")
     WESTERN_SAHARA = ("ESH", "Western Sahara")
     YEMEN = ("YEM", "Yemen")
+    LUATOPIA = ("LUA", "Luatopia")
     ZAMBIA = ("ZMB", "Zambia")
     ZIMBABWE = ("ZWE", "Zimbabwe")
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -18,10 +20,14 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi import status as http_status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import HttpUrl
 from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
-from shared_data_layer.repositories.documents import DocumentRepository
+from shared_data_layer.db.models import ChatResponseCache
+from shared_data_layer.db.models.documents import DocumentUpload
+from shared_data_layer.repositories.documents import DocumentRepository, DocumentUploadRepository
+from sqlalchemy import and_, func, select, update
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -32,6 +38,10 @@ from ingestion_service.s3 import (
     upload_pdf_to_s3,
 )
 from ingestion_service.schemas import (
+    AdminCountryReprocessStatusResponse,
+    AdminDocumentUploadListResponse,
+    AdminDocumentUploadResponse,
+    PaginationMetadata,
     UploadCompleteResponse,
     UploadInfo,
     UploadInitRequest,
@@ -43,6 +53,7 @@ from ingestion_service.settings import (
     get_settings,
 )
 from ingestion_service.signing import now_seconds, sign_payload, verify_signature
+from ingestion_service.storage import S3StorageClient
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +166,491 @@ async def _require_user(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+@app.post("/v1/admin/documents/upload", response_model=AdminDocumentUploadResponse)
+async def admin_upload_document(
+    db: DBSession,
+    settings: SettingsDep,
+    country_code: str = Form(...),
+    source: str = Form(...),
+    metadata: str | None = Form(None),
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    user = await _require_user(authorization, settings)
+    uploader_id = _parse_user_uuid(user)
+    normalized_country = country_code.upper().strip()
+    if len(normalized_country) != 3:
+        raise HTTPException(status_code=400, detail="country_code must be ISO-3")
+    if file.filename is None or file.filename.strip() == "":
+        raise HTTPException(status_code=400, detail="filename is required")
+
+    filename = file.filename.strip()
+    source_type = _infer_source_type(filename)
+    if source_type not in settings.allowed_source_types:
+        raise HTTPException(status_code=400, detail=f"Unsupported source_type '{source_type}'")
+
+    body = await file.read()
+    if not body:
+        raise HTTPException(status_code=400, detail="File is empty")
+    if len(body) > settings.max_file_size_bytes:
+        raise HTTPException(status_code=413, detail="File exceeds max_file_size_bytes")
+
+    metadata_obj = _parse_json_field(metadata, {})
+    if not isinstance(metadata_obj, dict):
+        metadata_obj = {}
+    metadata_obj["source_type"] = source_type
+
+    storage_client = S3StorageClient(settings)
+    raw_storage_document_id = uuid4()
+    try:
+        storage_uri = storage_client.upload_document(
+            document_id=raw_storage_document_id,
+            file_bytes=body,
+            content_type=file.content_type or "application/octet-stream",
+            source_type=source_type,
+            filename=filename,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to store file: {exc}") from exc
+
+    repo = DocumentUploadRepository(db)
+    upload = await repo.create_upload(
+        country_code=normalized_country,
+        filename=filename,
+        storage_uri=storage_uri,
+        byte_size=len(body),
+        content_hash=hashlib.sha256(body).hexdigest(),
+        source=source,
+        uploaded_by=uploader_id,
+        metadata_=metadata_obj,
+    )
+    await db.commit()
+    return {"upload": _serialize_document_upload(upload)}
+
+
+@app.get("/v1/admin/documents", response_model=AdminDocumentUploadListResponse)
+async def admin_list_documents(
+    db: DBSession,
+    settings: SettingsDep,
+    country_code: str | None = None,
+    verified: bool | None = None,
+    reprocess_status: str | None = None,
+    approved_and_done_only: bool | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    await _require_user(authorization, settings)
+    normalized_country = country_code.upper().strip() if country_code is not None else None
+
+    filters = []
+    if normalized_country is not None:
+        filters.append(DocumentUpload.country_code == normalized_country)
+    if approved_and_done_only is True:
+        filters.append(DocumentUpload.verified.is_(True))
+        filters.append(DocumentUpload.reprocess_status == "done")
+    elif approved_and_done_only is False:
+        filters.append(
+            ~and_(
+                DocumentUpload.verified.is_(True),
+                DocumentUpload.reprocess_status == "done",
+            )
+        )
+
+    if verified is not None:
+        filters.append(DocumentUpload.verified == verified)
+    if reprocess_status is not None:
+        filters.append(DocumentUpload.reprocess_status == reprocess_status)
+
+    base_stmt = select(DocumentUpload)
+    if filters:
+        base_stmt = base_stmt.where(and_(*filters))
+
+    count_stmt = select(func.count()).select_from(base_stmt.subquery())
+    total_count = (await db.execute(count_stmt)).scalar_one()
+
+    rows_stmt = (
+        base_stmt.order_by(DocumentUpload.created_at.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    )
+    result = await db.execute(rows_stmt)
+    uploads = list(result.scalars().all())
+
+    return {
+        "items": [_serialize_document_upload(u) for u in uploads],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "has_next": (page * page_size) < total_count,
+        },
+    }
+
+
+@app.get(
+    "/v1/admin/documents/reprocess-status",
+    response_model=AdminCountryReprocessStatusResponse,
+)
+async def admin_reprocess_status(
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    await _require_user(authorization, settings)
+    stmt = (
+        select(
+            DocumentUpload.country_code,
+            DocumentUpload.reprocess_status,
+            func.count(DocumentUpload.id),
+        )
+        .where(DocumentUpload.verified.is_(True))
+        .group_by(DocumentUpload.country_code, DocumentUpload.reprocess_status)
+    )
+    result = await db.execute(stmt)
+    status_rows = result.all()
+    per_country: dict[str, dict[str, int]] = {}
+    for country, status, count in status_rows:
+        if country not in per_country:
+            per_country[country] = {}
+        per_country[country][status] = int(count)
+
+    items: list[dict[str, Any]] = []
+    for country, counts in per_country.items():
+        items.append(
+            {
+                "country_code": country,
+                "counts": counts,
+                "total": int(sum(counts.values())),
+            }
+        )
+    items.sort(key=lambda item: item["country_code"])
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/v1/admin/documents/{upload_id}", response_model=AdminDocumentUploadResponse)
+async def admin_get_document(
+    upload_id: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    await _require_user(authorization, settings)
+    try:
+        upload_uuid = UUID(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload_id") from exc
+
+    repo = DocumentUploadRepository(db)
+    upload = await repo.get_upload(upload_uuid)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return {"upload": _serialize_document_upload(upload)}
+
+
+@app.patch(
+    "/v1/admin/documents/{upload_id}/approve",
+    response_model=AdminDocumentUploadResponse,
+    status_code=http_status.HTTP_202_ACCEPTED,
+)
+async def admin_approve_document(
+    upload_id: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    user = await _require_user(authorization, settings)
+    approver_id = _parse_user_uuid(user)
+    try:
+        upload_uuid = UUID(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload_id") from exc
+
+    repo = DocumentUploadRepository(db)
+    upload = await repo.get_upload(upload_uuid)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if upload.verified and upload.reprocess_status in {
+        "queued",
+        "ingesting",
+        "reprocessing_cache",
+        "reprocessing_pdf",
+        "done",
+    }:
+        raise HTTPException(status_code=409, detail="Upload already approved")
+
+    now = datetime.now(timezone.utc)
+    await repo.set_verified(
+        upload_id=upload_uuid,
+        verified=True,
+        verified_by=approver_id,
+        verified_at=now,
+    )
+    await repo.queue_upload(upload_id=upload_uuid)
+    await db.commit()
+
+    refreshed = await repo.get_upload(upload_uuid)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Upload not found after approval")
+    return {"upload": _serialize_document_upload(refreshed)}
+
+
+@app.patch("/v1/admin/documents/{upload_id}/reject", response_model=AdminDocumentUploadResponse)
+async def admin_reject_document(
+    upload_id: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    user = await _require_user(authorization, settings)
+    reviewer_id = _parse_user_uuid(user)
+    try:
+        upload_uuid = UUID(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload_id") from exc
+
+    repo = DocumentUploadRepository(db)
+    upload = await repo.get_upload(upload_uuid)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    now = datetime.now(timezone.utc)
+    await repo.set_verified(
+        upload_id=upload_uuid,
+        verified=False,
+        verified_by=reviewer_id,
+        verified_at=now,
+    )
+    await repo.update_reprocess_status(
+        upload_id=upload_uuid,
+        status="failed",
+        error="rejected",
+        completed_at=now,
+    )
+    await db.commit()
+    refreshed = await repo.get_upload(upload_uuid)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Upload not found after reject")
+    return {"upload": _serialize_document_upload(refreshed)}
+
+
+@app.delete("/v1/admin/documents/{upload_id}")
+async def admin_delete_document(
+    upload_id: str,
+    db: DBSession,
+    settings: SettingsDep,
+    authorization: str | None = Header(default=None, convert_underscores=False),
+) -> dict[str, Any]:
+    await _require_user(authorization, settings)
+    try:
+        upload_uuid = UUID(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload_id") from exc
+
+    repo = DocumentUploadRepository(db)
+    upload = await repo.get_upload(upload_uuid)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    storage_client = S3StorageClient(settings)
+    try:
+        storage_client.delete_document(storage_uri=upload.storage_uri)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to delete stored file: {exc}") from exc
+
+    deleted = await repo.delete(upload_uuid)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    await db.commit()
+    return {"deleted": True, "upload_id": upload_id}
+
+
+def _resolve_internal_worker_secret(settings: Settings) -> str | None:
+    if settings.auth_shared_secret is not None and settings.auth_shared_secret.strip() != "":
+        return settings.auth_shared_secret
+    if settings.jwt_secret_key is not None and settings.jwt_secret_key.strip() != "":
+        return settings.jwt_secret_key
+    return None
+
+
+def _require_internal_worker_secret(
+    worker_secret: str | None,
+    settings: Settings,
+) -> None:
+    expected_secret = _resolve_internal_worker_secret(settings)
+    if expected_secret is None:
+        raise HTTPException(status_code=500, detail="Internal worker secret not configured")
+    if worker_secret is None or worker_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Invalid internal worker secret")
+
+
+async def _ingest_approved_upload(
+    *,
+    upload_uuid: UUID,
+    request: Request,
+    db: DBSession,
+    settings: Settings,
+) -> dict[str, Any]:
+    repo = DocumentUploadRepository(db)
+    upload = await repo.get_upload(upload_uuid)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if not upload.verified:
+        raise HTTPException(status_code=409, detail="Upload must be approved first")
+    if upload.document_id is not None and upload.reprocess_status in {
+        "reprocessing_cache",
+        "reprocessing_pdf",
+        "done",
+    }:
+        return {"upload": _serialize_document_upload(upload)}
+
+    now = datetime.now(timezone.utc)
+    await repo.update_reprocess_status(
+        upload_id=upload_uuid,
+        status="ingesting",
+        error=None,
+        started_at=now,
+    )
+    await db.commit()
+
+    source_type = _infer_source_type(upload.filename)
+    if source_type not in settings.allowed_source_types:
+        await repo.update_reprocess_status(
+            upload_id=upload_uuid,
+            status="failed",
+            error=f"Unsupported source_type '{source_type}'",
+            completed_at=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail=f"Unsupported source_type '{source_type}'")
+
+    storage_client = S3StorageClient(settings)
+    try:
+        body = storage_client.download_document(storage_uri=upload.storage_uri)
+    except Exception as exc:
+        await repo.update_reprocess_status(
+            upload_id=upload_uuid,
+            status="failed",
+            error=f"Failed to fetch stored file: {exc}",
+            completed_at=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        raise HTTPException(status_code=502, detail=f"Failed to fetch stored file: {exc}") from exc
+
+    metadata_obj = upload.metadata_ if isinstance(upload.metadata_, dict) else {}
+    language_value = metadata_obj.get("language", "en")
+    language = str(language_value) if language_value is not None else "en"
+    tags_value = metadata_obj.get("tags", [])
+    tags_list = tags_value if isinstance(tags_value, list) else []
+    access_scope_value = metadata_obj.get("access_scope", "base")
+    access_scope = str(access_scope_value) if access_scope_value is not None else "base"
+    trace_id_value = metadata_obj.get("trace_id")
+    trace_id = str(trace_id_value) if trace_id_value is not None else None
+
+    payload = UploadInitRequest(
+        document_name=upload.filename,
+        source_type=source_type,
+        country_code=upload.country_code,
+        language=language,
+        tags=tags_list,
+        file_size_bytes=upload.byte_size,
+        access_scope=access_scope,
+        callback_url=None,
+        metadata=metadata_obj,
+        trace_id=trace_id,
+        output_dimension=settings.voyage_output_dimension,
+    )
+
+    pipeline: IngestionPipeline = request.app.state.pipeline
+    document_uuid = uuid4()
+    ingestion_uuid = uuid4()
+
+    async def _progress_callback(progress: dict[str, int]) -> None:
+        await repo.set_ingestion_progress(
+            upload_id=upload_uuid,
+            total_chunks=progress["total_chunks"],
+            total_batches=progress["total_batches"],
+            processed_chunks=progress["processed_chunks"],
+            processed_batches=progress["processed_batches"],
+            batch_size=progress["batch_size"],
+        )
+
+    try:
+        document, _ = await pipeline.ingest_file(
+            session=db,
+            request=payload,
+            owner_user_id=None,
+            document_id=document_uuid,
+            ingestion_id=ingestion_uuid,
+            file_bytes=body,
+            progress_callback=_progress_callback,
+        )
+        await repo.set_document_link(upload_id=upload_uuid, document_id=document.id)
+        await repo.update_reprocess_status(
+            upload_id=upload_uuid,
+            status="reprocessing_cache",
+            error=None,
+        )
+        await db.execute(
+            update(ChatResponseCache)
+            .where(ChatResponseCache.country_code == upload.country_code)
+            .values(status="stale")
+        )
+        await db.commit()
+    except IngestionError as exc:
+        await db.rollback()
+        await repo.update_reprocess_status(
+            upload_id=upload_uuid,
+            status="failed",
+            error=str(exc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.rollback()
+        await repo.update_reprocess_status(
+            upload_id=upload_uuid,
+            status="failed",
+            error=str(exc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        raise HTTPException(status_code=500, detail="Unexpected ingestion failure") from exc
+    finally:
+        del body
+        gc.collect()
+
+    refreshed = await repo.get_upload(upload_uuid)
+    if refreshed is None:
+        raise HTTPException(status_code=404, detail="Upload not found after ingestion")
+    return {"upload": _serialize_document_upload(refreshed)}
+
+
+@app.post(
+    "/v1/internal/admin/documents/{upload_id}/ingest",
+    response_model=AdminDocumentUploadResponse,
+)
+async def internal_ingest_approved_document(
+    upload_id: str,
+    request: Request,
+    db: DBSession,
+    settings: SettingsDep,
+    x_worker_secret: str | None = Header(default=None, alias="X-Worker-Secret"),
+) -> dict[str, Any]:
+    _require_internal_worker_secret(x_worker_secret, settings)
+    try:
+        upload_uuid = UUID(upload_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload_id") from exc
+    return await _ingest_approved_upload(
+        upload_uuid=upload_uuid,
+        request=request,
+        db=db,
+        settings=settings,
+    )
+
+
 @app.post(
     "/v1/documents/upload",
     response_model=UploadInitResponse,
@@ -252,6 +748,73 @@ def _parse_owner(raw_owner: str) -> UUID | None:
     if owner_uuid == SYSTEM_OWNER_SENTINEL:
         return SYSTEM_OWNER_SENTINEL
     return owner_uuid
+
+
+def _parse_user_uuid(user: UserContext) -> UUID:
+    try:
+        return UUID(user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid authenticated user id") from exc
+
+
+def _infer_source_type(filename: str) -> str:
+    if "." not in filename:
+        return "pdf"
+    return filename.rsplit(".", 1)[1].lower()
+
+
+def _extract_ingestion_progress(metadata: Any) -> dict[str, int] | None:
+    if not isinstance(metadata, dict):
+        return None
+    raw_progress = metadata.get("ingestion_progress")
+    if not isinstance(raw_progress, dict):
+        return None
+    keys = (
+        "total_chunks",
+        "total_batches",
+        "processed_chunks",
+        "processed_batches",
+        "batch_size",
+    )
+    progress: dict[str, int] = {}
+    for key in keys:
+        value = raw_progress.get(key)
+        if value is None:
+            return None
+        try:
+            progress[key] = int(value)
+        except (TypeError, ValueError):
+            return None
+    return progress
+
+
+def _serialize_document_upload(upload: Any) -> dict[str, Any]:
+    return {
+        "id": str(upload.id),
+        "country_code": upload.country_code,
+        "filename": upload.filename,
+        "storage_uri": upload.storage_uri,
+        "byte_size": upload.byte_size,
+        "content_hash": upload.content_hash,
+        "source": upload.source,
+        "uploaded_by": str(upload.uploaded_by),
+        "verified": upload.verified,
+        "verified_by": str(upload.verified_by) if upload.verified_by is not None else None,
+        "verified_at": upload.verified_at.isoformat() if upload.verified_at is not None else None,
+        "document_id": str(upload.document_id) if upload.document_id is not None else None,
+        "reprocess_status": upload.reprocess_status,
+        "reprocess_error": upload.reprocess_error,
+        "reprocess_started_at": upload.reprocess_started_at.isoformat()
+        if upload.reprocess_started_at is not None
+        else None,
+        "reprocess_completed_at": upload.reprocess_completed_at.isoformat()
+        if upload.reprocess_completed_at is not None
+        else None,
+        "ingestion_progress": _extract_ingestion_progress(upload.metadata_),
+        "metadata": upload.metadata_,
+        "created_at": upload.created_at.isoformat(),
+        "updated_at": upload.updated_at.isoformat(),
+    }
 
 
 @app.post(
@@ -509,13 +1072,15 @@ async def download_document(
 )
 async def download_document_by_name(
     canonical_name: str,
+    db: DBSession,
     settings: SettingsDep,
     authorization: str | None = Header(default=None, convert_underscores=False),
 ) -> Response:
     """
     Download a PDF document from S3 by canonical name.
 
-    Searches S3 directly by filename without requiring a database document ID.
+    First looks up the DocumentUpload record by filename to get the exact storage_uri,
+    then falls back to a bucket-wide search for documents uploaded via the legacy flow.
     Requires authentication.
     """
     await _require_user(authorization, settings)
@@ -523,21 +1088,37 @@ async def download_document_by_name(
     if not settings.s3_housing_pdf_bucket:
         raise HTTPException(status_code=500, detail="S3 housing PDF bucket is not configured")
 
-    try:
-        file_bytes = download_pdf_from_s3_by_name(
-            document_name=canonical_name,
-            settings=settings,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        error_msg = str(exc)
-        if "not found" in error_msg.lower():
-            raise HTTPException(
-                status_code=404,
-                detail=f"PDF file not found in S3 for document '{canonical_name}'",
-            ) from exc
-        raise HTTPException(status_code=500, detail=f"Failed to download PDF: {error_msg}") from exc
+    upload_repo = DocumentUploadRepository(db)
+    upload = await upload_repo.get_latest_by_filename(canonical_name)
+
+    if upload is not None:
+        storage_client = S3StorageClient(settings)
+        try:
+            file_bytes = storage_client.download_document(storage_uri=upload.storage_uri)
+        except RuntimeError as exc:
+            error_msg = str(exc)
+            if "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"PDF file not found in S3 for document '{canonical_name}'",
+                ) from exc
+            raise HTTPException(status_code=500, detail=f"Failed to download PDF: {error_msg}") from exc
+    else:
+        try:
+            file_bytes = download_pdf_from_s3_by_name(
+                document_name=canonical_name,
+                settings=settings,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            error_msg = str(exc)
+            if "not found" in error_msg.lower():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"PDF file not found in S3 for document '{canonical_name}'",
+                ) from exc
+            raise HTTPException(status_code=500, detail=f"Failed to download PDF: {error_msg}") from exc
 
     return Response(
         content=file_bytes,

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
 
 from shared_data_layer.db.maintenance import refresh_base_documents_cache
@@ -10,6 +10,7 @@ from shared_data_layer.db.models.conversations import Conversation
 from shared_data_layer.db.models.documents import (
     ConversationDocument,
     Document,
+    DocumentUpload,
     UploadedFile,
 )
 from shared_data_layer.repositories.base import BaseRepository
@@ -272,3 +273,242 @@ class UploadedFileRepository(BaseRepository[UploadedFile]):
         result = await self.session.execute(stmt)
         uploads = result.scalars().all()
         return [UploadedFileRead.model_validate(upload) for upload in uploads]
+
+
+class DocumentUploadRepository(BaseRepository[DocumentUpload]):
+    def __init__(self, session):
+        super().__init__(session, DocumentUpload)
+
+    async def create_upload(
+        self,
+        *,
+        country_code: str,
+        filename: str,
+        storage_uri: str,
+        byte_size: int,
+        content_hash: str,
+        source: str,
+        uploaded_by: UUID,
+        metadata_: Optional[dict] = None,
+    ) -> DocumentUpload:
+        upload = DocumentUpload(
+            country_code=country_code,
+            filename=filename,
+            storage_uri=storage_uri,
+            byte_size=byte_size,
+            content_hash=content_hash,
+            source=source,
+            uploaded_by=uploaded_by,
+            metadata_=metadata_,
+            verified=False,
+            reprocess_status="not_started",
+        )
+        self.session.add(upload)
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def list_uploads(
+        self,
+        *,
+        country_code: Optional[str] = None,
+        verified: Optional[bool] = None,
+        reprocess_status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[DocumentUpload]:
+        stmt = select(DocumentUpload)
+        filters = []
+        if country_code is not None:
+            filters.append(DocumentUpload.country_code == country_code)
+        if verified is not None:
+            filters.append(DocumentUpload.verified == verified)
+        if reprocess_status is not None:
+            filters.append(DocumentUpload.reprocess_status == reprocess_status)
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        stmt = (
+            stmt.order_by(DocumentUpload.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_upload(self, upload_id: UUID) -> Optional[DocumentUpload]:
+        return await self.get(upload_id)
+
+    async def get_latest_by_filename(self, filename: str) -> Optional[DocumentUpload]:
+        stmt = (
+            select(DocumentUpload)
+            .where(DocumentUpload.filename == filename)
+            .order_by(
+                DocumentUpload.reprocess_status == "done",
+                DocumentUpload.created_at.desc(),
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
+    async def set_verified(
+        self,
+        *,
+        upload_id: UUID,
+        verified: bool,
+        verified_by: Optional[UUID],
+        verified_at: Optional[datetime],
+    ) -> Optional[DocumentUpload]:
+        upload = await self.get(upload_id)
+        if upload is None:
+            return None
+        upload.verified = verified
+        upload.verified_by = verified_by
+        upload.verified_at = verified_at
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def set_document_link(
+        self,
+        *,
+        upload_id: UUID,
+        document_id: UUID,
+    ) -> Optional[DocumentUpload]:
+        upload = await self.get(upload_id)
+        if upload is None:
+            return None
+        upload.document_id = document_id
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def update_reprocess_status(
+        self,
+        *,
+        upload_id: UUID,
+        status: str,
+        error: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> Optional[DocumentUpload]:
+        upload = await self.get(upload_id)
+        if upload is None:
+            return None
+        upload.reprocess_status = status
+        upload.reprocess_error = error
+        if status != "ingesting":
+            metadata_payload = dict(upload.metadata_ or {})
+            if metadata_payload.get("ingestion_progress") is not None:
+                metadata_payload.pop("ingestion_progress", None)
+                upload.metadata_ = metadata_payload
+        if started_at is not None:
+            upload.reprocess_started_at = started_at
+        if completed_at is not None:
+            upload.reprocess_completed_at = completed_at
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def queue_upload(
+        self,
+        *,
+        upload_id: UUID,
+    ) -> Optional[DocumentUpload]:
+        upload = await self.get(upload_id)
+        if upload is None:
+            return None
+        upload.reprocess_status = "queued"
+        upload.reprocess_error = None
+        upload.reprocess_started_at = None
+        upload.reprocess_completed_at = None
+        metadata_payload = dict(upload.metadata_ or {})
+        metadata_payload.pop("ingestion_progress", None)
+        upload.metadata_ = metadata_payload
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def claim_next_queued_upload(
+        self,
+        *,
+        claimed_at: datetime,
+    ) -> Optional[DocumentUpload]:
+        stmt = (
+            select(DocumentUpload)
+            .where(
+                DocumentUpload.verified.is_(True),
+                DocumentUpload.reprocess_status == "queued",
+            )
+            .order_by(DocumentUpload.verified_at.asc(), DocumentUpload.created_at.asc())
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        upload = result.scalars().first()
+        if upload is None:
+            return None
+        upload.reprocess_status = "ingesting"
+        upload.reprocess_error = None
+        upload.reprocess_started_at = claimed_at
+        upload.reprocess_completed_at = None
+        metadata_payload = dict(upload.metadata_ or {})
+        metadata_payload.pop("ingestion_progress", None)
+        upload.metadata_ = metadata_payload
+        await self.session.flush()
+        await self.session.refresh(upload)
+        return upload
+
+    async def set_ingestion_progress(
+        self,
+        *,
+        upload_id: UUID,
+        total_chunks: int,
+        total_batches: int,
+        processed_chunks: int,
+        processed_batches: int,
+        batch_size: int,
+    ) -> Optional[DocumentUpload]:
+        upload = await self.get(upload_id)
+        if upload is None:
+            return None
+        metadata_payload = dict(upload.metadata_ or {})
+        metadata_payload["ingestion_progress"] = {
+            "total_chunks": int(total_chunks),
+            "total_batches": int(total_batches),
+            "processed_chunks": int(processed_chunks),
+            "processed_batches": int(processed_batches),
+            "batch_size": int(batch_size),
+        }
+        upload.metadata_ = metadata_payload
+        await self.session.flush()
+        return upload
+
+    async def list_pending_reprocessing(
+        self,
+        *,
+        country_code: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[DocumentUpload]:
+        stmt = select(DocumentUpload).where(
+            DocumentUpload.verified.is_(True),
+            DocumentUpload.reprocess_status == "queued",
+        )
+        if country_code is not None:
+            stmt = stmt.where(DocumentUpload.country_code == country_code)
+        stmt = stmt.order_by(DocumentUpload.created_at.asc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_country_stale(self, *, country_code: str) -> int:
+        stmt = select(DocumentUpload).where(
+            DocumentUpload.country_code == country_code,
+            DocumentUpload.verified.is_(True),
+            DocumentUpload.reprocess_status.in_(["queued", "ingesting"]),
+        )
+        result = await self.session.execute(stmt)
+        uploads = list(result.scalars().all())
+        for upload in uploads:
+            upload.reprocess_status = "queued"
+        await self.session.flush()
+        return len(uploads)

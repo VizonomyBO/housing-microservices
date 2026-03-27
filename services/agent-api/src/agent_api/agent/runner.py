@@ -7,7 +7,13 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -268,7 +274,19 @@ class LangGraphRunner(ChatRunnerProtocol):
             if retrieval_profile is RetrievalProfile.COUNTRY_PROFILE
             else self._agent
         )
-        result = await agent.ainvoke({"messages": [system, human]}, config=config)
+
+        snapshot = await agent.aget_state(config)
+        pre_message_ids: set[str] = set()
+        if snapshot is not None and snapshot.values:
+            for msg in snapshot.values.get("messages", []):
+                if hasattr(msg, "id") and msg.id is not None:
+                    pre_message_ids.add(msg.id)
+
+        try:
+            result = await agent.ainvoke({"messages": [system, human]}, config=config)
+        except Exception:
+            await _rollback_graph_messages(agent, config, pre_message_ids)
+            raise
 
         ai_content = ""
         if isinstance(result, dict):
@@ -288,12 +306,21 @@ class LangGraphRunner(ChatRunnerProtocol):
         )
         citations = runtime.last_retrieval.citations if runtime.last_retrieval else []
         if not citations:
-            raise GatewayError(
-                code="MISSING_CITATIONS",
-                message="Unable to produce cited answer; retrieval did not yield citations.",
-                status_code=502,
+            logger.warning(
+                "Agent produced no citations; forcing fallback retrieval for thread=%s",
+                request.thread_id,
             )
-        ai_content, citations = _renumber_citations(ai_content, citations)
+            citations = await _fallback_retrieve(
+                runtime=runtime,
+                retrieval_service=retrieval_service,
+                query=request.message.content,
+                conversation_id=request.conversation_id,
+                profile=retrieval_profile,
+                target_country=target_country,
+            )
+
+        if citations:
+            ai_content, citations = _renumber_citations(ai_content, citations)
 
         await convo_service.append_message(
             conversation_id=request.conversation_id,
@@ -444,6 +471,56 @@ def _strip_incomplete_citation(text: str) -> str:
     if last_open != -1 and last_open > last_close:
         return text[:last_open].rstrip()
     return text
+
+
+async def _fallback_retrieve(
+    *,
+    runtime: ToolRuntime,
+    retrieval_service: RetrievalService,
+    query: str,
+    conversation_id: str,
+    profile: RetrievalProfile,
+    target_country: str | None,
+) -> list[dict[str, Any]]:
+    try:
+        geo_weight_overrides: dict[str, float] | None = None
+        if runtime.geo_weights is not None:
+            geo_weight_overrides = {
+                "country": runtime.geo_weights.country,
+                "region": runtime.geo_weights.region,
+                "global": runtime.geo_weights.global_,
+            }
+        ctx = await retrieval_service.retrieve(
+            user_query=query,
+            conversation_id=conversation_id,
+            profile=profile,
+            target_country_code=target_country,
+            geo_weights=geo_weight_overrides,
+        )
+        runtime.last_retrieval = ctx
+        return ctx.citations
+    except Exception:
+        logger.warning("Fallback retrieval failed", exc_info=True)
+        return []
+
+
+async def _rollback_graph_messages(
+    agent: Any, config: dict[str, Any], pre_message_ids: set[str]
+) -> None:
+    try:
+        current_state = await agent.aget_state(config)
+        if current_state is None or not current_state.values:
+            return
+        current_messages = current_state.values.get("messages", [])
+        to_remove = [
+            RemoveMessage(id=m.id)
+            for m in current_messages
+            if hasattr(m, "id") and m.id is not None and m.id not in pre_message_ids
+        ]
+        if to_remove:
+            await agent.aupdate_state(config, {"messages": to_remove})
+    except Exception:
+        logger.warning("Failed to rollback graph state after error", exc_info=True)
 
 
 __all__ = [

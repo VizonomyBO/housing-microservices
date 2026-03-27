@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -77,3 +78,53 @@ class UploadCompleteResponse(BaseModel):
     status: str
     content_hash: str
     message: str | None = None
+
+
+class AdminDocumentUploadRead(BaseModel):
+    id: UUID
+    country_code: str
+    filename: str
+    storage_uri: str
+    byte_size: int
+    content_hash: str
+    source: str
+    uploaded_by: UUID
+    verified: bool
+    verified_by: UUID | None = None
+    verified_at: datetime | None = None
+    document_id: UUID | None = None
+    reprocess_status: str
+    reprocess_error: str | None = None
+    reprocess_started_at: datetime | None = None
+    reprocess_completed_at: datetime | None = None
+    ingestion_progress: dict[str, int] | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminDocumentUploadResponse(BaseModel):
+    upload: AdminDocumentUploadRead
+
+
+class PaginationMetadata(BaseModel):
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1)
+    total_count: int = Field(ge=0)
+    has_next: bool
+
+
+class AdminDocumentUploadListResponse(BaseModel):
+    items: list[AdminDocumentUploadRead]
+    pagination: PaginationMetadata
+
+
+class AdminCountryReprocessStatusRead(BaseModel):
+    country_code: str
+    counts: dict[str, int]
+    total: int
+
+
+class AdminCountryReprocessStatusResponse(BaseModel):
+    items: list[AdminCountryReprocessStatusRead]
+    count: int

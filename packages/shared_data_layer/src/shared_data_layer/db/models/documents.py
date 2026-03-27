@@ -6,12 +6,14 @@ from uuid import UUID as PyUUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     PrimaryKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
     and_,
     func,
@@ -263,6 +265,55 @@ class UploadedFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
 
+class DocumentUpload(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "document_uploads"
+
+    country_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    storage_uri: Mapped[str] = mapped_column(String, nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    uploaded_by: Mapped[PyUUID] = mapped_column(nullable=False)
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verified_by: Mapped[Optional[PyUUID]] = mapped_column(nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    document_id: Mapped[Optional[PyUUID]] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+    reprocess_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="not_started"
+    )
+    reprocess_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reprocess_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reprocess_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+
+    document: Mapped[Optional["Document"]] = relationship("Document")
+
+    __table_args__ = (
+        CheckConstraint(
+            "country_code ~ '^[A-Z]{3}$'",
+            name="ck_document_uploads_country_code_format",
+        ),
+        CheckConstraint(
+            "byte_size >= 0",
+            name="ck_document_uploads_byte_size_non_negative",
+        ),
+        CheckConstraint(
+            "reprocess_status IN ('not_started','queued','ingesting','reprocessing_cache',"
+            "'reprocessing_pdf','done','failed')",
+            name="ck_document_uploads_reprocess_status_enum",
+        ),
+    )
+
+
 Index(
     "ix_documents_status_updated_at",
     Document.status,
@@ -357,4 +408,20 @@ Index(
     UploadedFile.content_hash,
     unique=True,
     postgresql_where=UploadedFile.owner_user_id.isnot(None),
+)
+
+Index(
+    "ix_document_uploads_country_code",
+    DocumentUpload.country_code,
+)
+
+Index(
+    "ix_document_uploads_verified_reprocess_status",
+    DocumentUpload.verified,
+    DocumentUpload.reprocess_status,
+)
+
+Index(
+    "ix_document_uploads_document_id",
+    DocumentUpload.document_id,
 )

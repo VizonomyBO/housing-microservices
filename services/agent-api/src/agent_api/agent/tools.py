@@ -43,13 +43,23 @@ async def retrieve_documents(query: str) -> str:
             "region": runtime.geo_weights.region,
             "global": runtime.geo_weights.global_,
         }
-    ctx = await runtime.retrieval.retrieve(
-        user_query=query,
-        conversation_id=runtime.conversation_id,
-        profile=runtime.retrieval_profile,
-        target_country_code=runtime.target_country_code,
-        geo_weights=geo_weight_overrides,
-    )
+    try:
+        ctx = await runtime.retrieval.retrieve(
+            user_query=query,
+            conversation_id=runtime.conversation_id,
+            profile=runtime.retrieval_profile,
+            target_country_code=runtime.target_country_code,
+            geo_weights=geo_weight_overrides,
+        )
+    except Exception:
+        logger.warning("Retrieval failed; retrying without geo weights", exc_info=True)
+        ctx = await runtime.retrieval.retrieve(
+            user_query=query,
+            conversation_id=runtime.conversation_id,
+            profile=runtime.retrieval_profile,
+            target_country_code=runtime.target_country_code,
+            geo_weights=None,
+        )
     runtime.last_retrieval = ctx
     attachments = [_serialize_attachment(att) for att in ctx.attachments]
     return (

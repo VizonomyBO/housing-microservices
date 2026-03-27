@@ -184,11 +184,23 @@ class ChatResponseCache(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     question_hash: Mapped[str] = mapped_column(String, nullable=False)
     response: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="ready")
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('ready','stale','reprocessing')",
+            name="ck_chat_response_cache_status_enum",
+        ),
         UniqueConstraint(
             "country_code",
             "question_hash",
             name="uq_chat_response_cache_country_hash",
         ),
     )
+
+
+Index(
+    "ix_chat_response_cache_country_code_status",
+    ChatResponseCache.country_code,
+    ChatResponseCache.status,
+)

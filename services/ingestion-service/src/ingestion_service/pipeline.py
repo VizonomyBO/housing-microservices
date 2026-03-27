@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import UUID, uuid4
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -35,6 +35,7 @@ from ingestion_service.schemas import UploadInitRequest
 from ingestion_service.settings import ALLOWED_VOYAGE_OUTPUT_DIMENSIONS, Settings
 
 logger = logging.getLogger(__name__)
+IngestionProgressCallback = Callable[[dict[str, int]], Awaitable[None]]
 
 
 @contextmanager
@@ -261,6 +262,7 @@ class IngestionPipeline:
         document_id: UUID,
         ingestion_id: UUID | None,
         file_bytes: bytes,
+        progress_callback: IngestionProgressCallback | None = None,
     ) -> tuple[Document, IngestionJob]:
         output_dimension = self._resolve_output_dimension(request.output_dimension)
         request.output_dimension = output_dimension  # ensure downstream consistency
@@ -333,6 +335,7 @@ class IngestionPipeline:
                 markdown=markdown,
                 request=request,
                 ingestion_id=ingestion_id,
+                progress_callback=progress_callback,
             )
             del markdown
             logger.info(
@@ -497,6 +500,7 @@ class IngestionPipeline:
         markdown: str,
         request: UploadInitRequest,
         ingestion_id: UUID | None,
+        progress_callback: IngestionProgressCallback | None = None,
     ) -> IngestionJob:
         import time
 
@@ -576,12 +580,23 @@ class IngestionPipeline:
         # Commit in batches to avoid disk saturation from large transactions
         BATCH_SIZE = 10
         total_chunks = len(chunks)
+        total_batches = (total_chunks + BATCH_SIZE - 1) // BATCH_SIZE
         logger.info(
             "[%s] STEP 4/4: Writing %d chunks to database (batch size=%d)...",
             document.id,
             total_chunks,
             BATCH_SIZE,
         )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "total_chunks": total_chunks,
+                    "total_batches": total_batches,
+                    "processed_chunks": 0,
+                    "processed_batches": 0,
+                    "batch_size": BATCH_SIZE,
+                }
+            )
 
         for idx, chunk in enumerate(chunks):
             chunk_id = uuid4()
@@ -624,15 +639,35 @@ class IngestionPipeline:
                     "[%s]   ... committed batch %d/%d (%d chunks)",
                     document.id,
                     (idx + 1) // BATCH_SIZE,
-                    (total_chunks + BATCH_SIZE - 1) // BATCH_SIZE,
+                    total_batches,
                     idx + 1,
                 )
+                if progress_callback is not None:
+                    await progress_callback(
+                        {
+                            "total_chunks": total_chunks,
+                            "total_batches": total_batches,
+                            "processed_chunks": idx + 1,
+                            "processed_batches": (idx + 1) // BATCH_SIZE,
+                            "batch_size": BATCH_SIZE,
+                        }
+                    )
 
         # Commit any remaining chunks
         remaining = total_chunks % BATCH_SIZE
         if remaining > 0:
             await session.commit()
             logger.info("[%s]   ... committed final batch (%d chunks)", document.id, remaining)
+            if progress_callback is not None:
+                await progress_callback(
+                    {
+                        "total_chunks": total_chunks,
+                        "total_batches": total_batches,
+                        "processed_chunks": total_chunks,
+                        "processed_batches": total_batches,
+                        "batch_size": BATCH_SIZE,
+                    }
+                )
 
         t_db_end = time.perf_counter()
         logger.info(

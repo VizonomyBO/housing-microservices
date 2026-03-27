@@ -42,6 +42,7 @@ class S3StorageClient:
         file_bytes: bytes,
         content_type: str,
         source_type: str,
+        filename: str | None = None,
     ) -> str:
         """
         Upload original document to S3.
@@ -51,6 +52,7 @@ class S3StorageClient:
             file_bytes: The raw file bytes
             content_type: MIME type of the file
             source_type: File extension (pdf, docx, etc.)
+            filename: Original filename; used as S3 key leaf so download-by-name can find it
 
         Returns:
             S3 URI in format s3://bucket/key
@@ -58,8 +60,8 @@ class S3StorageClient:
         if not self._bucket_name:
             raise ValueError("S3 bucket name not configured")
 
-        # Create S3 key: raw/documents/{document_id}/source.{ext}
-        key = f"raw/documents/{document_id}/source.{source_type}"
+        leaf = filename if filename else f"source.{source_type}"
+        key = f"raw/documents/{document_id}/{leaf}"
 
         try:
             self._s3_client.put_object(
@@ -139,3 +141,19 @@ class S3StorageClient:
         except ClientError as exc:
             logger.exception("Failed to delete document from S3: %s", storage_uri)
             raise RuntimeError(f"S3 delete failed: {exc}") from exc
+
+    def download_document(self, *, storage_uri: str) -> bytes:
+        if not storage_uri.startswith("s3://"):
+            raise ValueError(f"Invalid S3 URI: {storage_uri}")
+
+        parts = storage_uri[5:].split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid S3 URI format: {storage_uri}")
+
+        bucket, key = parts
+        try:
+            response = self._s3_client.get_object(Bucket=bucket, Key=key)
+            return response["Body"].read()
+        except ClientError as exc:
+            logger.exception("Failed to download document from S3: %s", storage_uri)
+            raise RuntimeError(f"S3 download failed: {exc}") from exc

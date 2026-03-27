@@ -141,6 +141,13 @@ class RetrievalService:
             geo_weights=geo_weights,
         )
         context_blocks = reranked[:effective_top_k]
+        if not context_blocks:
+            logger.warning(
+                "Retrieval pipeline returned 0 chunks for conversation=%s; retrying without rerank",
+                conversation_id,
+            )
+            context_blocks = retrieved[:effective_top_k]
+
         context_text = self._format_context(context_blocks)
         citations = [
             {
@@ -154,12 +161,6 @@ class RetrievalService:
             }
             for chunk in context_blocks
         ]
-        if not citations:
-            raise GatewayError(
-                code="NO_RESULTS",
-                message="Retrieval returned no citations.",
-                status_code=502,
-            )
         return RetrievalContext(
             attachments=attachments,
             chunks=context_blocks,
@@ -319,7 +320,11 @@ class RetrievalService:
         if not chunks:
             return []
         documents = [chunk.text for chunk in chunks]
-        scores = await self._rerank_client.rerank(query, documents, top_k=len(documents))
+        try:
+            scores = await self._rerank_client.rerank(query, documents, top_k=len(documents))
+        except Exception:
+            logger.warning("Reranker failed; returning chunks with original scores", exc_info=True)
+            return sorted(chunks, key=lambda c: c.score, reverse=True)
         scored = []
         for chunk, score in zip(chunks, scores, strict=False):
             scored.append(
