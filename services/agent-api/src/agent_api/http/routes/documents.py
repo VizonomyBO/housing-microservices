@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import httpx
@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from shared_data_layer.db.models.documents import Document
 from shared_data_layer.repositories.documents import UploadedFileRepository
 from shared_data_layer.schemas.countries import REGION_BY_COUNTRY_ALPHA3, Region
-from sqlalchemy import func, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_api.http.context import AuthContext, RequestContext
@@ -27,8 +27,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
 
-# Set of all region codes for quick lookup
 _REGION_CODES = {r.value for r in Region}
+_REGION_ONLY_CODES = {r.value for r in Region if r != Region.GLO}
+
+_CHAT_SORT_COLUMNS = {
+    "country": Document.country_code,
+    "filename": Document.canonical_name,
+    "upload_date": Document.created_at,
+    "status": Document.status,
+}
 
 
 def _expand_country_codes(codes: list[str], include_global: bool = True) -> list[str]:
@@ -107,19 +114,23 @@ async def list_documents(
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     page: Annotated[int, Query(ge=1, le=1000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
+    search_name: Annotated[
+        str | None,
+        Query(description="Case-insensitive partial match on document name"),
+    ] = None,
     tags: Annotated[list[str] | None, Query(description="Filter by tag (all must match)")] = None,
     content_hash: Annotated[
         list[str] | None,
         Query(description="Filter by SHA-256 content hash"),
     ] = None,
+    doc_type: Annotated[
+        Literal["regional", "country", "global"] | None,
+        Query(alias="type", description="Filter by document type: regional, country, or global"),
+    ] = None,
     country_code: Annotated[
         list[str] | None,
         Query(description="Filter by country code"),
     ] = None,
-    include_global: Annotated[
-        bool,
-        Query(description="Include global (GLO) documents in country queries"),
-    ] = True,
     created_after: Annotated[
         datetime | None,
         Query(description="Return documents created after this timestamp"),
@@ -128,29 +139,50 @@ async def list_documents(
         datetime | None,
         Query(description="Return documents created before this timestamp"),
     ] = None,
+    sort_by: Annotated[
+        Literal["country", "filename", "upload_date", "status"] | None,
+        Query(description="Field to sort by"),
+    ] = None,
+    sort_order: Annotated[
+        Literal["asc", "desc"],
+        Query(description="Sort direction"),
+    ] = "desc",
 ) -> JSONResponse:
     # user_id = _require_user(auth_context)
     # user_uuid = UUID(user_id)
     stmt = select(Document)  # .where(Document.owner_user_id == user_uuid)
-    if tags:
+
+    if search_name is not None:
+        stmt = stmt.where(Document.canonical_name.ilike(f"%{search_name}%"))
+    if tags is not None:
         stmt = stmt.where(Document.tags.contains(tags))
-    if content_hash:
+    if content_hash is not None:
         stmt = stmt.where(Document.content_hash.in_(content_hash))
-    if country_code:
-        # Expand country codes to include their region (and optionally global) documents
-        expanded_codes = _expand_country_codes(country_code, include_global=include_global)
-        stmt = stmt.where(Document.country_code.in_(expanded_codes))
-    if created_after:
+    if doc_type == "regional":
+        stmt = stmt.where(Document.country_code.in_(_REGION_ONLY_CODES))
+    elif doc_type == "country":
+        stmt = stmt.where(
+            Document.country_code.isnot(None),
+            Document.country_code.notin_(_REGION_ONLY_CODES | {"GLO"}),
+        )
+    elif doc_type == "global":
+        stmt = stmt.where(Document.country_code == "GLO")
+    if country_code is not None:
+        stmt = stmt.where(Document.country_code.in_(country_code))
+    if created_after is not None:
         stmt = stmt.where(Document.created_at >= created_after)
-    if created_before:
+    if created_before is not None:
         stmt = stmt.where(Document.created_at <= created_before)
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total_count = (await db_session.execute(count_stmt)).scalar_one()
+
+    sort_col = _CHAT_SORT_COLUMNS.get(sort_by or "upload_date", Document.created_at)
+    order_fn = asc if sort_order == "asc" else desc
     rows = (
         (
             await db_session.execute(
-                stmt.order_by(Document.created_at.desc())
+                stmt.order_by(order_fn(sort_col))
                 .limit(page_size)
                 .offset((page - 1) * page_size)
             )

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID, uuid4
 
+from typing import Literal
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -16,6 +18,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -27,7 +30,8 @@ from shared_data_layer.config import SYSTEM_OWNER_SENTINEL
 from shared_data_layer.db.models import ChatResponseCache
 from shared_data_layer.db.models.documents import DocumentUpload
 from shared_data_layer.repositories.documents import DocumentRepository, DocumentUploadRepository
-from sqlalchemy import and_, func, select, update
+from shared_data_layer.schemas.countries import Region
+from sqlalchemy import and_, asc, desc, func, select, update
 
 from ingestion_service.auth import AuthError, UserContext, verify_token
 from ingestion_service.db import DBSession, SettingsDep, dispose_engine, init_engine
@@ -56,6 +60,16 @@ from ingestion_service.signing import now_seconds, sign_payload, verify_signatur
 from ingestion_service.storage import S3StorageClient
 
 logger = logging.getLogger(__name__)
+
+_REGION_ONLY_CODES = {r.value for r in Region if r != Region.GLO}
+
+_ADMIN_SORT_COLUMNS = {
+    "country": DocumentUpload.country_code,
+    "filename": DocumentUpload.filename,
+    "upload_date": DocumentUpload.created_at,
+    "verified": DocumentUpload.verified,
+    "status": DocumentUpload.reprocess_status,
+}
 
 
 @asynccontextmanager
@@ -232,20 +246,48 @@ async def admin_upload_document(
 async def admin_list_documents(
     db: DBSession,
     settings: SettingsDep,
-    country_code: str | None = None,
+    page: int = Query(default=1, ge=1, le=1000),
+    page_size: int = Query(default=20, ge=1, le=1000),
+    search_name: str | None = Query(
+        default=None, description="Case-insensitive partial match on filename"
+    ),
+    doc_type: Literal["regional", "country", "global"] | None = Query(
+        default=None, alias="type", description="Filter by document type: regional, country, or global"
+    ),
+    country_code: list[str] | None = Query(
+        default=None, description="Filter by country code"
+    ),
     verified: bool | None = None,
     reprocess_status: str | None = None,
     approved_and_done_only: bool | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    sort_by: Literal["country", "filename", "upload_date", "verified", "status"] | None = Query(
+        default=None, description="Field to sort by"
+    ),
+    sort_order: Literal["asc", "desc"] = Query(
+        default="desc", description="Sort direction"
+    ),
     authorization: str | None = Header(default=None, convert_underscores=False),
 ) -> dict[str, Any]:
     await _require_user(authorization, settings)
-    normalized_country = country_code.upper().strip() if country_code is not None else None
 
     filters = []
-    if normalized_country is not None:
-        filters.append(DocumentUpload.country_code == normalized_country)
+
+    if search_name is not None:
+        filters.append(DocumentUpload.filename.ilike(f"%{search_name}%"))
+
+    if doc_type == "regional":
+        filters.append(DocumentUpload.country_code.in_(_REGION_ONLY_CODES))
+    elif doc_type == "country":
+        filters.append(
+            DocumentUpload.country_code.notin_(_REGION_ONLY_CODES | {"GLO"})
+        )
+    elif doc_type == "global":
+        filters.append(DocumentUpload.country_code == "GLO")
+
+    if country_code is not None:
+        normalized = [c.upper().strip() for c in country_code]
+        filters.append(DocumentUpload.country_code.in_(normalized))
+
     if approved_and_done_only is True:
         filters.append(DocumentUpload.verified.is_(True))
         filters.append(DocumentUpload.reprocess_status == "done")
@@ -269,8 +311,10 @@ async def admin_list_documents(
     count_stmt = select(func.count()).select_from(base_stmt.subquery())
     total_count = (await db.execute(count_stmt)).scalar_one()
 
+    sort_col = _ADMIN_SORT_COLUMNS.get(sort_by or "upload_date", DocumentUpload.created_at)
+    order_fn = asc if sort_order == "asc" else desc
     rows_stmt = (
-        base_stmt.order_by(DocumentUpload.created_at.desc())
+        base_stmt.order_by(order_fn(sort_col))
         .limit(page_size)
         .offset((page - 1) * page_size)
     )
