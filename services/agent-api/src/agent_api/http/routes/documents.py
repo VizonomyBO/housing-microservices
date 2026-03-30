@@ -168,7 +168,8 @@ async def list_documents(
     elif doc_type == "global":
         stmt = stmt.where(Document.country_code == "GLO")
     if country_code is not None:
-        stmt = stmt.where(Document.country_code.in_(country_code))
+        expanded = _expand_country_codes(country_code)
+        stmt = stmt.where(Document.country_code.in_(expanded))
     if created_after is not None:
         stmt = stmt.where(Document.created_at >= created_after)
     if created_before is not None:

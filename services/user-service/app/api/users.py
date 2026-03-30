@@ -35,6 +35,10 @@ class UserAdminUpdate(BaseModel):
     notes: str | None = None
 
 
+VALID_SORT_FIELDS = {"name", "access", "last_active", "date_added"}
+VALID_SORT_ORDERS = {"asc", "desc"}
+
+
 class UserListRequest(BaseModel):
     page: int = Field(1, ge=1)
     per_page: int = Field(20, ge=1, le=100)
@@ -46,6 +50,7 @@ class UserListRequest(BaseModel):
     country: str | None = None
     search: str | None = Field(default=None, min_length=1, max_length=200)
     sort_by: str | None = None
+    sort_order: str | None = Field(default=None, pattern="^(asc|desc)$")
 
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
@@ -161,6 +166,7 @@ async def list_users(
             "countries": payload.countries,
             "search": payload.search,
             "sort_by": payload.sort_by,
+            "sort_order": payload.sort_order,
         },
     )
     result = UserService.get_all_users(
@@ -172,6 +178,7 @@ async def list_users(
         countries=(payload.countries or []) + ([payload.country] if payload.country else []),
         search=payload.search,
         sort_by=payload.sort_by,
+        sort_order=payload.sort_order,
     )
     return JSONResponse(result)
 

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_
+from sqlalchemy import asc, desc, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import literal
@@ -46,6 +46,14 @@ class UserService:
         """Get user by email"""
         return session.query(User).filter_by(email=email).first()
 
+    SORT_FIELD_MAP: dict[str, list] = {
+        "name": [User.first_name, User.last_name],
+        "access": [User.role],
+        "last_active": [User.last_login],
+        "date_added": [User.date_created],
+        "date": [User.date_created],
+    }
+
     @staticmethod
     def get_all_users(
         session: Session,
@@ -56,6 +64,7 @@ class UserService:
         countries: list[str] | None = None,
         search: str | None = None,
         sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> dict[str, Any]:
         """Get all users with pagination and filtering."""
         query = session.query(User)
@@ -85,10 +94,13 @@ class UserService:
                 )
             )
 
-        if sort_by == "date":
-            query = query.order_by(User.date_created.desc())
+        direction = desc if sort_order == "desc" else asc
+        columns = UserService.SORT_FIELD_MAP.get(sort_by or "", None)
+        if columns is not None:
+            for col in columns:
+                query = query.order_by(direction(col))
         else:
-            query = query.order_by(User.first_name.asc(), User.last_name.asc())
+            query = query.order_by(asc(User.first_name), asc(User.last_name))
 
         total = query.count()
         offset = (page - 1) * per_page

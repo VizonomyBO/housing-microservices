@@ -130,6 +130,7 @@ class User(Base):
             "date_modified": (self.date_modified.isoformat() if self.date_modified else None),
             "created_at": (self.created_at.isoformat() if self.created_at else None),
             "updated_at": (self.updated_at.isoformat() if self.updated_at else None),
+            "last_login": (self.last_login.isoformat() if self.last_login is not None else None),
             "created_by": _as_str(self.created_by),
         }
 
