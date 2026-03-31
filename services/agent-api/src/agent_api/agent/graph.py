@@ -34,12 +34,12 @@ def build_agent_graph(
     tool_list = list(tools)
     graph = StateGraph(MessagesState)  # type: ignore[arg-type]
 
-    def _call_model(state: MessagesState):
+    async def _call_model(state: MessagesState):
         messages = state.get("messages", [])
         if not messages:
             return {"messages": []}
         bound = llm.bind_tools(tool_list)
-        response = bound.invoke(messages)
+        response = await bound.ainvoke(messages)
         return {"messages": [response]}
 
     graph.add_node("agent", _call_model)
