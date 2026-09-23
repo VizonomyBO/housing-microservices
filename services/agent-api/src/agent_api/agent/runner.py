@@ -120,7 +120,7 @@ class LangGraphRunner(ChatRunnerProtocol):
             max_tokens=_PROFILE_MAX_TOKENS,
         )
         self._chat_client = OpenAIChatClient(
-            api_key=settings.openai_api_key or "", model=settings.openai_chat_model
+            api_key=settings.openai_api_key or "", model=settings.openai_utility_model
         )
         self._embedding_client = VoyageEmbeddingClient(
             api_key=settings.voyage_api_key or "",

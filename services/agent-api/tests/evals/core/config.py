@@ -10,7 +10,7 @@ class EvalConfig:
     eval_user_email: str
     eval_user_password: str
     eval_user_id: str | None
-    openai_model: str = "gpt-5.1"
+    openai_model: str = "gpt-5.6-sol"
     reasoning_effort: str = "high"
 
     @classmethod
@@ -20,6 +20,6 @@ class EvalConfig:
             eval_user_email=os.getenv("EVAL_USER_EMAIL") or "",  # type: ignore[arg-type]
             eval_user_password=os.getenv("EVAL_USER_PASSWORD") or "",  # type: ignore[arg-type]
             eval_user_id=os.getenv("EVAL_USER_ID"),
-            openai_model=os.getenv("EVAL_JUDGE_MODEL", "gpt-5.1"),
+            openai_model=os.getenv("EVAL_JUDGE_MODEL", "gpt-5.6-sol"),
             reasoning_effort=os.getenv("EVAL_REASONING_EFFORT", "high"),
         )

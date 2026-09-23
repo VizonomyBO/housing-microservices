@@ -52,6 +52,7 @@ class Settings:
     openai_api_key: str | None
     voyage_api_key: str | None
     openai_chat_model: str
+    openai_utility_model: str
     voyage_embedding: VoyageEmbeddingConfig
     voyage_rerank_model: str
     auth: AuthSettings
@@ -142,7 +143,9 @@ def load_settings() -> Settings:
         metrics_auth_scheme=os.getenv("METRICS_AUTH_SCHEME", "Bearer"),
         openai_api_key=openai_api_key,
         voyage_api_key=voyage_api_key,
-        openai_chat_model=_env_str("OPENAI_CHAT_MODEL", "gpt-4o-mini") or "gpt-4o-mini",
+        openai_chat_model=_env_str("OPENAI_CHAT_MODEL", "gpt-5.6-terra") or "gpt-5.6-terra",
+        openai_utility_model=_env_str("OPENAI_UTILITY_MODEL", "gpt-5.6-luna")
+        or "gpt-5.6-luna",
         voyage_embedding=voyage_embedding,
         voyage_rerank_model=_env_str("VOYAGE_RERANK_MODEL", "rerank-2.5") or "rerank-2.5",
         auth=auth_settings,

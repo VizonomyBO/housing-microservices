@@ -10,7 +10,7 @@ from .scenarios import DocumentRef
 
 
 class LLMJudge:
-    def __init__(self, model: str = "gpt-5.1", reasoning_effort: str = "high") -> None:
+    def __init__(self, model: str = "gpt-5.6-sol", reasoning_effort: str = "high") -> None:
         self.client = openai.OpenAI()
         self.model = model
         self.reasoning_effort = reasoning_effort
